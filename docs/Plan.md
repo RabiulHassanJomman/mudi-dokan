@@ -28,7 +28,8 @@ Main features (MVP)
 7.  🧾 Khoroch (expense): "বিদ্যুৎ বিল ৫০০ টাকা খরচ", "চা নাস্তা ৫০ খরচ", "ভাড়া দিলাম ২০০০" bolle khoroch entry hobe (ki, koto taka). Cash screen er "খরচ বলুন" button e "খরচ" shobdo chara-o hobe. Khoroch cash theke kome ar net profit theke bad jay (feature 5).
 8.  🏁 Opening cash: prothombar chalu korar somoy (Setup) "এখন ক্যাশে কত টাকা?" — bole, type kore ba note gune deoa jabe. Etai prothom diner গতকালের ক্যাশ.
 9.  💵 Din sheshe cash milano (Cash + CashCount screen): হাতে থাকার কথা = গতকালের ক্যাশ + নগদ বিক্রি + বাকি জমা − খরচ − nogod kena − মালিক নিল. "গুনে মিলান" e note (১০০০…১০) gune "গুনে পেলাম" er sathe milabe, kom/beshi dekhabe. "দিন শেষ করুন" = din bondho, gune paoa taka porer diner opening cash.
-10. 👤 Malik/poribar er taka nea (owner_withdrawal): "মালিক ৫০০ নিল", "আব্বু ১০০০ নিল বাসার জন্য", "বাসার জন্য ৩০০ টাকা নিলাম". Ke nilo (person; na bolle ei phone er device_name), koto, keno (note). Hate thakar kotha cash theke kome, kintu khoroch na, tai lav hisab e ashe na.
+10. 👤 Malik/poribar er taka nea (owner_withdrawal): "মালিক ৫০০ নিল", "আব্বু ১০০০ নিল বাসার জন্য", "বাসার জন্য ৩০০ টাকা নিলাম". Ke nilo (person), koto, keno (note).
+    First-person ("৩০০ টাকা নিলাম", "৫০০ তুললাম", naam chara) phone er role dekhe: role owner → owner_withdrawal, person = device_name; role staff → expense, item "অগ্রিম বেতন", person = device_name (lav theke bad jabe). Naam bolle ("মালিক ৫০০ নিল") role jai hok owner_withdrawal. Hate thakar kotha cash theke kome, kintu khoroch na, tai lav hisab e ashe na.
 Jara porte pare na, tader jonno UX
 • Screen er majhe ekta boro 🎤 button, niche 3 ta icon tab.
 • Prottek command er por app bole shonabe, jemon "চাল ২ কেজি, ১২০ টাকা। ঠিক আছে?" Tarpor boro ✅/❌ button chapa jabe, ba mukhe "হ্যাঁ"/"না" bola jabe.
@@ -56,6 +57,7 @@ Nijer rule-based Bangla parser: shongkha shobdo ("আড়াই", "পাঁ�
 Table: products (naam, unit, stock, kena dam, becha dam), purchases (kena: poriman, kena dam), sales (poriman, becha dam, sei somoyer kena dam), customers (baki), ledger (baki/joma er itihas), expenses (khoroch: item, taka), owner_withdrawals (malik nilo: person, taka, note), day_close (din shesh: opening cash, thakar kotha, gune paoa, note count; setup er opening cash o ekhane). Prottek row e id (UUID), device_id, updated_at thakbe sync er jonno.
 voice_logs (audio file, transcript, kon phone, somoy). Prottek entry (purchase, sale, ledger, expense, owner_withdrawal) e voice_log_id thakbe; correction entry corrects_id diye ager entry ke point korbe.
 product_aliases (alias → product): STT eki maal alada banane likhte pare ("পেঁয়াজ"/"পিঁয়াজ"); audio shune naam thik korle vul banan ta automatic alias hoye jabe. ledger e party_type (customer/supplier) — supplier/মহাজন Phase 3, kintu column MVP schema tei thakbe jate pore migration na lage. Prottek entry te device_name (phone e ekbar set kora naam, jemon "Abbu", "Karmochari 1").
+devices (device_id, device_name, role: owner | staff, updated_at): Setup step ২ e set hoy, settings theke bodlano jay. Parser pure thake: app parseCommand e ctx.deviceRole ar ctx.deviceName pathay (ownerNames er moto).
 Phase
 1.  Pilot (2–3 din): shudhu mic → text → parse prototype. Asol dokane bhir er moddhe 50–100 ta asol command test. 80% er kom thik hole command design bodlano (choto command, list theke beche newa). Sync ar audio er age eta.
 2.  MVP: upore 10 ta feature (khoroch, opening cash, din sheshe cash milano ar malik er taka nea soho), voice diye confirm, offline DB, multi-phone sync, voice e undo ("ভুল হয়েছে"/"বাতিল" bolle shesh entry correction diye ulte jabe), product naam alias, ar prottek entry te phone/karmochari er naam.
@@ -71,13 +73,13 @@ Risk
 Open questions
 1.  Ager POS er 226 ta product er Excel catalog ta shurute import korbo?
 2.  Barcode MVP te rakhbo, naki pore?
-3.  Malik ar karmochari er alada login lagbe? Karmochari ki kena dam ar lav dekhte parbe?
+3.  Malik ar karmochari er alada login lagbe? Karmochari ki kena dam ar lav dekhte parbe? (devices.role ekhon ache; permission er jonno eta use kora jabe.)
 Screens
 Design (11 ta screen, 390×844 phone): <https://claude.ai/code/artifact/178f8815-6636-44e0-959c-4191e254c838>
 Design file gulo (project/*.dc.html) ei link theke abar pora jabe. Phase 2 er age kono UI code hobe na.
 
 Screen list (design file → naam → kaj → main elements → kothay theke khole)
-1.  Setup.dc.html — প্রথমবার চালু / "দোকান চালু করুন". Prothombar app khulle. 3 ta numbered card: (১) dokaner Google account button, (২) "এই ফোন কার?" naam chip (আব্বু / আম্মু / কর্মচারী ১ / + নতুন নাম) = device_name, (৩) "এখন ক্যাশে কত টাকা?" opening cash, mic button ar note-count button. Niche boro "শুরু করুন". Opens from: first launch. Goes to: Main; note button → CashCount.
+1.  Setup.dc.html — প্রথমবার চালু / "দোকান চালু করুন". Prothombar app khulle. 3 ta numbered card: (১) dokaner Google account button, (২) "এই ফোন কার?" naam chip (আব্বু / আম্মু / কর্মচারী ১ / + নতুন নাম) = device_name, ar tar niche role chip: মালিক / কর্মচারী (owner | staff) — design e nei, add korte hobe; naam chip theke default (আব্বু/আম্মু → মালিক, কর্মচারী → কর্মচারী) kintu bodlano jabe. Dutoi devices table e save, (৩) "এখন ক্যাশে কত টাকা?" opening cash, mic button ar note-count button. Niche boro "শুরু করুন". Opens from: first launch. Goes to: Main; note button → CashCount.
 2.  Main.dc.html — বিক্রি (হোম). Bikri tab, default screen. Header: "আমার দোকান" + "শুনুন" (TTS) pill. Dark "হাতে ক্যাশ" card (→ Cash). 2 ta stat tile: আজ বিক্রি (green), আজ বাকি (orange). Majhe 172px 🎤 button (12px ring) + "চাপুন, বলুন", niche "লিখুন" button. Shesh 2 ta entry card (icon tile, naam, poriman, ৳, বাকি badge, ▶️). Bottom nav 3 tab: বিক্রি / মাল / বাকি. Opens from: Setup, bottom nav, Confirm, back from shob sub-screen.
 3.  Listening.dc.html — শুনছি. Mic chapar por. Dark green full screen, 3-ring mic, "শুনছি…", sound bars, live transcript card ("চাল দুই কেজি"), boro "থামুন" button, ✕ (বাতিল). Opens from: Main mic (Baki/Stock er "বলুন" button theke-o). Goes to: Confirm (থামুন), Main (✕).
 4.  Confirm.dc.html — নিশ্চিত করুন. Parser result dekhano. Back + "আবার শুনুন". Card: product icon tile (112px), naam, − poriman + stepper, boro ৳ dam (52px green). নগদ / বাকি toggle. Niche না (✕) ar হ্যাঁ (✓, 1.6× chowra). Opens from: Listening, Pick. Goes to: Main (হ্যাঁ = save, না = baad).
@@ -117,6 +119,7 @@ Design tokens
 Status
 • Done: Phase 1 parser — src/parser/ (pure TS, no RN imports), `npm test` → 257 passing. Number words (১–৯৯, আধা/দেড়/আড়াই, সাড়ে/সোয়া/পৌনে, শ/হাজার/লাখ), units (কেজি, গ্রাম, লিটার, পিস/টা, প্যাকেট, ডজন, হালি, বস্তা, পোয়া), intents (bikri, kena, baki, joma, stock, lav). Plan er sob example test e ache.
 • Done: UI design review — 11 screen ar design token "Screens" section e likha (code na).
+• Done: parser e device role — ctx.deviceRole/deviceName; staff er "নিলাম" = expense "অগ্রিম বেতন". `npm test` → 309 passing.
 • Done: parser e `owner_withdrawal` intent (`person`, `amount`, `note`; মালিক/আব্বু/আম্মু ba ctx.ownerNames + taka, ba "নিলাম" + taka). `npm test` → 295 passing.
 • Done: parser e `expense` intent (`item` + `amount`; "খরচ" shobdo, ba ভাড়া/বিল/বেতন/নাস্তা/মালিক + taka, ba tab = expense). `npm test` → 279 passing.
 • Next: pilot — asol dokane 50–100 ta command diye parser test, vul gulo test case banano.
@@ -132,3 +135,4 @@ Status
   – Parser: expense er naam `item` field e (product na). "দিল" (she/he dilo) + taka = joma; "দিলাম" + ভাড়া/বিল ityadi = expense. "আজকের খরচ কত" (expense query) ekhono nei — todo.
   – Nov 13: "মালিক" expense na — notun `owner_withdrawal` intent ar owner_withdrawals table. Expected cash theke kome, profit e na.
   – Nov 13: Lav er uttor = বিক্রি, মোট লাভ (gross), খরচ, আসল লাভ (net = gross − খরচ). Purchase ar owner_withdrawal lav e dhora hoy na.
+  – Nov 13: prottek phone er role (owner | staff), devices table e device_name er sathe; Setup step ২ e set. First-person cash nea: owner → owner_withdrawal, staff → expense "অগ্রিম বেতন"; dutotei person = device_name.

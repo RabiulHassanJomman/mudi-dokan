@@ -5,6 +5,8 @@ import type { Field, Intent, ParseContext, ParsedCommand, Quantity } from './typ
 import { parseUnit } from './units';
 import { nfc } from './util';
 
+/** Expense item for cash a staff member takes for themselves. */
+const STAFF_ADVANCE = nfc('অগ্রিম বেতন');
 const GENITIVE = nfc('ের');
 const OBJECTIVE = nfc('কে');
 
@@ -194,10 +196,15 @@ export function parseCommand(text: string, ctx: ParseContext = {}): ParsedComman
     quantity === undefined &&
     ((ownerName !== undefined && (hasMoney || has(K.TAKE))) || (has(K.SELF_TAKE) && hasMoney));
 
+  // "৩০০ টাকা নিলাম": who took it depends on whose phone this is
+  const firstPerson = isWithdrawal && ownerName === undefined;
+  const staffAdvance = firstPerson && ctx.deviceRole === 'staff';
+
   let intent: Intent;
   let credit = false;
   let ledgerGuess = false;
-  if (isWithdrawal) intent = 'owner_withdrawal';
+  if (staffAdvance) intent = 'expense';
+  else if (isWithdrawal) intent = 'owner_withdrawal';
   else if (has(K.EXPENSE)) intent = 'expense';
   else if (has(K.PURCHASE) || has(K.NEW)) intent = 'purchase';
   else if (creditWords && (quantity !== undefined || names.length >= 2 || prodHit !== null)) {
@@ -244,11 +251,12 @@ export function parseCommand(text: string, ctx: ParseContext = {}): ParsedComman
   let customer: string | undefined;
   let person: string | undefined;
   let note: string | undefined;
-  if (isOwner) {
-    person = ownerName;
+  if (isOwner || staffAdvance) {
+    person = firstPerson ? ctx.deviceName : ownerName;
     const width = ownerName ? ownerName.split(' ').length : 0;
     // keep the note as spoken ("ওষুধের জন্য"), no genitive stripping
     note = joinOrUndef(rawNames.filter((_, k) => ownerIdx < 0 || k < ownerIdx || k >= ownerIdx + width));
+    if (staffAdvance) item = STAFF_ADVANCE;
   } else if (isExpense) {
     item = joinOrUndef(names);
   } else if (isLedger) {

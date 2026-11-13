@@ -43,9 +43,9 @@ export interface ParsedCommand {
   item?: string;
   /** Customer name as spoken, e.g. "করিম". */
   customer?: string;
-  /** Who took cash out (owner_withdrawal), e.g. "মালিক", "আব্বু". Empty = this phone's device_name. */
+  /** Who took cash (owner_withdrawal, or staff advance as expense), e.g. "মালিক", "আব্বু". */
   person?: string;
-  /** Free-text reason (owner_withdrawal), e.g. "বাসার জন্য". */
+  /** Free-text reason (owner_withdrawal, staff advance), e.g. "বাসার জন্য". */
   note?: string;
   quantity?: Quantity;
   /** Total taka: "১০০ টাকার চিনি", "২০০ টাকা বাকি", "চাল ২ কেজি ১২০ টাকা", "ভাড়া ২০০০". */
@@ -73,4 +73,8 @@ export interface ParseContext {
   knownCustomers?: string[];
   /** Extra names that mean the owner/family (e.g. device names); মালিক/আব্বু/আম্মু are built in. */
   ownerNames?: string[];
+  /** This phone's role (Setup step ২). Decides what "৩০০ টাকা নিলাম" means. */
+  deviceRole?: 'owner' | 'staff';
+  /** This phone's device_name ("আব্বু", "কর্মচারী ১"); becomes `person` for first-person commands. */
+  deviceName?: string;
 }
