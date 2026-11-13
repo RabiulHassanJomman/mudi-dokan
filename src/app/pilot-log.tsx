@@ -23,6 +23,9 @@ const OUTCOME: Record<Outcome, { label: string; bg: string; ink: string }> = {
   stt_error: { label: 'শোনা যায়নি', bg: colors.neutralTint, ink: colors.ink2 },
 };
 
+/** "পাইলট ডাটা মুছুন" must be held this long before the confirm dialog opens. */
+const WIPE_HOLD_MS = 3000;
+
 const time = (ms: number) => {
   const d = new Date(ms);
   return toBnDigits(`${d.getDate()}/${d.getMonth() + 1} ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`);
@@ -144,11 +147,23 @@ export default function PilotLogScreen() {
         contentContainerStyle={styles.list}
         ListFooterComponent={
           <View style={styles.footer}>
-            <Pressable accessibilityRole="button" onPress={wipe} style={({ pressed }) => [styles.wipe, pressed && styles.pressed]}>
-              <Txt size={fontSize.body} weight="bold" color={colors.bakiInk}>
-                পাইলট ডাটা মুছুন
-              </Txt>
+            {/* 3 s hold, then the confirm dialog: a tap while scrolling must not get near a wipe */}
+            <Pressable
+              accessibilityRole="button"
+              accessibilityHint="৩ সেকেন্ড চেপে ধরে রাখুন"
+              delayLongPress={WIPE_HOLD_MS}
+              onLongPress={wipe}
+              style={({ pressed }) => [styles.wipe, pressed && styles.wipeHeld]}
+            >
+              {({ pressed }) => (
+                <Txt size={fontSize.body} weight="bold" color={pressed ? colors.onColor : colors.bakiInk}>
+                  {pressed ? 'ধরে রাখুন…' : 'পাইলট ডাটা মুছুন'}
+                </Txt>
+              )}
             </Pressable>
+            <Txt size={fontSize.caption} weight="medium" color={colors.muted} style={styles.center}>
+              ৩ সেকেন্ড চেপে ধরে রাখুন
+            </Txt>
             <Txt size={fontSize.caption} weight="medium" color={colors.muted} style={styles.center}>
               {buildLabel()}
             </Txt>
@@ -283,6 +298,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.bakiTint,
     justifyContent: 'center',
   },
-  pressed: { opacity: 0.85 },
+  wipeHeld: { backgroundColor: colors.baki },
   badge: { borderRadius: radius.pill, paddingHorizontal: 10, paddingVertical: 4 },
 });

@@ -6,6 +6,9 @@
  * confirm card, with their edits applied. A field the user did not touch keeps the
  * parser's value (it was accepted as is), so a spoken "৫০০ গ্রাম" stays 500 g even
  * though the app saved 0.5 kg. A field they edited takes the saved value.
+ *
+ * Non-sale commands (not saved by the app yet) and unsure sales come in as status
+ * "review": expected is a draft and the eval does not score them until labelled.
  */
 import type { ParsedCommand, Unit } from '../src/parser/types';
 import type { Expected, ExpectedItem, Fixture, Seed, Tab } from './eval-types';
@@ -47,12 +50,55 @@ const TABS: readonly Tab[] = ['sale', 'purchase', 'ledger', 'stock', 'expense'] 
 const taka = (poisha: number) => Math.round(poisha) / 100;
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
+const tabOf = (log: PilotLog): Tab => (TABS.includes(log.tab as Tab) ? (log.tab as Tab) : 'sale');
+
+/** The parser's guess as a starting label (no confirmed result exists for it). */
+function draftFromParse(p: Partial<ParsedCommand>): Expected {
+  const e: Expected = { intent: p.intent ?? 'unknown' };
+  if (p.customer) e.customer = p.customer;
+  if (p.credit) e.credit = true;
+  if (p.amount !== undefined) e.amount = p.amount;
+  if (p.item) e.item = p.item;
+  if (p.person) e.person = p.person;
+  if (p.items?.length)
+    e.items = p.items.map((i) => {
+      const x: ExpectedItem = {};
+      if (i.product) x.product = i.product;
+      if (i.quantity) x.quantity = { ...i.quantity };
+      if (i.total !== undefined) x.total = i.total;
+      if (i.priceKind === 'unit' && i.unitPrice !== undefined) x.unitPrice = i.unitPrice;
+      return x;
+    });
+  return e;
+}
+
+/**
+ * Non-sale command (baki, joma, expense, owner_withdrawal, …): the app can't save these yet
+ * (outcome "unsupported"), so nobody confirmed a result. Imported as status "review" with the
+ * parser's guess as a draft, to be labelled by ear.
+ */
+function reviewFromUnsupported(log: PilotLog, text: string): Converted {
+  const intent = log.parsed?.intent ?? 'unknown';
+  const fixture: Fixture = {
+    text,
+    tab: tabOf(log),
+    source: 'pilot',
+    expected: draftFromParse(log.parsed ?? {}),
+    status: 'review',
+    review_notes: [`unconfirmed: ${intent}`],
+  };
+  if (log.id) fixture.pilot_id = log.id;
+  return { fixture };
+}
+
 export function fixtureFromLog(log: PilotLog): Converted {
-  if (log.outcome !== 'saved' && log.outcome !== 'saved_edited') return { skip: 'not_saved' };
   const text = log.transcript?.trim();
+  const unsupported = log.outcome === 'unsupported' && log.parsed?.intent !== 'sale';
+  if (!unsupported && log.outcome !== 'saved' && log.outcome !== 'saved_edited') return { skip: 'not_saved' };
   if (!text) return { skip: 'no_transcript' };
   // STT wrote something else than was said: the confirmed result is not what this text means
   if (log.stt_ok === false) return { skip: 'stt_wrong' };
+  if (unsupported) return reviewFromUnsupported(log, text);
   const saved = log.saved;
   if (!saved || !Array.isArray(saved.items)) return { skip: 'no_result' };
 
@@ -101,10 +147,12 @@ export function fixtureFromLog(log: PilotLog): Converted {
   if (saved.credit) expected.credit = true;
   if (items.length && items.every((i) => i.total !== undefined)) expected.amount = round2(items.reduce((t, i) => t + i.total!, 0));
 
-  const tab = TABS.includes(log.tab as Tab) ? (log.tab as Tab) : 'sale';
-  const fixture: Fixture = { text, tab, source: 'pilot', expected, edited: log.outcome === 'saved_edited' };
+  const fixture: Fixture = { text, tab: tabOf(log), source: 'pilot', expected, edited: log.outcome === 'saved_edited' };
   if (log.id) fixture.pilot_id = log.id;
-  if (review.length) fixture.review = review;
+  if (review.length) {
+    fixture.status = 'review';
+    fixture.review_notes = review;
+  }
   return { fixture };
 }
 

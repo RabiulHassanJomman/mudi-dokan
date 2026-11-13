@@ -30,8 +30,13 @@ export interface Fixture {
   pilot_id?: string;
   /** pilot only: the shopkeeper changed something on the confirm card (the parser was wrong then). */
   edited?: boolean;
-  /** pilot only: things the import could not be sure of; check by ear before trusting the case. */
-  review?: string[];
+  /**
+   * "review" = expected is only a draft (the parser's guess, or a confirmed sale the import was
+   * unsure of). Not scored. Label it by ear, then delete `status` (and `review_notes`).
+   */
+  status?: 'review';
+  /** Why it needs review, e.g. "unconfirmed: joma", "items[0].price". */
+  review_notes?: string[];
 }
 export interface Seed {
   products: { name: string; unit: Unit; price: number }[];

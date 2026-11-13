@@ -40,11 +40,13 @@ if (!ruleOnly && !apiKey) {
   process.exit(1);
 }
 
-const fixtures: Fixture[] = readFileSync(join(ROOT, 'eval/fixtures.jsonl'), 'utf8')
+const allFixtures: Fixture[] = readFileSync(join(ROOT, 'eval/fixtures.jsonl'), 'utf8')
   .split('\n')
   .filter((l) => l.trim())
-  .map((l) => JSON.parse(l) as Fixture)
-  .slice(0, limit);
+  .map((l) => JSON.parse(l) as Fixture);
+/** status "review" = expected is only a draft; not run or scored until labelled. */
+const unlabelled = allFixtures.filter((f) => f.status === 'review');
+const fixtures = allFixtures.filter((f) => f.status !== 'review').slice(0, limit);
 const seed = JSON.parse(readFileSync(join(ROOT, 'eval/seed.json'), 'utf8')) as Seed;
 
 // ── fuzzy product match (top 15 for the prompt) ────────────────
@@ -388,9 +390,16 @@ async function main() {
   if (pilotNow.length)
     console.log(
       `\npilot = held-out score. "edited" = the shopkeeper fixed the confirm card, i.e. the app's parser was wrong then;` +
-        ` the other pilot cases were accepted as parsed, so they mostly catch regressions.` +
-        (pilotNow.some((r) => r.review) ? ` ${pilotNow.filter((r) => r.review).length} pilot cases are marked review.` : ''),
+        ` the other pilot cases were accepted as parsed, so they mostly catch regressions.`,
     );
+  if (unlabelled.length) {
+    const byIntent = new Map<string, number>();
+    for (const f of unlabelled) byIntent.set(f.expected.intent, (byIntent.get(f.expected.intent) ?? 0) + 1);
+    console.log(
+      `\nnot scored: ${unlabelled.length} cases with status "review" (draft label: ${[...byIntent].map(([i, n]) => `${i} ${n}`).join(', ')}).` +
+        ` Label them in eval/fixtures.jsonl and delete "status" to count them.`,
+    );
+  }
   const low = rows.filter((r) => r.rule.confidence === 'low');
   const lowWrong = low.filter((r) => r.rule.fails.length).length;
   const highWrong = rows.filter((r) => r.rule.confidence === 'high' && r.rule.fails.length).length;

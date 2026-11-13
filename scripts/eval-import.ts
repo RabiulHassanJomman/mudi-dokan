@@ -4,8 +4,10 @@
  *
  *   npm run eval:import -- pilot.jsonl [--no-seed] [--dry-run]
  *
- * Takes the app's "শেয়ার" export (one JSON object) or JSONL. Only confirmed entries
- * (saved / saved_edited) with a transcript; STT marked ভুল is skipped. Same text + tab
+ * Takes the app's "শেয়ার" export (one JSON object) or JSONL. Confirmed sales (saved /
+ * saved_edited) are scored fixtures; non-sale commands the app can't save yet (baki, joma,
+ * expense, owner_withdrawal, …) and unsure sales get status "review" (draft label, not
+ * scored). Cancelled and STT marked ভুল are skipped. Same text + tab
  * as an existing fixture (any source) or the same pilot id = duplicate, skipped.
  * Products/customers the shop confirmed are added to eval/seed.json (--no-seed: don't).
  */
@@ -66,8 +68,11 @@ if (!noSeed && !dryRun && (extra.products.length || extra.customers.length)) {
 }
 
 const edited = added.filter((f) => f.edited).length;
-const review = added.filter((f) => f.review);
-console.log(`${logs.length} log entries → ${added.length} new pilot fixtures (${edited} edited on the confirm card)${dryRun ? ' [dry run]' : ''}`);
+const review = added.filter((f) => f.status === 'review');
+console.log(
+  `${logs.length} log entries → ${added.length} new pilot fixtures: ${added.length - review.length} scored` +
+    ` (${edited} edited on the confirm card), ${review.length} status "review"${dryRun ? ' [dry run]' : ''}`,
+);
 const skips = Object.entries(skipped).filter(([, n]) => n);
 if (skips.length) console.log(`skipped: ${skips.map(([k, n]) => `${k} ${n}`).join(', ')}`);
 if (!noSeed && (extra.products.length || extra.customers.length))
@@ -76,6 +81,6 @@ if (!noSeed && (extra.products.length || extra.customers.length))
       (extra.products.length ? ` (${extra.products.map((p) => p.name).join(', ')})` : ''),
   );
 if (review.length) {
-  console.log(`\ncheck by ear (${review.length}), the import was unsure:`);
-  for (const f of review) console.log(`  “${f.text}”: ${f.review!.join(', ')}`);
+  console.log(`\nto label by ear (${review.length}): fix "expected" in eval/fixtures.jsonl, then delete "status"/"review_notes"`);
+  for (const f of review) console.log(`  “${f.text}”: ${f.review_notes?.join(', ') ?? ''}`);
 }

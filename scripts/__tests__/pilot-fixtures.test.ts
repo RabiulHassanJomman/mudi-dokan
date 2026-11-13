@@ -83,7 +83,7 @@ describe('pilot log → fixture', () => {
       ),
     );
     expect(f.edited).toBe(true);
-    expect(f.review).toBeUndefined();
+    expect(f.status).toBeUndefined();
     expect(f.expected).toEqual({ intent: 'sale', customer: 'করিম', credit: true, items: [{ product: 'চাল', quantity: { value: 3, unit: 'kg' } }] });
   });
 
@@ -101,31 +101,57 @@ describe('pilot log → fixture', () => {
     expect(f.expected).toEqual({ intent: 'sale', items: [{ product: 'চাল', quantity: { value: 3, unit: 'kg' }, total: 300 }], amount: 300 });
   });
 
-  it('a price nobody said but the user typed: left out and marked for review', () => {
+  it('a price nobody said but the user typed: left out, status review', () => {
     const f = fixture(
       log('চাল দুই কেজি', { credit: false, customer: null, total_poisha: 13000, items: [line('চাল', 2, 'kg', 6500)] }, { outcome: 'saved_edited', edits: ['items[0].pricePoisha'] }),
     );
     expect(f.expected.items).toEqual([{ product: 'চাল', quantity: { value: 2, unit: 'kg' } }]);
-    expect(f.review).toEqual(['items[0].price']);
+    expect(f.status).toBe('review');
+    expect(f.review_notes).toEqual(['items[0].price']);
   });
 
-  it('saved lines that do not line up with the parse are marked for review', () => {
+  it('saved lines that do not line up with the parse: status review', () => {
     const f = fixture(
       log('চাল দুই কেজি', { credit: false, customer: null, total_poisha: 0, items: [line('চাল', 2, 'kg', 6000), line('ডাল', 1, 'kg', 11000)] }),
     );
-    expect(f.review).toContain('item_count');
+    expect(f.status).toBe('review');
+    expect(f.review_notes).toContain('item_count');
     expect(f.expected.items).toHaveLength(2);
   });
 
   it.each([
     ['cancelled', { outcome: 'cancelled' }, 'not_saved'],
-    ['unsupported', { outcome: 'unsupported' }, 'not_saved'],
+    ['an unsupported sale (no such thing, but not labelled)', { outcome: 'unsupported' }, 'not_saved'],
+    ['pending (left the confirm card)', { outcome: 'pending' }, 'not_saved'],
     ['empty transcript', { transcript: '  ' }, 'no_transcript'],
     ['STT marked wrong', { stt_ok: false }, 'stt_wrong'],
     ['no saved result', { saved: undefined }, 'no_result'],
   ] as const)('skips %s', (_name, more, reason) => {
     const base = log('চাল দুই কেজি', { credit: false, customer: null, total_poisha: 12000, items: [line('চাল', 2, 'kg', 6000)] });
     expect(fixtureFromLog({ ...base, ...more })).toEqual({ skip: reason });
+  });
+
+  it.each([
+    ['করিম ৫০০ টাকা বাকি', 'baki', { customer: 'করিম', amount: 500 }],
+    ['রহিম ২০০ টাকা জমা দিল', 'joma', { customer: 'রহিম', amount: 200 }],
+    ['বিদ্যুৎ বিল ৫০০ টাকা খরচ', 'expense', { amount: 500 }],
+    ['মালিক ৫০০ নিল', 'owner_withdrawal', { amount: 500 }],
+  ] as const)('non-sale "%s" (%s): status review, draft = the parse', (text, intent, fields) => {
+    const l: PilotLog = { id: 'u1', source: 'voice', tab: 'sale', transcript: text, parsed: parseCommand(text, { tab: 'sale' }), outcome: 'unsupported' };
+    const f = fixture(l);
+    expect(f).toMatchObject({ text, source: 'pilot', pilot_id: 'u1', status: 'review', review_notes: [`unconfirmed: ${intent}`] });
+    expect(f.expected).toMatchObject({ intent, ...fields });
+    expect(f.edited).toBeUndefined();
+  });
+
+  it('non-sale with no parse at all: draft intent unknown', () => {
+    const f = fixture({ id: 'u2', transcript: 'হুম', outcome: 'unsupported' });
+    expect(f.expected).toEqual({ intent: 'unknown' });
+    expect(f.status).toBe('review');
+  });
+
+  it('non-sale with STT marked wrong is still skipped', () => {
+    expect(fixtureFromLog({ transcript: 'করিম ৫০০ বাকি', parsed: { intent: 'baki' }, outcome: 'unsupported', stt_ok: false })).toEqual({ skip: 'stt_wrong' });
   });
 
   it('keeps the tab; an unknown tab falls back to sale', () => {

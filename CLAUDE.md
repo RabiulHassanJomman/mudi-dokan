@@ -31,8 +31,20 @@ Input = Bangla voice, output = big icons + TTS. Full plan: @docs/PLAN.md
 - test: npm test
 - run: npx expo run:android
 - release APK (no Metro, for the shop phone): npm run apk
-  → android/app/build/outputs/apk/release/app-release.apk; install with
-  `adb install -r <apk>` (debug-key signed, so it installs over the dev build and keeps data)
+  → android/app/build/outputs/apk/release/app-release.apk; update with `adb install -r <apk>`
+- Release signing: dedicated key, NOT the debug key (plugins/withReleaseSigning.js).
+  - Keystore: ~/.mudi-dokan/keys/mudi-dokan-release.jks (outside the repo), alias
+    mudi-dokan-release, SHA-256 D0:B0:99:12:…:C8:89.
+  - Path/alias/passwords: MUDI_RELEASE_STORE_FILE, MUDI_RELEASE_STORE_PASSWORD,
+    MUDI_RELEASE_KEY_ALIAS, MUDI_RELEASE_KEY_PASSWORD in ~/.gradle/gradle.properties
+    (or env). Never commit them. Without them the release build fails (no debug fallback).
+  - Every future APK must use this same key, or Android refuses the update and the only way
+    in is uninstall = all shop data on the phone lost.
+  - BACKUP (do once, and after any change): copy the .jks AND the 4 MUDI_RELEASE_* lines
+    to two places off this Mac (password manager + encrypted USB/drive). Losing either
+    = no more updates for installed phones.
+  - Dev builds (npx expo run:android) are debug-signed: they can't install over the
+    release app without uninstalling it first.
 - eval (Mac only): npm run eval:gemini [-- --rule-only]; pilot log → fixtures:
   npm run eval:import -- pilot.jsonl
 
