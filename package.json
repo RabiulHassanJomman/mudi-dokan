@@ -9,7 +9,8 @@
     "apk": "expo prebuild -p android --no-install && cd android && ANDROID_HOME=${ANDROID_HOME:-$HOME/Library/Android/sdk} ./gradlew assembleRelease && echo android/app/build/outputs/apk/release/app-release.apk",
     "test": "jest",
     "typecheck": "tsc --noEmit",
-    "doctor": "expo-doctor"
+    "doctor": "expo-doctor",
+    "eval:gemini": "tsx scripts/eval-gemini.ts"
   },
   "devDependencies": {
     "@types/jest": "^30.0.0",
@@ -17,6 +18,7 @@
     "@types/react": "~19.3.0",
     "jest": "~30.5.2",
     "ts-jest": "^29.4.15",
+    "tsx": "^4.23.15",
     "typescript": "~6.0.3"
   },
   "dependencies": {

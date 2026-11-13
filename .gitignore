@@ -30,3 +30,6 @@ npm-debug.*
 .DS_Store
 .env*.local
 coverage/
+
+# eval (scripts/eval-gemini.ts) output
+eval/results/
