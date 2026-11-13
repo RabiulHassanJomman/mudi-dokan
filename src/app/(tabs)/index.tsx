@@ -1,17 +1,19 @@
 import { useCallback, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useFocusEffect } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 
-import { Icon } from '../../components/Icon';
+import { Icon, productIcon } from '../../components/Icon';
 import { ScreenHeader } from '../../components/ScreenHeader';
 import { Txt } from '../../components/Txt';
 import { buildLabel } from '../../lib/buildInfo';
-import { pilotStats, recentBaskets, todayTotals, type PilotStats, type RecentBasket } from '../../db/repo';
-import { formatQty, formatTaka, toBnDigits } from '../../lib/bn';
+import { getSetup, pilotStats, recentBaskets, todayTotals, type PilotStats, type RecentBasket } from '../../db/repo';
+import { getDevice } from '../../device';
+import { formatNumber, formatQty, formatTaka, toBnDigits } from '../../lib/bn';
+import { speak } from '../../lib/speak';
 import { useClipPlayer } from '../../lib/useClipPlayer';
-import { colors, fonts, fontSize, productTiles, radius, size, spacing } from '../../theme/tokens';
+import { colors, fontSize, productTiles, radius, size, spacing } from '../../theme/tokens';
 
 const startOfToday = () => {
   const d = new Date();
@@ -23,8 +25,7 @@ const startOfToday = () => {
 export default function SaleScreen() {
   const db = useSQLiteContext();
   const play = useClipPlayer();
-  const [typing, setTyping] = useState(false);
-  const [text, setText] = useState('');
+  const [shopName, setShopName] = useState<string | null>(null);
   const [today, setToday] = useState({ sales: 0, baki: 0 });
   const [recent, setRecent] = useState<RecentBasket[]>([]);
   const [stats, setStats] = useState<PilotStats | null>(null);
@@ -35,21 +36,27 @@ export default function SaleScreen() {
         setToday(await todayTotals(db, startOfToday()));
         setRecent(await recentBaskets(db, 3));
         setStats(await pilotStats(db));
+        setShopName((await getSetup(db, getDevice().id)).shopName);
       })();
     }, [db]),
   );
 
-  const submitTyped = () => {
-    const t = text.trim();
-    if (!t) return;
-    setText('');
-    setTyping(false);
-    router.push({ pathname: '/confirm', params: { text: t, tab: 'sale' } });
+  const readScreen = () => {
+    const last = recent[0];
+    void speak(
+      `আজ বিক্রি ${formatNumber(today.sales / 100)} টাকা। আজ বাকি ${formatNumber(today.baki / 100)} টাকা। ` +
+        (last ? `শেষ বিক্রি: ${last.products}, ${formatNumber(last.amount_poisha / 100)} টাকা। ` : '') +
+        'বিক্রি বলতে মাইক চাপুন। ছবি দেখে বেছে নিতে লিখুন চাপুন।',
+    );
   };
 
   return (
     <SafeAreaView edges={['top']} style={styles.screen}>
-      <ScreenHeader title="আমার দোকান" />
+      <ScreenHeader
+        title={shopName ?? 'আমার দোকান'}
+        onListen={readScreen}
+        onSettings={() => router.push({ pathname: '/setup', params: { edit: '1' } })}
+      />
       <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
         <View style={styles.tiles}>
           <View style={[styles.tile, { backgroundColor: colors.sale }]}>
@@ -88,37 +95,19 @@ export default function SaleScreen() {
           <Txt size={fontSize.prompt} weight="bold">
             চাপুন, বলুন
           </Txt>
-          {typing ? (
-            <View style={styles.typeRow}>
-              <TextInput
-                autoFocus
-                value={text}
-                onChangeText={setText}
-                onSubmitEditing={submitTyped}
-                returnKeyType="done"
-                accessibilityLabel="লিখে দিন"
-                placeholder="যেমন: চাল ২ কেজি"
-                placeholderTextColor={colors.muted}
-                style={styles.input}
-              />
-              <Pressable accessibilityRole="button" accessibilityLabel="ঠিক আছে" onPress={submitTyped} style={styles.go}>
-                <Icon name="check" size={28} color={colors.onColor} strokeWidth={2.6} />
-              </Pressable>
-            </View>
-          ) : (
-            <Pressable accessibilityRole="button" onPress={() => setTyping(true)} style={styles.typeButton}>
-              <Icon name="keyboard" size={24} color={colors.ink2} />
-              <Txt size={17} weight="semibold" color={colors.ink2}>
-                লিখুন
-              </Txt>
-            </Pressable>
-          )}
+          {/* লিখুন = type or choose by picture (Pick) */}
+          <Pressable accessibilityRole="button" onPress={() => router.push('/pick')} style={styles.typeButton}>
+            <Icon name="keyboard" size={24} color={colors.ink2} />
+            <Txt size={17} weight="semibold" color={colors.ink2}>
+              লিখুন
+            </Txt>
+          </Pressable>
         </View>
 
         {recent.map((r) => (
           <View key={r.id} style={[styles.entry, r.credit ? styles.entryCredit : null]}>
             <View style={[styles.entryTile, { backgroundColor: (r.lines === 1 && productTiles[r.products]) || colors.neutralTint }]}>
-              <Icon name="box" size={30} color={colors.ink} strokeWidth={1.6} />
+              <Icon name={r.lines === 1 ? productIcon(r.products) : 'box'} size={30} color={colors.ink} strokeWidth={1.6} />
             </View>
             <View style={styles.flex}>
               <Txt size={21} weight="bold">
@@ -204,31 +193,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.xs,
-  },
-  typeRow: { flexDirection: 'row', gap: spacing.xs, alignSelf: 'stretch' },
-  input: {
-    flex: 1,
-    height: size.iconButton,
-    // Android's default input padding clips tall Bangla vowel signs (ি looks like া)
-    paddingVertical: 0,
-    textAlignVertical: 'center',
-    includeFontPadding: true,
-    borderWidth: 2,
-    borderColor: colors.border,
-    borderRadius: radius.icon,
-    paddingHorizontal: spacing.lg,
-    fontFamily: fonts.medium,
-    fontSize: fontSize.label,
-    color: colors.ink,
-    backgroundColor: colors.surface,
-  },
-  go: {
-    width: size.iconButton,
-    height: size.iconButton,
-    borderRadius: radius.icon,
-    backgroundColor: colors.sale,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   entry: {
     backgroundColor: colors.surface,

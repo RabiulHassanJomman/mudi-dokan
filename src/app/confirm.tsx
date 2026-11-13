@@ -5,7 +5,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-speech-recognition';
 
-import { Icon } from '../components/Icon';
+import { Icon, productIcon, type IconName } from '../components/Icon';
 import { Txt } from '../components/Txt';
 import {
   basketFromParse,
@@ -29,6 +29,7 @@ import { createVoiceLog, findProducts, getVoiceLog, knownNames, saveBasket, setO
 import { getDevice, writer } from '../device';
 import { UNIT_BN, formatNumber, formatQty, formatTaka, parseTakaInput, toBnDigits } from '../lib/bn';
 import { speak, stopSpeaking } from '../lib/speak';
+import { pickedCommand, pickText, type PickedItem } from '../domain/pick';
 import { parseCommand } from '../parser';
 import type { Intent } from '../parser/types';
 import { colors, fonts, fontSize, productTiles, radius, size, spacing } from '../theme/tokens';
@@ -53,7 +54,8 @@ const INTENT_BN: Record<Intent, string> = {
 /** নিশ্চিত করুন: one row per item; nothing is saved until হ্যাঁ (button or voice). */
 export default function ConfirmScreen() {
   const db = useSQLiteContext();
-  const params = useLocalSearchParams<{ logId?: string; text?: string; tab?: string }>();
+  /** logId = voice (from Listening); text = typed; pick = chosen on ছবি দেখে (JSON PickedItem). */
+  const params = useLocalSearchParams<{ logId?: string; text?: string; tab?: string; pick?: string }>();
   const tab = params.tab ?? 'sale';
 
   const [state, setState] = useState<State>({ kind: 'loading' });
@@ -104,22 +106,31 @@ export default function ConfirmScreen() {
       const w = writer();
       const device = getDevice();
       let transcript = '';
-      if (params.logId) {
-        logId.current = params.logId;
-        transcript = (await getVoiceLog(db, params.logId))?.transcript ?? '';
+      let parsed;
+      if (params.pick) {
+        // no speech, no parser: the picked product + number is the command
+        const pick = JSON.parse(params.pick) as PickedItem;
+        transcript = pickText(pick);
+        parsed = pickedCommand(pick);
+        logId.current = await createVoiceLog(db, w, { transcript, source: 'typed', contextTab: tab, parsed, via: 'pick' });
       } else {
-        transcript = params.text ?? '';
-        logId.current = await createVoiceLog(db, w, { transcript, source: 'typed', contextTab: tab });
+        if (params.logId) {
+          logId.current = params.logId;
+          transcript = (await getVoiceLog(db, params.logId))?.transcript ?? '';
+        } else {
+          transcript = params.text ?? '';
+          logId.current = await createVoiceLog(db, w, { transcript, source: 'typed', contextTab: tab });
+        }
+        const names = await knownNames(db);
+        parsed = parseCommand(transcript, {
+          tab: tab === 'sale' ? 'sale' : undefined,
+          knownProducts: names.products,
+          knownCustomers: names.customers,
+          deviceRole: device.role ?? undefined,
+          deviceName: device.name,
+        });
+        await setParsed(db, w, logId.current, parsed);
       }
-      const names = await knownNames(db);
-      const parsed = parseCommand(transcript, {
-        tab: tab === 'sale' ? 'sale' : undefined,
-        knownProducts: names.products,
-        knownCustomers: names.customers,
-        deviceRole: device.role ?? undefined,
-        deviceName: device.name,
-      });
-      await setParsed(db, w, logId.current, parsed);
       if (!alive) return;
 
       if (parsed.intent !== 'sale') {
@@ -198,6 +209,13 @@ export default function ConfirmScreen() {
     router.replace({ pathname: '/listening', params: { tab } });
   };
 
+  /** Voice did not work out: choose by picture instead. */
+  const pickInstead = () => {
+    decided.current = true;
+    if (logId.current) void setOutcome(db, writer(), logId.current, 'cancelled');
+    router.replace('/pick');
+  };
+
   // ── render ─────────────────────────────────────────────────────
   return (
     <SafeAreaView style={styles.screen}>
@@ -239,6 +257,7 @@ export default function ConfirmScreen() {
                   কিছু বুঝিনি
                 </Txt>
                 <BigButton label="আবার বলুন" icon="mic" bg={colors.sale} ink={colors.onColor} onPress={again} />
+                <BigButton label="ছবি দেখে বেছে নিন" icon="image" bg={colors.stockTint} ink={colors.stock} onPress={pickInstead} />
               </View>
             ) : (
               basket.items.map((it) => (
@@ -365,7 +384,7 @@ function ItemRow(props: {
     <View style={[styles.row, item.problems.length > 0 && styles.rowProblem]}>
       <View style={styles.rowTop}>
         <View style={[styles.rowTile, { backgroundColor: tile }]}>
-          <Icon name="box" size={26} color={colors.ink} strokeWidth={1.6} />
+          <Icon name={productIcon(item.productName ?? '')} size={26} color={colors.ink} strokeWidth={1.6} />
         </View>
         <View style={styles.flex}>
           <Txt size={fontSize.button} weight="bold">
@@ -512,7 +531,7 @@ function Toggle(props: {
   );
 }
 
-function BigButton(props: { label: string; icon: 'mic' | 'close'; bg: string; ink: string; onPress: () => void }) {
+function BigButton(props: { label: string; icon: IconName; bg: string; ink: string; onPress: () => void }) {
   return (
     <Pressable
       accessibilityRole="button"

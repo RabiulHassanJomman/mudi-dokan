@@ -219,7 +219,7 @@ describe('reads', () => {
     await setOutcome(db, w, u, 'unsupported');
     expect(await getVoiceLog(db, c)).toMatchObject({ outcome: 'cancelled' });
     expect(await pilotStats(db)).toEqual({
-      total: 6, saved: 2, edited: 1, cancelled: 1, unsupported: 1, sttError: 1, sttChecked: 0, sttOk: 0, accuracy: 50,
+      total: 6, saved: 2, edited: 1, cancelled: 1, unsupported: 1, sttError: 1, picked: 0, sttChecked: 0, sttOk: 0, accuracy: 50,
     });
   });
 

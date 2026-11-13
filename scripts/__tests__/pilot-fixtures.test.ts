@@ -125,6 +125,7 @@ describe('pilot log → fixture', () => {
     ['pending (left the confirm card)', { outcome: 'pending' }, 'not_saved'],
     ['empty transcript', { transcript: '  ' }, 'no_transcript'],
     ['STT marked wrong', { stt_ok: false }, 'stt_wrong'],
+    ['picked on ছবি দেখে (nothing was parsed)', { via: 'pick' }, 'picked'],
     ['no saved result', { saved: undefined }, 'no_result'],
   ] as const)('skips %s', (_name, more, reason) => {
     const base = log('চাল দুই কেজি', { credit: false, customer: null, total_poisha: 12000, items: [line('চাল', 2, 'kg', 6000)] });

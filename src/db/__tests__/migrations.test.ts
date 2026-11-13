@@ -198,3 +198,50 @@ describe('v4', () => {
   });
 });
 
+
+describe('v5', () => {
+  it('adds the shop table (one row, renamable) and voice_logs.via', () => {
+    insert(raw, 'shop', { ...row('shop'), name: 'রহমান স্টোর' });
+    raw.exec(`UPDATE shop SET name = 'নতুন নাম' WHERE id = 'shop'`);
+    expect(raw.prepare('SELECT name FROM shop').all()).toEqual([{ name: 'নতুন নাম' }]);
+    const cols = (raw.prepare('PRAGMA table_info(voice_logs)').all() as { name: string }[]).map((c) => c.name);
+    expect(cols).toContain('via');
+  });
+
+  it("via is null (voice/typed) or 'pick'", () => {
+    raw.exec(`INSERT INTO voice_logs (id, transcript, device_name, device_id, created_at, updated_at, via) VALUES ('v', 't', 'd', 'd', 1, 1, 'pick')`);
+    expect(() => raw.exec(`UPDATE voice_logs SET via = 'other' WHERE id = 'v'`)).toThrow();
+  });
+});
+
+describe('upgrade keeps pilot data', () => {
+  it('a v4 shop phone with sales, baki and logs migrates to the latest version untouched', async () => {
+    const old = new DatabaseSync(':memory:');
+    const a = adapter(old);
+    await a.execAsync('PRAGMA foreign_keys = ON;');
+    for (const sql of MIGRATIONS.slice(0, 4)) old.exec(sql);
+    old.exec('PRAGMA user_version = 4');
+    insert(old, 'devices', { ...row('d1'), device_name: 'আব্বু', role: 'owner' });
+    insert(old, 'products', { ...row('p1'), name: 'চাল', unit: 'kg', sell_price_poisha: 6000 });
+    insert(old, 'customers', { ...row('c1'), name: 'করিম' });
+    insert(old, 'voice_logs', { ...row('v1'), transcript: 'করিম চাল ২ কেজি বাকি', device_name: 'আব্বু', outcome: 'saved', stt_ok: 1 });
+    insert(old, 'sales', {
+      ...entry('s1'), product_id: 'p1', quantity: 2, sell_price_poisha: 6000, amount_poisha: 12000, cost_price_poisha: 0,
+      credit: 1, customer_id: 'c1', voice_log_id: 'v1', basket_id: 'b1', line_no: 1,
+    });
+    insert(old, 'ledger', { ...entry('l1'), party_id: 'c1', kind: 'baki', amount_poisha: 12000, basket_id: 'b1' });
+    const dump = (t: string) => old.prepare(`SELECT * FROM ${t} ORDER BY id`).all();
+    const before = Object.fromEntries(['devices', 'products', 'customers', 'voice_logs', 'sales', 'ledger'].map((t) => [t, dump(t)]));
+
+    await expect(migrate(a)).resolves.toBe(4);
+    expect(old.prepare('PRAGMA user_version').get()).toEqual({ user_version: SCHEMA_VERSION });
+    for (const [t, rows] of Object.entries(before)) {
+      // same rows; new columns may only be added (null)
+      expect(dump(t).map((r) => ({ ...(r as object), via: undefined }))).toEqual(
+        (rows as object[]).map((r) => ({ ...r, via: undefined })),
+      );
+    }
+    expect(old.prepare('SELECT via FROM voice_logs').get()).toEqual({ via: null });
+    old.close();
+  });
+});

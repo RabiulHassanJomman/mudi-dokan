@@ -6,17 +6,29 @@ import { Txt } from './Txt';
 
 interface Props {
   title: string;
-  /** "শুনুন" reads the screen aloud (TTS arrives in step 2). */
+  /** "শুনুন" reads the screen aloud. */
   onListen?: () => void;
+  /** ⚙ (home only): shop/phone settings = Setup in edit mode. */
+  onSettings?: () => void;
 }
 
 /** Title + dark "শুনুন" pill, as on every tab screen in the design. */
-export function ScreenHeader({ title, onListen }: Props) {
+export function ScreenHeader({ title, onListen, onSettings }: Props) {
   return (
     <View style={styles.row}>
-      <Txt accessibilityRole="header" size={fontSize.headingLg} weight="bold">
+      <Txt accessibilityRole="header" size={fontSize.headingLg} weight="bold" style={styles.title}>
         {title}
       </Txt>
+      {onSettings && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="দোকানের তথ্য"
+          onPress={onSettings}
+          style={({ pressed }) => [styles.settings, pressed && { opacity: 0.85 }]}
+        >
+          <Icon name="settings" size={26} color={colors.ink2} strokeWidth={2} />
+        </Pressable>
+      )}
       <Pressable
         accessibilityRole="button"
         accessibilityLabel="শুনুন"
@@ -36,11 +48,20 @@ export function ScreenHeader({ title, onListen }: Props) {
 const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
+    gap: spacing.xs,
     paddingHorizontal: spacing.screen,
     paddingTop: spacing.screenTop,
     paddingBottom: spacing.sm,
+  },
+  title: { flex: 1 },
+  settings: {
+    width: size.iconButton,
+    height: size.iconButton,
+    borderRadius: radius.icon,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   listen: {
     height: size.iconButton,

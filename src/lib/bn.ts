@@ -7,7 +7,9 @@ export const toBnDigits = (s: number | string): string =>
 /** 8230 → "৮,২৩০", 2.5 → "২.৫" (at most `maxFraction` decimals, trailing zeros dropped). */
 export function formatNumber(n: number, maxFraction = 2): string {
   const neg = n < 0;
-  const fixed = Math.abs(n).toFixed(maxFraction).replace(/\.?0+$/, '');
+  const raw = Math.abs(n).toFixed(maxFraction);
+  // trim zeros of the fraction only ("2.50" → "2.5"), never of a whole number ("5000")
+  const fixed = raw.includes('.') ? raw.replace(/\.?0+$/, '') : raw;
   const [int = '0', frac] = fixed.split('.');
   const grouped = int.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   return toBnDigits(`${neg ? '−' : ''}${grouped}${frac ? `.${frac}` : ''}`);

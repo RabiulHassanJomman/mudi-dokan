@@ -4,6 +4,8 @@
  * tested on node:sqlite.
  */
 import { basketSummary, storedLine, type BasketDraft, type ProductInfo } from '../domain/basket';
+import type { PickProduct } from '../domain/pick';
+import type { Role, SetupDraft } from '../domain/setup';
 import { ENTRY_TABLES, noDeleteTrigger } from './migrations';
 import type { ParsedCommand, Unit } from '../parser/types';
 
@@ -50,7 +52,85 @@ export async function ensureDevice(db: Db, w: Writer, role: 'owner' | 'staff' | 
   });
 }
 
+// ── setup (প্রথমবার চালু) ──────────────────────────────────────
+
+/** The shop row has a fixed id so every phone's copy is the same row when synced. */
+export const SHOP_ID = 'shop';
+
+/** Current setup values for this phone (shop + its device row + the effective opening cash). */
+export async function getSetup(
+  db: Db,
+  deviceId: string,
+): Promise<{ shopName: string | null; deviceName: string | null; role: Role | null; openingCashPoisha: number | null }> {
+  const shop = await db.getFirstAsync<{ name: string }>('SELECT name FROM shop WHERE id = ?', SHOP_ID);
+  const dev = await db.getFirstAsync<{ device_name: string; role: Role }>('SELECT device_name, role FROM devices WHERE id = ?', deviceId);
+  const open = await currentOpening(db);
+  return {
+    shopName: shop?.name ?? null,
+    deviceName: dev?.device_name ?? null,
+    role: dev?.role ?? null,
+    openingCashPoisha: open?.opening_cash_poisha ?? null,
+  };
+}
+
+const currentOpening = (db: Db) =>
+  db.getFirstAsync<{ id: string; business_date: string; opening_cash_poisha: number }>(
+    "SELECT id, business_date, opening_cash_poisha FROM v_day_close WHERE kind = 'opening' ORDER BY created_at LIMIT 1",
+  );
+
+/**
+ * Saves Setup in one transaction: the shop name (upsert), this phone's name and role,
+ * and the opening cash as a day_close 'opening' entry. Editing it later (settings) adds
+ * a correction row for the same business day; the same amount adds nothing.
+ */
+export async function saveSetup(db: Db, w: Writer, s: SetupDraft, businessDate: string): Promise<void> {
+  if (!s.role || s.openingCashPoisha === null) throw new Error('setup is not complete');
+  const t = w.now();
+  const deviceName = s.deviceName.trim();
+  await db.withTransactionAsync(async () => {
+    await db.runAsync(
+      `INSERT INTO shop (id, name, device_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET name = excluded.name, device_id = excluded.device_id, updated_at = excluded.updated_at`,
+      SHOP_ID, s.shopName.trim(), w.deviceId, t, t,
+    );
+    await db.runAsync(
+      `INSERT INTO devices (id, device_name, role, device_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET device_name = excluded.device_name, role = excluded.role, updated_at = excluded.updated_at`,
+      w.deviceId, deviceName, s.role, w.deviceId, t, t,
+    );
+    const open = await currentOpening(db);
+    if (open?.opening_cash_poisha === s.openingCashPoisha) return;
+    await insert(db, 'day_close', {
+      id: w.newId(),
+      business_date: open?.business_date ?? businessDate,
+      kind: 'opening',
+      opening_cash_poisha: s.openingCashPoisha,
+      corrects_id: open?.id ?? null,
+      device_name: deviceName,
+      ...rowCols(w),
+    });
+  });
+}
+
 // ── products & customers ───────────────────────────────────────
+
+/** ছবি দেখে বেছে নিন: active products, most sold first, with their aliases. */
+export async function pickProducts(db: Db): Promise<PickProduct[]> {
+  const rows = await db.getAllAsync<{ id: string; name: string; unit: Unit; sell_price_poisha: number | null; aliases: string | null }>(
+    `SELECT p.id, p.name, p.unit, p.sell_price_poisha,
+       (SELECT GROUP_CONCAT(alias, char(31)) FROM product_aliases a WHERE a.product_id = p.id) AS aliases
+     FROM products p
+     WHERE p.archived = 0
+     ORDER BY (SELECT COUNT(*) FROM v_sales s WHERE s.product_id = p.id) DESC, p.created_at`,
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    unit: r.unit,
+    sellPricePoisha: r.sell_price_poisha,
+    aliases: r.aliases ? r.aliases.split('\u001f') : [],
+  }));
+}
 
 export async function knownNames(db: Db): Promise<{ products: string[]; customers: string[] }> {
   const products = await db.getAllAsync<{ n: string }>(
@@ -119,6 +199,8 @@ export interface NewVoiceLog {
   audioPath?: string | null;
   parsed?: ParsedCommand | null;
   sttError?: string | null;
+  /** 'pick' = chosen on ছবি দেখে (no speech, no parser): left out of the accuracy. */
+  via?: 'pick';
 }
 
 export async function createVoiceLog(db: Db, w: Writer, v: NewVoiceLog): Promise<string> {
@@ -134,6 +216,7 @@ export async function createVoiceLog(db: Db, w: Writer, v: NewVoiceLog): Promise
     alternatives_json: v.alternatives?.length ? JSON.stringify(v.alternatives) : null,
     stt_error: v.sttError ?? null,
     outcome: v.sttError ? 'stt_error' : 'pending',
+    via: v.via ?? null,
     device_name: w.deviceName,
     ...rowCols(w),
   });
@@ -157,6 +240,8 @@ export interface VoiceLogRow {
   entry_id: string | null;
   /** Pilot reviewer: 1 = STT heard it right, 0 = wrong, null = not checked. */
   stt_ok: number | null;
+  /** 'pick' = ছবি দেখে বেছে নেওয়া; null = voice or typed. */
+  via: 'pick' | null;
   created_at: number;
 }
 
@@ -331,6 +416,8 @@ export interface PilotStats {
   cancelled: number;
   unsupported: number;
   sttError: number;
+  /** Chosen on ছবি দেখে: counted apart, not in total or accuracy (no parser involved). */
+  picked: number;
   /** Voice logs the reviewer marked, and how many of those STT heard right. */
   sttChecked: number;
   sttOk: number;
@@ -340,7 +427,11 @@ export interface PilotStats {
 
 export async function pilotStats(db: Db, since = 0): Promise<PilotStats> {
   const rows = await db.getAllAsync<{ outcome: Outcome; n: number }>(
-    'SELECT outcome, COUNT(*) AS n FROM voice_logs WHERE created_at >= ? GROUP BY outcome',
+    'SELECT outcome, COUNT(*) AS n FROM voice_logs WHERE created_at >= ? AND via IS NULL GROUP BY outcome',
+    since,
+  );
+  const picked = await db.getFirstAsync<{ n: number }>(
+    "SELECT COUNT(*) AS n FROM voice_logs WHERE created_at >= ? AND via = 'pick'",
     since,
   );
   const n = (o: Outcome) => rows.find((r) => r.outcome === o)?.n ?? 0;
@@ -360,6 +451,7 @@ export async function pilotStats(db: Db, since = 0): Promise<PilotStats> {
   return {
     total: rows.reduce((a, r) => a + r.n, 0),
     ...s,
+    picked: picked?.n ?? 0,
     sttChecked: stt?.checked ?? 0,
     sttOk: stt?.ok ?? 0,
     accuracy: decided ? Math.round((s.saved / decided) * 100) : null,

@@ -41,9 +41,11 @@ export interface PilotLog {
   edits?: string[];
   saved?: SavedBasket;
   stt_ok?: boolean;
+  /** 'pick' = chosen on ছবি দেখে: no speech, no parse, nothing to evaluate. */
+  via?: 'pick';
 }
 
-export type SkipReason = 'not_saved' | 'no_transcript' | 'stt_wrong' | 'no_result';
+export type SkipReason = 'not_saved' | 'no_transcript' | 'stt_wrong' | 'no_result' | 'picked';
 export type Converted = { fixture: Fixture } | { skip: SkipReason };
 
 const TABS: readonly Tab[] = ['sale', 'purchase', 'ledger', 'stock', 'expense'] as Tab[];
@@ -92,6 +94,7 @@ function reviewFromUnsupported(log: PilotLog, text: string): Converted {
 }
 
 export function fixtureFromLog(log: PilotLog): Converted {
+  if (log.via === 'pick') return { skip: 'picked' };
   const text = log.transcript?.trim();
   const unsupported = log.outcome === 'unsupported' && log.parsed?.intent !== 'sale';
   if (!unsupported && log.outcome !== 'saved' && log.outcome !== 'saved_edited') return { skip: 'not_saved' };

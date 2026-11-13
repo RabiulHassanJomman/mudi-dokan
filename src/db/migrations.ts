@@ -191,8 +191,20 @@ ALTER TABLE sales ADD COLUMN line_no INTEGER;                -- 1, 2, 3 … with
 ALTER TABLE voice_logs ADD COLUMN stt_ok INTEGER CHECK (stt_ok IS NULL OR stt_ok IN (0,1));
 `;
 
+/**
+ * v5 (build step 3): the shop's name (one row, id 'shop', so every phone's copy merges on
+ * sync), and voice_logs.via = 'pick' for ছবি দেখে entries (kept out of the parser accuracy).
+ * The opening cash from Setup is a day_close 'opening' entry (table from v1).
+ */
+const V5 = `
+CREATE TABLE shop (
+  name TEXT NOT NULL,${ROW}
+);
+ALTER TABLE voice_logs ADD COLUMN via TEXT CHECK (via IS NULL OR via IN ('pick'));
+`;
+
 /** Index i holds the SQL that takes the DB from user_version i to i + 1. */
-export const MIGRATIONS: readonly string[] = [V1, V2, V3, V4];
+export const MIGRATIONS: readonly string[] = [V1, V2, V3, V4, V5];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;
 

@@ -40,7 +40,7 @@ const seenIds = new Set(existing.map((f) => f.pilot_id).filter(Boolean));
 
 const logs = files.flatMap((f) => readPilotLogs(readFileSync(f, 'utf8')));
 const added: Fixture[] = [];
-const skipped: Record<SkipReason | 'duplicate', number> = { not_saved: 0, no_transcript: 0, stt_wrong: 0, no_result: 0, duplicate: 0 };
+const skipped: Record<SkipReason | 'duplicate', number> = { not_saved: 0, no_transcript: 0, stt_wrong: 0, no_result: 0, picked: 0, duplicate: 0 };
 for (const log of logs) {
   const r = fixtureFromLog(log);
   if ('skip' in r) {

@@ -148,12 +148,28 @@ export default function ListeningScreen() {
       )}
 
       {phase === 'error' ? (
-        <Pressable accessibilityRole="button" onPress={() => void start()} style={styles.action}>
-          <Icon name="mic" size={32} color={colors.listening.bg} />
-          <Txt size={fontSize.listAmount} weight="bold" color={colors.listening.bg}>
-            আবার বলুন
-          </Txt>
-        </Pressable>
+        <>
+          <Pressable accessibilityRole="button" onPress={() => void start()} style={styles.action}>
+            <Icon name="mic" size={32} color={colors.listening.bg} />
+            <Txt size={fontSize.listAmount} weight="bold" color={colors.listening.bg}>
+              আবার বলুন
+            </Txt>
+          </Pressable>
+          {/* voice failed: choose by picture (Pick) instead */}
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => {
+              closing.current = true;
+              router.replace('/pick');
+            }}
+            style={[styles.action, styles.actionAlt]}
+          >
+            <Icon name="image" size={30} color={colors.onColor} />
+            <Txt size={fontSize.listAmount} weight="bold" color={colors.onColor}>
+              ছবি দেখে বেছে নিন
+            </Txt>
+          </Pressable>
+        </>
       ) : (
         <Pressable
           accessibilityRole="button"
@@ -231,5 +247,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: spacing.md,
   },
+  actionAlt: { backgroundColor: colors.listening.close, marginTop: -spacing.md },
   stopSquare: { width: 24, height: 24, borderRadius: 4, backgroundColor: colors.listening.bg },
 });

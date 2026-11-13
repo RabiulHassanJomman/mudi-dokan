@@ -3,7 +3,26 @@ import Svg, { Circle, Path, Rect } from 'react-native-svg';
 /** Stroke icons from the design (24×24 viewBox, round caps). */
 export type IconName =
   | 'cart' | 'box' | 'book' | 'speaker' | 'mic' | 'keyboard'
-  | 'back' | 'plus' | 'minus' | 'check' | 'close' | 'cash' | 'play' | 'list';
+  | 'back' | 'plus' | 'minus' | 'check' | 'close' | 'cash' | 'play' | 'list'
+  | 'settings' | 'keypad' | 'arrow' | 'search' | 'image'
+  // product pictures (Pick.dc.html)
+  | 'rice' | 'dal' | 'oil' | 'sugar' | 'egg' | 'soap';
+
+/** Product name → its picture; anything else is a box. */
+const PRODUCT_ICONS: Readonly<Record<string, IconName>> = {
+  চাল: 'rice', চাউল: 'rice', ডাল: 'dal', তেল: 'oil', চিনি: 'sugar', ডিম: 'egg', সাবান: 'soap',
+};
+export const productIcon = (name: string): IconName =>
+  PRODUCT_ICONS[name.normalize('NFC')] ?? PRODUCT_ICONS[name.split(' ').at(-1) ?? ''] ?? 'box';
+
+const PRODUCT_PATHS: Partial<Record<IconName, string>> = {
+  rice: 'M7 4h10l-1 3c2 2 3 5 3 8a5 5 0 0 1-5 5h-4a5 5 0 0 1-5-5c0-3 1-6 3-8z M8 7h8',
+  dal: 'M3 11h18a9 9 0 0 1-18 0z M8 8a1 1 0 1 0 2 0a1 1 0 1 0-2 0 M11 7a1 1 0 1 0 2 0a1 1 0 1 0-2 0 M14 8a1 1 0 1 0 2 0a1 1 0 1 0-2 0',
+  oil: 'M10 2h4v3l2 3v12a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2V8l2-3z M8 13h8',
+  sugar: 'M4 11h7v7H4z M13 11h7v7h-7z M8.5 4h7v7h-7z',
+  egg: 'M12 3c4 0 7 6 7 11a7 7 0 0 1-14 0c0-5 3-11 7-11z',
+  soap: 'M7 9h10a4 4 0 0 1 4 4v2a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4v-2a4 4 0 0 1 4-4z M6.5 5a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0-3 0 M12 4a1 1 0 1 0 2 0a1 1 0 1 0-2 0',
+};
 
 interface Props {
   name: IconName;
@@ -64,6 +83,30 @@ export function Icon({ name, size = 24, color, strokeWidth = 1.8 }: Props) {
       )}
       {name === 'play' && <Path d="M8 5v14l11-7z" fill={color} />}
       {name === 'list' && <Path {...p} d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />}
+      {PRODUCT_PATHS[name] && <Path {...p} d={PRODUCT_PATHS[name]} />}
+      {name === 'settings' && (
+        <>
+          <Circle {...p} cx={12} cy={12} r={3} />
+          <Path {...p} d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" />
+        </>
+      )}
+      {name === 'keypad' && (
+        <Path {...p} d="M5 4h.01M12 4h.01M19 4h.01M5 10h.01M12 10h.01M19 10h.01M5 16h.01M12 16h.01M19 16h.01M12 21h.01" strokeWidth={strokeWidth + 2} />
+      )}
+      {name === 'arrow' && <Path {...p} d="M5 12h14M13 6l6 6-6 6" />}
+      {name === 'search' && (
+        <>
+          <Circle {...p} cx={11} cy={11} r={7} />
+          <Path {...p} d="M20 20l-4-4" />
+        </>
+      )}
+      {name === 'image' && (
+        <>
+          <Rect {...p} x={3} y={4} width={18} height={16} rx={2} />
+          <Circle {...p} cx={9} cy={10} r={2} />
+          <Path {...p} d="M21 16l-5-5-9 9" />
+        </>
+      )}
       {name === 'keyboard' && (
         <>
           <Rect {...p} x={2} y={6} width={20} height={12} rx={2} />

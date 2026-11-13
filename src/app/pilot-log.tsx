@@ -11,6 +11,7 @@ import { pilotLog, pilotStats, setSttOk, wipePilotData, type Outcome, type Pilot
 import { getDevice, writer } from '../device';
 import { BUILD, buildLabel } from '../lib/buildInfo';
 import { formatNumber, toBnDigits } from '../lib/bn';
+import { speak } from '../lib/speak';
 import { useClipPlayer } from '../lib/useClipPlayer';
 import { colors, fontSize, radius, size, spacing } from '../theme/tokens';
 
@@ -102,6 +103,7 @@ export default function PilotLogScreen() {
         saved: r.final_json ? (JSON.parse(r.final_json) as unknown) : undefined,
         stt_error: r.stt_error ?? undefined,
         stt_ok: r.stt_ok === null ? undefined : r.stt_ok === 1,
+        via: r.via ?? undefined,
         has_audio: !!r.audio_path,
       })),
     };
@@ -117,6 +119,20 @@ export default function PilotLogScreen() {
         <Txt accessibilityRole="header" size={fontSize.heading} weight="bold" style={styles.flex}>
           পাইলট লগ
         </Txt>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="শুনুন"
+          onPress={() =>
+            void speak(
+              stats
+                ? `পাইলট লগ। মোট ${formatNumber(stats.total)}টি কমান্ড। ${stats.accuracy === null ? '' : `ঠিক বুঝেছে ${formatNumber(stats.accuracy)} শতাংশ।`}`
+                : 'পাইলট লগ।',
+            )
+          }
+          style={styles.speaker}
+        >
+          <Icon name="speaker" size={26} color={colors.onColor} strokeWidth={2} />
+        </Pressable>
         <Pressable accessibilityRole="button" onPress={() => void share()} style={styles.share}>
           <Txt size={fontSize.body} weight="bold" color={colors.onColor}>
             শেয়ার
@@ -136,6 +152,7 @@ export default function PilotLogScreen() {
             মোট {formatNumber(stats.total)} · ঠিক {formatNumber(stats.saved)} · ঠিক করে {formatNumber(stats.edited)} · বাতিল{' '}
             {formatNumber(stats.cancelled)} · অন্য কাজ {formatNumber(stats.unsupported)} · শোনা যায়নি{' '}
             {formatNumber(stats.sttError)}
+            {stats.picked > 0 ? ` · ছবি দেখে ${formatNumber(stats.picked)} (হিসাবে নেই)` : ''}
             {stats.sttChecked > 0 ? ` · শোনা ঠিক ${formatNumber(stats.sttOk)}/${formatNumber(stats.sttChecked)}` : ''}
           </Txt>
         </View>
@@ -193,7 +210,7 @@ export default function PilotLogScreen() {
                   {item.transcript ? `“${item.transcript}”` : `(${item.stt_error ?? 'কিছু না'})`}
                 </Txt>
                 <Txt wrap size={fontSize.caption} weight="medium" color={colors.muted}>
-                  {time(item.created_at)} · {item.source === 'typed' ? 'লেখা' : 'বলা'}
+                  {time(item.created_at)} · {item.via === 'pick' ? 'ছবি দেখে' : item.source === 'typed' ? 'লেখা' : 'বলা'}
                   {parsed?.intent ? ` · ${parsed.intent}` : ''}
                   {item.edits_json ? ` · বদল: ${(JSON.parse(item.edits_json) as string[]).join(', ')}` : ''}
                 </Txt>
@@ -244,6 +261,14 @@ const styles = StyleSheet.create({
     height: size.iconButton,
     borderRadius: radius.icon,
     backgroundColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  speaker: {
+    width: size.iconButton,
+    height: size.iconButton,
+    borderRadius: radius.pill,
+    backgroundColor: colors.dark,
     alignItems: 'center',
     justifyContent: 'center',
   },
