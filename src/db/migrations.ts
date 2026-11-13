@@ -174,8 +174,16 @@ ALTER TABLE voice_logs ADD COLUMN entry_id TEXT;
 ALTER TABLE sales ADD COLUMN cost_known INTEGER NOT NULL DEFAULT 1 CHECK (cost_known IN (0,1));
 `;
 
+/** v3: multi-item sales. Lines of one basket share basket_id; a credit basket has one baki row. */
+const V3 = `
+ALTER TABLE sales ADD COLUMN basket_id TEXT;
+CREATE INDEX sales_basket ON sales(basket_id);
+ALTER TABLE ledger ADD COLUMN basket_id TEXT;
+ALTER TABLE voice_logs ADD COLUMN final_json TEXT;        -- the saved lines (pilot log)
+`;
+
 /** Index i holds the SQL that takes the DB from user_version i to i + 1. */
-export const MIGRATIONS: readonly string[] = [V1, V2];
+export const MIGRATIONS: readonly string[] = [V1, V2, V3];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;
 

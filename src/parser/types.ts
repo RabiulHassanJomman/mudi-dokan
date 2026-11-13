@@ -25,6 +25,18 @@ export interface Quantity {
   unit?: Unit;
 }
 
+/** One line of a sale basket. Money in taka (the app converts to poisha). */
+export interface SaleItem {
+  product?: string;
+  quantity?: Quantity;
+  /** Price per `priceUnit` ("২০০ টাকা করে", "কেজি ৬০"), or total ÷ quantity. */
+  unitPrice?: number;
+  /** Unit the unitPrice is for; can differ from quantity.unit ("৫০০ গ্রাম, কেজি ৬০"). */
+  priceUnit?: Unit;
+  /** Line total: spoken ("২০০ টাকা"), or quantity × unitPrice. */
+  total?: number;
+}
+
 export type Field =
   | 'intent'
   | 'product'
@@ -48,6 +60,12 @@ export interface ParsedCommand {
   /** Free-text reason (owner_withdrawal, staff advance), e.g. "বাসার জন্য". */
   note?: string;
   quantity?: Quantity;
+  /**
+   * Sale lines, in spoken order. Always set for a sale; customer and credit apply
+   * to the whole basket. product/quantity are filled only for a one-item sale;
+   * amount is the basket total when every line has one.
+   */
+  items?: SaleItem[];
   /** Total taka: "১০০ টাকার চিনি", "২০০ টাকা বাকি", "চাল ২ কেজি ১২০ টাকা", "ভাড়া ২০০০". */
   amount?: number;
   /** Per-unit purchase price (purchase only). */

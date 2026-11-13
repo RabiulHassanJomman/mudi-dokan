@@ -1,8 +1,9 @@
+import { groupItems, type Slot } from './items';
 import * as K from './keywords';
 import { tokenize } from './normalize';
 import { parseNumber } from './numbers';
-import type { Field, Intent, ParseContext, ParsedCommand, Quantity } from './types';
-import { parseUnit } from './units';
+import type { Field, Intent, ParseContext, ParsedCommand, Quantity, SaleItem } from './types';
+import { parseUnit, type UnitMatch } from './units';
 import { nfc } from './util';
 
 /** Expense item for cash a staff member takes for themselves. */
@@ -34,6 +35,44 @@ const customerName = (ts: readonly string[]): string | undefined => {
 interface KnownHit {
   match: string;
   rest: string[];
+}
+
+/** Positions in `names` covered by any known name (longest first, no overlaps). */
+function knownPositions(names: readonly string[], known: readonly string[] | undefined): Set<number> {
+  const covered = new Set<number>();
+  if (!known?.length) return covered;
+  const candidates = known
+    .map((k) => tokenize(k).map(stripGenitive))
+    .filter((k) => k.length > 0)
+    .sort((a, b) => b.length - a.length);
+  for (const k of candidates) {
+    for (let s = 0; s + k.length <= names.length; s++) {
+      const span = k.map((_, o) => s + o);
+      if (span.some((p) => covered.has(p))) continue;
+      if (k.every((t, o) => names[s + o] === t)) span.forEach((p) => covered.add(p));
+    }
+  }
+  return covered;
+}
+
+/** First known name (longest first) in `names`, skipping `exclude`d positions: [start, length]. */
+function knownSpan(
+  names: readonly string[],
+  known: readonly string[] | undefined,
+  exclude: ReadonlySet<number>,
+): [number, number] | null {
+  if (!known?.length) return null;
+  const candidates = known
+    .map((k) => tokenize(k).map(stripGenitive))
+    .filter((k) => k.length > 0)
+    .sort((a, b) => b.length - a.length);
+  for (const k of candidates) {
+    for (let s = 0; s + k.length <= names.length; s++) {
+      if (k.some((_, o) => exclude.has(s + o))) continue;
+      if (k.every((t, o) => names[s + o] === t)) return [s, k.length];
+    }
+  }
+  return null;
 }
 
 /** Find the longest known name appearing as contiguous tokens in `names`. */
@@ -79,6 +118,71 @@ function priceMarkerBefore(tokens: readonly string[], used: boolean[], i: number
   return kind;
 }
 
+/**
+ * Per-unit price around the number at tokens[i..end):
+ *   "২০০ টাকা করে", "২০০ করে", "২০০ টাকা প্রতি কেজি", "২০০ টাকা কেজি",
+ *   "কেজি ২০০", "প্রতি কেজি ২০০", "কেজি প্রতি ২০০".
+ * Marks the marker words used. Returns the price's unit (if said) and where scanning resumes.
+ */
+function perUnitPrice(
+  tokens: readonly string[],
+  used: boolean[],
+  i: number,
+  end: number,
+): { unit?: UnitMatch; next: number } | null {
+  const tok = (k: number) => (k >= 0 && k < tokens.length && !used[k] ? tokens[k] : undefined);
+  const marks: number[] = [];
+  let after = end;
+  const money = tok(after);
+  const moneyAfter = money !== undefined && K.MONEY.has(money);
+  if (moneyAfter) {
+    marks.push(after);
+    after++;
+  }
+  let unit: UnitMatch | undefined;
+  let hit = false;
+
+  const a = tok(after);
+  if (a !== undefined && K.EACH.has(a)) {
+    hit = true;
+    marks.push(after++);
+  } else if (a !== undefined && K.PER.has(a)) {
+    hit = true;
+    marks.push(after++);
+    const u = tok(after);
+    const um = u !== undefined ? parseUnit(u) : null;
+    if (um) {
+      unit = um;
+      marks.push(after++);
+    }
+  } else if (moneyAfter && a !== undefined && parseUnit(a)) {
+    hit = true;
+    unit = parseUnit(a) ?? undefined;
+    marks.push(after++);
+  }
+
+  const b1 = tok(i - 1);
+  const b2 = tok(i - 2);
+  if (b1 !== undefined && K.PER.has(b1)) {
+    hit = true;
+    marks.push(i - 1);
+    const um = b2 !== undefined ? parseUnit(b2) : null;
+    if (um && !unit) {
+      unit = um;
+      marks.push(i - 2);
+    }
+  } else if (b1 !== undefined && parseUnit(b1)) {
+    hit = true;
+    unit ??= parseUnit(b1) ?? undefined;
+    marks.push(i - 1);
+    if (b2 !== undefined && K.PER.has(b2)) marks.push(i - 2);
+  }
+
+  if (!hit) return null;
+  for (const m of marks) used[m] = true;
+  return { unit, next: after };
+}
+
 /** Drop undefined fields so results are easy to read and compare. */
 function compact(cmd: ParsedCommand): ParsedCommand {
   const out = { ...cmd } as Record<string, unknown>;
@@ -111,6 +215,9 @@ export function parseCommand(text: string, ctx: ParseContext = {}): ParsedComman
   let sellPrice: number | undefined;
   const prices: number[] = [];
   const bare: number[] = [];
+  const unitPrices: number[] = [];
+  /** Every number's role and position, for splitting a sale into lines. */
+  const events: Slot[] = [];
   let anyNumber = false;
 
   let i = 0;
@@ -129,8 +236,20 @@ export function parseCommand(text: string, ctx: ParseContext = {}): ParsedComman
     const unit = next !== undefined ? parseUnit(next) : null;
     if (unit) {
       used[end] = true;
-      quantity ??= { value: Math.round(num.value * unit.factor * 1e6) / 1e6, unit: unit.unit };
+      const q: Quantity = { value: Math.round(num.value * unit.factor * 1e6) / 1e6, unit: unit.unit };
+      quantity ??= q;
+      events.push({ at: i, kind: 'qty', q });
       i = end + 1;
+      continue;
+    }
+
+    const per = perUnitPrice(tokens, used, i, end);
+    if (per) {
+      // "পোয়া ২০" = ৳২০ per quarter kg = ৳৮০ per kg
+      const v = per.unit ? Math.round((num.value / per.unit.factor) * 100) / 100 : num.value;
+      unitPrices.push(v);
+      events.push({ at: i, kind: 'each', v, unit: per.unit?.unit });
+      i = per.next;
       continue;
     }
 
@@ -140,6 +259,8 @@ export function parseCommand(text: string, ctx: ParseContext = {}): ParsedComman
       if (marker === 'buy') buyPrice ??= num.value;
       else if (marker === 'sell') sellPrice ??= num.value;
       else prices.push(num.value);
+      // for a sale, "বিক্রি ১২০" / "দাম ১২০" is a line total
+      if (marker !== 'buy') events.push({ at: i, kind: 'total', v: num.value });
       i = nextIsMoney ? end + 1 : end;
       continue;
     }
@@ -147,6 +268,7 @@ export function parseCommand(text: string, ctx: ParseContext = {}): ParsedComman
     if (nextIsMoney) {
       used[end] = true;
       amount ??= num.value;
+      events.push({ at: i, kind: 'total', v: num.value });
       i = end + 1;
       continue;
     }
@@ -155,17 +277,25 @@ export function parseCommand(text: string, ctx: ParseContext = {}): ParsedComman
     if (prev !== undefined && !used[i - 1] && K.MONEY.has(prev)) {
       used[i - 1] = true; // "৳১০০" → "টাকা 100"
       amount ??= num.value;
+      events.push({ at: i, kind: 'total', v: num.value });
       i = end;
       continue;
     }
 
-    if (num.classifier) quantity ??= { value: num.value, unit: 'piece' };
-    else bare.push(num.value);
+    if (num.classifier) {
+      const q: Quantity = { value: num.value, unit: 'piece' };
+      quantity ??= q;
+      events.push({ at: i, kind: 'qty', q });
+    } else {
+      bare.push(num.value);
+      events.push({ at: i, kind: 'bare', v: num.value });
+    }
     i = end;
   }
 
   // ── names ──────────────────────────────────────────────────
-  const rawNames = tokens.filter((t, k) => !used[k] && !isNoise(t));
+  const namePos = tokens.map((_, k) => k).filter((k) => !used[k] && !isNoise(tokens[k]!));
+  const rawNames = namePos.map((k) => tokens[k]!);
   const names = rawNames.map(stripGenitive);
   const prodHit = matchKnown(names, ctx.knownProducts);
   const afterProd = prodHit ? prodHit.rest : names;
@@ -177,7 +307,7 @@ export function parseCommand(text: string, ctx: ParseContext = {}): ParsedComman
   const expenseHint = tokens.some(
     (t) => K.EXPENSE_HINT.has(t) || K.EXPENSE_HINT_SUFFIXES.some((s) => t.length > s.length && t.endsWith(s)),
   );
-  const hasMoney = amount !== undefined || bare.length > 0 || prices.length > 0;
+  const hasMoney = amount !== undefined || bare.length > 0 || prices.length > 0 || unitPrices.length > 0;
 
   // owner/family withdrawal: an owner name (or "নিলাম") + money, and no stronger keyword
   let ownerIdx = names.findIndex((t) => K.OWNER.has(t));
@@ -240,6 +370,10 @@ export function parseCommand(text: string, ctx: ParseContext = {}): ParsedComman
     if (intent === 'purchase') buyPrice ??= p;
     else amount ??= p;
   }
+  for (const p of unitPrices) {
+    if (intent === 'purchase') buyPrice ??= p;
+    else if (intent !== 'sale') amount ??= p;
+  }
   for (const b of bare) {
     if (isTrade && quantity === undefined && amount === undefined) quantity = { value: b };
     else amount ??= b;
@@ -250,6 +384,7 @@ export function parseCommand(text: string, ctx: ParseContext = {}): ParsedComman
   let product: string | undefined;
   let item: string | undefined;
   let customer: string | undefined;
+  let items: SaleItem[] | undefined;
   let person: string | undefined;
   let note: string | undefined;
   if (isOwner || staffAdvance) {
@@ -264,6 +399,50 @@ export function parseCommand(text: string, ctx: ParseContext = {}): ParsedComman
     customer = matchKnown(names, ctx.knownCustomers)?.match ?? customerName(names);
   } else if (intent === 'stock_query') {
     product = joinOrUndef(names);
+  } else if (intent === 'sale') {
+    // customer: a known customer, else (on credit) the first unknown name
+    const productAt = knownPositions(names, ctx.knownProducts);
+    const known = knownSpan(names, ctx.knownCustomers, productAt);
+    let custAt: number[] = [];
+    if (known) custAt = Array.from({ length: known[1] }, (_, o) => known[0] + o);
+    else if (credit) {
+      const free = names.map((_, n) => n).filter((n) => !productAt.has(n));
+      const adjacent = (a: number, b: number) => b === a + 1 && namePos[b] === namePos[a]! + 1;
+      if (free.length) custAt = [free[0]!];
+      // products are known: the customer is the whole first run of other names
+      if (productAt.size) {
+        for (let n = 1; n < free.length && adjacent(free[n - 1]!, free[n]!); n++) custAt.push(free[n]!);
+      }
+    }
+    const custNames = custAt.map((n) => names[n]!);
+    customer = !custNames.length ? undefined : known ? custNames.join(' ') : customerName(custNames);
+
+    // product names: runs of adjacent leftover tokens, minus the customer
+    const slots: Slot[] = [...events];
+    let run: number[] = [];
+    const flushRun = () => {
+      if (run.length) slots.push({ at: namePos[run[0]!]!, kind: 'name', text: run.map((n) => names[n]).join(' ') });
+      run = [];
+    };
+    names.forEach((_, n) => {
+      if (custAt.includes(n)) return flushRun();
+      if (run.length && namePos[n] !== namePos[run[run.length - 1]!]! + 1) flushRun();
+      run.push(n);
+    });
+    flushRun();
+
+    items = groupItems(slots);
+    if (items.length === 1) {
+      product = items[0]!.product;
+      quantity = items[0]!.quantity;
+      amount = items[0]!.total;
+    } else {
+      product = undefined;
+      quantity = undefined;
+      amount = items.length && items.every((it) => it.total !== undefined)
+        ? Math.round(items.reduce((sum, it) => sum + it.total!, 0) * 100) / 100
+        : undefined;
+    }
   } else if (isTrade) {
     product = prodHit?.match;
     customer = custHit?.match;
@@ -280,11 +459,13 @@ export function parseCommand(text: string, ctx: ParseContext = {}): ParsedComman
   // ── missing fields ─────────────────────────────────────────
   const missing: Field[] = [];
   if (ledgerGuess) missing.push('intent');
-  if (isTrade) {
+  if (intent === 'sale' && items) {
+    if (!items.length || items.some((it) => !it.product)) missing.push('product');
+    if (credit && !customer) missing.push('customer');
+    if (!items.length || items.some((it) => !it.quantity && it.total === undefined)) missing.push('quantity');
+  } else if (isTrade) {
     if (!product) missing.push('product');
-    if (intent === 'sale' && credit && !customer) missing.push('customer');
-    if (intent === 'sale' && !quantity && amount === undefined) missing.push('quantity');
-    if (intent === 'purchase' && !quantity) missing.push('quantity');
+    if (!quantity) missing.push('quantity');
   }
   if (isLedger) {
     if (!customer) missing.push('customer');
@@ -316,6 +497,7 @@ export function parseCommand(text: string, ctx: ParseContext = {}): ParsedComman
     note,
     quantity,
     amount,
+    items,
     buyPrice: intent === 'purchase' ? buyPrice : undefined,
     sellPrice: intent === 'purchase' ? sellPrice : undefined,
     credit: credit || undefined,

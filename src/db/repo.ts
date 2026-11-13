@@ -3,7 +3,7 @@
  * small DB interface that expo-sqlite's SQLiteDatabase satisfies, so it is
  * tested on node:sqlite.
  */
-import type { ProductInfo, SaleDraft } from '../domain/saleDraft';
+import { basketSummary, type BasketDraft, type ProductInfo } from '../domain/basket';
 import type { ParsedCommand, Unit } from '../parser/types';
 
 type Bind = string | number | null;
@@ -67,6 +67,16 @@ interface ProductRow {
   unit: Unit;
   sell_price_poisha: number | null;
   cost: number | null;
+}
+
+/** Each name that matches a product (by name or alias). Unknown names are left out. */
+export async function findProducts(db: Db, names: readonly string[]): Promise<Map<string, ProductInfo>> {
+  const found = new Map<string, ProductInfo>();
+  for (const name of new Set(names.filter(Boolean))) {
+    const p = await findProduct(db, name);
+    if (p) found.set(name, p);
+  }
+  return found;
 }
 
 /** By exact name or alias. Cost = weighted average buy price of effective purchases. */
@@ -139,6 +149,7 @@ export interface VoiceLogRow {
   stt_error: string | null;
   outcome: Outcome;
   edits_json: string | null;
+  final_json: string | null;
   entry_table: string | null;
   entry_id: string | null;
   created_at: number;
@@ -157,13 +168,14 @@ export async function setOutcome(
   w: Writer,
   id: string,
   outcome: Exclude<Outcome, 'pending'>,
-  extra: { edits?: string[]; entryTable?: string; entryId?: string } = {},
+  extra: { edits?: string[]; final?: unknown; entryTable?: string; entryId?: string } = {},
 ): Promise<void> {
   await db.runAsync(
-    `UPDATE voice_logs SET outcome = ?, edits_json = ?, entry_table = ?, entry_id = ?, updated_at = ?
+    `UPDATE voice_logs SET outcome = ?, edits_json = ?, final_json = ?, entry_table = ?, entry_id = ?, updated_at = ?
      WHERE id = ? AND outcome = 'pending'`,
     outcome,
     extra.edits?.length ? JSON.stringify(extra.edits) : null,
+    extra.final !== undefined ? JSON.stringify(extra.final) : null,
     extra.entryTable ?? null,
     extra.entryId ?? null,
     w.now(),
@@ -174,91 +186,118 @@ export async function setOutcome(
 // ── sale ───────────────────────────────────────────────────────
 
 /**
- * Saves a confirmed sale in one transaction: the product (if new), the
- * customer and a baki ledger row (if on credit), the sale, and the log outcome.
+ * Saves a confirmed basket in one transaction: new products (once per name),
+ * one sale row per line sharing basket_id and voice_log_id, the customer and
+ * one baki ledger row for the basket total (if on credit), and the log outcome.
+ * Returns the basket id.
  */
-export async function saveSale(
+export async function saveBasket(
   db: Db,
   w: Writer,
-  d: SaleDraft,
+  b: BasketDraft,
   voiceLogId: string,
   edits: string[],
 ): Promise<string> {
-  if (d.problems.length || !d.productName || d.quantity === null || d.pricePoisha === null || d.amountPoisha === null) {
-    throw new Error(`sale draft is not complete: ${d.problems.join(', ')}`);
+  if (b.problems.length || b.totalPoisha === null) {
+    throw new Error(`basket is not complete: ${b.problems.join(', ')}`);
   }
-  const saleId = w.newId();
+  const basketId = w.newId();
   await db.withTransactionAsync(async () => {
-    let productId = d.product?.id;
-    if (!productId) {
-      productId = w.newId();
-      await insert(db, 'products', {
-        id: productId,
-        name: d.productName,
-        unit: d.unit,
-        sell_price_poisha: d.pricePoisha,
-        ...rowCols(w),
+    const created = new Map<string, string>();
+    const customerId = b.credit && b.customerName ? await findOrCreateCustomer(db, w, b.customerName) : null;
+    const entry = () => ({ voice_log_id: voiceLogId, device_name: w.deviceName, ...rowCols(w) });
+    let firstSaleId: string | null = null;
+
+    for (const it of b.items) {
+      if (!it.productName || it.quantity === null || it.pricePoisha === null || it.amountPoisha === null) {
+        throw new Error(`basket line ${it.key} is not complete`);
+      }
+      let productId = it.product?.id ?? created.get(it.productName);
+      if (!productId) {
+        productId = w.newId();
+        created.set(it.productName, productId);
+        await insert(db, 'products', {
+          id: productId,
+          name: it.productName,
+          unit: it.unit,
+          sell_price_poisha: it.pricePoisha,
+          ...rowCols(w),
+        });
+      }
+      const cost = it.product?.costPricePoisha ?? null;
+      const saleId = w.newId();
+      firstSaleId ??= saleId;
+      await insert(db, 'sales', {
+        id: saleId,
+        basket_id: basketId,
+        product_id: productId,
+        quantity: it.quantity,
+        spoken_unit: it.unit,
+        sell_price_poisha: it.pricePoisha,
+        amount_poisha: it.amountPoisha,
+        cost_price_poisha: cost ?? 0,
+        cost_known: cost === null ? 0 : 1,
+        credit: b.credit ? 1 : 0,
+        customer_id: customerId,
+        ...entry(),
       });
     }
-    const customerId = d.credit && d.customerName ? await findOrCreateCustomer(db, w, d.customerName) : null;
-    const cost = d.product?.costPricePoisha ?? null;
-    const entry = { voice_log_id: voiceLogId, device_name: w.deviceName, ...rowCols(w) };
-
-    await insert(db, 'sales', {
-      id: saleId,
-      product_id: productId,
-      quantity: d.quantity,
-      spoken_unit: d.unit,
-      sell_price_poisha: d.pricePoisha,
-      amount_poisha: d.amountPoisha,
-      cost_price_poisha: cost ?? 0,
-      cost_known: cost === null ? 0 : 1,
-      credit: d.credit ? 1 : 0,
-      customer_id: customerId,
-      ...entry,
-    });
     if (customerId) {
       await insert(db, 'ledger', {
         id: w.newId(),
         party_id: customerId,
         party_type: 'customer',
         kind: 'baki',
-        amount_poisha: d.amountPoisha,
-        sale_id: saleId,
-        ...entry,
+        amount_poisha: b.totalPoisha,
+        basket_id: basketId,
+        sale_id: b.items.length === 1 ? firstSaleId : null,
+        ...entry(),
       });
     }
     await setOutcome(db, w, voiceLogId, edits.length ? 'saved_edited' : 'saved', {
       edits,
+      final: basketSummary(b),
       entryTable: 'sales',
-      entryId: saleId,
+      entryId: basketId,
     });
   });
-  return saleId;
+  return basketId;
 }
 
-export interface RecentSale {
+export interface RecentBasket {
   id: string;
-  product: string;
+  /** "চাল, ডাল" */
+  products: string;
+  lines: number;
+  /** Only meaningful when lines = 1. */
   quantity: number;
   unit: Unit;
   amount_poisha: number;
   credit: number;
   customer: string | null;
-  voice_log_id: string | null;
   audio_path: string | null;
   created_at: number;
 }
 
-export const recentSales = (db: Db, limit = 3) =>
-  db.getAllAsync<RecentSale>(
-    `SELECT s.id, p.name AS product, s.quantity, p.unit, s.amount_poisha, s.credit,
-            c.name AS customer, s.voice_log_id, v.audio_path, s.created_at
-     FROM v_sales s
+/** Latest sales, one row per basket. */
+export const recentBaskets = (db: Db, limit = 3) =>
+  db.getAllAsync<RecentBasket>(
+    `SELECT COALESCE(s.basket_id, s.id) AS id,
+            GROUP_CONCAT(p.name, ', ') AS products,
+            COUNT(*) AS lines,
+            MIN(s.quantity) AS quantity,
+            MIN(p.unit) AS unit,
+            SUM(s.amount_poisha) AS amount_poisha,
+            MAX(s.credit) AS credit,
+            MAX(c.name) AS customer,
+            MAX(v.audio_path) AS audio_path,
+            MAX(s.created_at) AS created_at
+     FROM (SELECT * FROM v_sales ORDER BY created_at) s
      JOIN products p ON p.id = s.product_id
      LEFT JOIN customers c ON c.id = s.customer_id
      LEFT JOIN voice_logs v ON v.id = s.voice_log_id
-     ORDER BY s.created_at DESC LIMIT ?`,
+     GROUP BY COALESCE(s.basket_id, s.id)
+     ORDER BY created_at DESC LIMIT ?`,
     limit,
   );
 

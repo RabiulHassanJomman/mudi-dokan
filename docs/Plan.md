@@ -14,7 +14,7 @@ Decisions
 • Input: voice main, kintu user chaile type kore-o input dite parbe.
 Main features (MVP)
 1.  📦 Maal (inventory): "নতুন চাল ৫০ কেজি কেনা ৫৫ বেচা ৬০" bolle maal jog hobe kena ar becha dam soho. Maal age theke thakle stock barbe; kena dam bodlale average kena dam hisab hobe.
-2.  🛒 Bikri: "চাল ২ কেজি" bolle stock kombe ar ajker bikri te jog hobe. "১০০ টাকার চিনি" bolleo hobe, app nije poriman hisab korbe.
+2.  🛒 Bikri: "চাল ২ কেজি" bolle stock kombe ar ajker bikri te jog hobe. "১০০ টাকার চিনি" bolleo hobe, app nije poriman hisab korbe. Ek command e onek maal (basket): "করিম বাকিতে নিয়েছে দুই কেজি চাল ২০০ টাকা ৩ কেজি চাল ৪০০ টাকা ৫ কেজি তেল ৬০০ টাকা" — customer ar নগদ/বাকি puro basket er; eki maal dui bar thakle alada line. Dam: "২০০ টাকা করে", "কেজি ২০০", "প্রতি কেজি ২০০", "২০০ টাকা কেজি" = per unit (mot = poriman × dam); shudhu "২০০ টাকা" = oi line er mot.
 3.  📒 Baki khata: "করিম ২০০ টাকা বাকি" ba "করিম ১০০ জমা" diye hisab rakha jabe. "করিম চাল ১ কেজি বাকিতে নিল" bolle eki sathe bikri ar baki dutoi hobe.
 4.  Stock jana: "চাল কত আছে?" jiggesh korle app bole debe koto ache ar dam koto.
 5.  💰 Lav hisab: prottek bikri te sei somoyer kena dam save hobe. "আজ লাভ কত?" (ba "এই মাসে লাভ কত") er uttor e 4 ta jinish bolbe, ei kromey:
@@ -132,6 +132,7 @@ Status
 • Done: parser e `expense` intent (`item` + `amount`; "খরচ" shobdo, ba ভাড়া/বিল/বেতন/নাস্তা/মালিক + taka, ba tab = expense). `npm test` → 279 passing.
 • Done: Build step 1 — Expo SDK 58 dev build shell (src/app, expo-router), design token (src/theme/tokens.ts, Hind Siliguri embed), বিক্রি/মাল/বাকি tab bar + placeholder, SQLite schema v1 + migration (src/db, 22 test), app parser import kore (বিক্রি tab e "পার্সার পরীক্ষা" debug box ar DB status). `npm test` → 331 passing.
 • Done: build step 2 (Pixel 7 e type kora path test hoyeche; voice path user er test baki) — 🎤 → শুনছি (bn-BD STT, audio phone e save) → নিশ্চিত করুন (TTS readback, হ্যাঁ/না bola ba button, poriman +/−, নগদ/বাকি, notun maal er dam) → sale save (baki hole ledger row-o). "লিখুন" type kora command-o eki confirm card e jay. Home e আজ বিক্রি/আজ বাকি ar shesh 3 ta entry (▶️). Pilot log screen: shob command, ki holo, ▶️, accuracy % (target 80%), JSON share. `npm test` → 389 passing.
+• Done: multi-item sale + per-unit dam — parser items[] (unitPrice, priceUnit, total), confirm card e line list (± poriman, dam edit, ✕ bad, nicher মোট), bola dam stored dam theke 20% er beshi alada hole kamla highlight, TTS >4 line hole shudhu sonkha + mot. Schema v3: sales.basket_id, ledger.basket_id, voice_logs.final_json. `npm test` → 416 passing.
 • Next: dokane pilot (50–100 command) → log share → step 3 (Pick-by-picture) ar step 6 er parser fix.
 • Decisions log:
   – Test: Jest + ts-jest.
@@ -156,3 +157,6 @@ Status
   – Nov 13: Ei phone er device_id/naam/role expo-sqlite kv-store e (sync hoy na); Setup na howa porjonto naam "এই ফোন", role nei (= staff).
   – Nov 13: Audio clip app er document folder e (cache na), jate 30 din porjonto thake.
   – Nov 13: Android e Bangla text auto-width box e shesh shobdo hariye jay ("আজ বাকি" → "আজ"), tai Txt default ek line (wrap prop diye beshi line). TextInput e paddingVertical 0, na hole ি er matha kete jay.
+  – Nov 13: Sale = basket. Parser sale e shob somoy items[] dey (product, quantity, unitPrice, priceUnit, total); ek line hole top-level product/quantity/amount-o thake, beshi hole amount = basket mot (shob line e dam thakle). Line bhag: name / poriman / dam — ek line e prottek dhoron ekbar; abar ashle notun line. আর/এবং/সাথে/একই/একসাথে separator.
+  – Nov 13: Save: prottek line ekta sales row, shob row e eki basket_id ar voice_log_id; বাকি hole ledger e ekta baki row = basket mot (basket_id soho). Pilot log e final_json = save hoya line gulo, edits = "items[1].quantity", "items[0].removed" ityadi.
+  – Nov 13: Bola dam stored becha dam theke >20% alada hole confirm card e highlight (save atkay na).

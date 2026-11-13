@@ -8,33 +8,54 @@ export interface UnitMatch {
 }
 
 const UNITS = wordMap<UnitMatch>({
-  কেজি: { unit: 'kg', factor: 1 },
-  কিলো: { unit: 'kg', factor: 1 },
-  কিলোগ্রাম: { unit: 'kg', factor: 1 },
+  "কেজি": { unit: 'kg', factor: 1 },
+  "কিলো": { unit: 'kg', factor: 1 },
+  "কিলোগ্রাম": { unit: 'kg', factor: 1 },
   kg: { unit: 'kg', factor: 1 },
-  পোয়া: { unit: 'kg', factor: 0.25 },
-  গ্রাম: { unit: 'g', factor: 1 },
+  "পোয়া": { unit: 'kg', factor: 0.25 },
+  "গ্রাম": { unit: 'g', factor: 1 },
   g: { unit: 'g', factor: 1 },
   gm: { unit: 'g', factor: 1 },
-  লিটার: { unit: 'litre', factor: 1 },
+  "লিটার": { unit: 'litre', factor: 1 },
   litre: { unit: 'litre', factor: 1 },
   liter: { unit: 'litre', factor: 1 },
-  মিলি: { unit: 'ml', factor: 1 },
+  "মিলি": { unit: 'ml', factor: 1 },
   ml: { unit: 'ml', factor: 1 },
-  পিস: { unit: 'piece', factor: 1 },
-  পিচ: { unit: 'piece', factor: 1 },
+  "পিস": { unit: 'piece', factor: 1 },
+  "পিচ": { unit: 'piece', factor: 1 },
   pcs: { unit: 'piece', factor: 1 },
-  টা: { unit: 'piece', factor: 1 },
-  টি: { unit: 'piece', factor: 1 },
-  টো: { unit: 'piece', factor: 1 },
-  খানা: { unit: 'piece', factor: 1 },
-  প্যাকেট: { unit: 'packet', factor: 1 },
-  পেকেট: { unit: 'packet', factor: 1 },
-  ডজন: { unit: 'dozen', factor: 1 },
-  হালি: { unit: 'hali', factor: 1 },
-  বস্তা: { unit: 'bosta', factor: 1 },
+  "টা": { unit: 'piece', factor: 1 },
+  "টি": { unit: 'piece', factor: 1 },
+  "টো": { unit: 'piece', factor: 1 },
+  "খানা": { unit: 'piece', factor: 1 },
+  "প্যাকেট": { unit: 'packet', factor: 1 },
+  "পেকেট": { unit: 'packet', factor: 1 },
+  "ডজন": { unit: 'dozen', factor: 1 },
+  "হালি": { unit: 'hali', factor: 1 },
+  "বস্তা": { unit: 'bosta', factor: 1 },
 });
 
 export function parseUnit(token: string): UnitMatch | null {
   return UNITS.get(token) ?? null;
+}
+
+/** How many base units one unit is: kg/g share mass, litre/ml volume, dozen/hali/piece count. */
+const BASE: Readonly<Record<Unit, readonly [string, number]>> = {
+  kg: ['mass', 1000],
+  g: ['mass', 1],
+  litre: ['volume', 1000],
+  ml: ['volume', 1],
+  piece: ['count', 1],
+  hali: ['count', 4],
+  dozen: ['count', 12],
+  packet: ['packet', 1],
+  bosta: ['bosta', 1],
+};
+
+/** 500 g → 0.5 kg; 1 dozen → 12 piece. null when the units can't convert (kg ↔ piece). */
+export function convertUnit(value: number, from: Unit, to: Unit): number | null {
+  const [fk, fv] = BASE[from];
+  const [tk, tv] = BASE[to];
+  if (fk !== tk) return null;
+  return Math.round(((value * fv) / tv) * 1e6) / 1e6;
 }

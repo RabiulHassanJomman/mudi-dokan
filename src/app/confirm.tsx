@@ -7,19 +7,21 @@ import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-spe
 
 import { Icon } from '../components/Icon';
 import { Txt } from '../components/Txt';
-import { classifyAnswer } from '../domain/confirmWords';
 import {
+  basketFromParse,
   canSave,
-  diffDrafts,
-  draftFromParse,
+  diffBaskets,
   readback,
-  stepQuantity,
+  removeItem,
+  setItemPrice,
+  stepItem,
   withCredit,
   withCustomer,
-  withPrice,
-  type SaleDraft,
-} from '../domain/saleDraft';
-import { createVoiceLog, findProduct, getVoiceLog, knownNames, saveSale, setOutcome, setParsed } from '../db/repo';
+  type BasketDraft,
+  type ItemDraft,
+} from '../domain/basket';
+import { classifyAnswer } from '../domain/confirmWords';
+import { createVoiceLog, findProducts, getVoiceLog, knownNames, saveBasket, setOutcome, setParsed } from '../db/repo';
 import { getDevice, writer } from '../device';
 import { UNIT_BN, formatNumber, formatQty, formatTaka, parseTakaInput } from '../lib/bn';
 import { speak, stopSpeaking } from '../lib/speak';
@@ -44,22 +46,22 @@ const INTENT_BN: Record<Intent, string> = {
   unknown: 'বুঝিনি',
 };
 
-/** নিশ্চিত করুন: nothing is saved until হ্যাঁ (button or voice). */
+/** নিশ্চিত করুন: one row per item; nothing is saved until হ্যাঁ (button or voice). */
 export default function ConfirmScreen() {
   const db = useSQLiteContext();
   const params = useLocalSearchParams<{ logId?: string; text?: string; tab?: string }>();
   const tab = params.tab ?? 'sale';
 
   const [state, setState] = useState<State>({ kind: 'loading' });
-  const [draft, setDraft] = useState<SaleDraft | null>(null);
+  const [basket, setBasket] = useState<BasketDraft | null>(null);
   const [answering, setAnswering] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const logId = useRef<string | null>(null);
-  const first = useRef<SaleDraft | null>(null);
-  const latest = useRef<SaleDraft | null>(null);
+  const first = useRef<BasketDraft | null>(null);
+  const latest = useRef<BasketDraft | null>(null);
   const decided = useRef(false);
-  latest.current = draft;
+  latest.current = basket;
 
   // ── voice হ্যাঁ / না ───────────────────────────────────────────
   const listenForAnswer = useCallback(async () => {
@@ -75,10 +77,10 @@ export default function ConfirmScreen() {
   }, []);
 
   const sayAndListen = useCallback(
-    async (d: SaleDraft) => {
+    async (b: BasketDraft) => {
       stopListening();
-      await speak(readback(d));
-      if (canSave(d) && !decided.current) void listenForAnswer();
+      await speak(readback(b));
+      if (canSave(b) && !decided.current) void listenForAnswer();
     },
     [listenForAnswer, stopListening],
   );
@@ -91,7 +93,7 @@ export default function ConfirmScreen() {
   });
   useSpeechRecognitionEvent('end', () => setAnswering(false));
 
-  // ── load: log row → parse → product → draft ────────────────────
+  // ── load: log row → parse → products → basket ──────────────────
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -123,12 +125,12 @@ export default function ConfirmScreen() {
         void speak('এখন শুধু বিক্রি রাখা যায়।');
         return;
       }
-      const product = parsed.product ? await findProduct(db, parsed.product) : null;
-      const d = draftFromParse(parsed, product);
-      first.current = d;
-      setDraft(d);
+      const products = await findProducts(db, (parsed.items ?? []).map((i) => i.product ?? ''));
+      const b = basketFromParse(parsed, products);
+      first.current = b;
+      setBasket(b);
       setState({ kind: 'ready', transcript });
-      void sayAndListen(d);
+      void sayAndListen(b);
     })();
     return () => {
       alive = false;
@@ -151,24 +153,24 @@ export default function ConfirmScreen() {
   const leave = () => (router.canGoBack() ? router.back() : router.replace('/'));
 
   async function onYes() {
-    const d = latest.current;
-    if (!d || !logId.current || decided.current || saving) return;
+    const b = latest.current;
+    if (!b || !logId.current || decided.current || saving) return;
     stopListening();
-    if (!canSave(d)) {
-      void speak(readback(d));
+    if (!canSave(b)) {
+      void speak(readback(b));
       return;
     }
     setSaving(true);
     decided.current = true;
     try {
-      await saveSale(db, writer(), d, logId.current, first.current ? diffDrafts(first.current, d) : []);
+      await saveBasket(db, writer(), b, logId.current, first.current ? diffBaskets(first.current, b) : []);
       void speak('রাখা হয়েছে।');
       leave();
     } catch (e) {
       decided.current = false;
       setSaving(false);
       void speak('রাখা গেল না।');
-      console.warn('saveSale failed', e);
+      console.warn('saveBasket failed', e);
     }
   }
 
@@ -181,9 +183,9 @@ export default function ConfirmScreen() {
     leave();
   }
 
-  const edit = (next: SaleDraft) => {
+  const edit = (next: BasketDraft) => {
     stopListening();
-    setDraft(next);
+    setBasket(next);
   };
 
   const again = () => {
@@ -199,10 +201,10 @@ export default function ConfirmScreen() {
         <Pressable accessibilityRole="button" accessibilityLabel="ফিরে যান" onPress={() => void onNo()} style={styles.back}>
           <Icon name="back" size={26} color={colors.ink} strokeWidth={2.2} />
         </Pressable>
-        {draft && (
+        {basket && (
           <Pressable
             accessibilityRole="button"
-            onPress={() => void sayAndListen(draft)}
+            onPress={() => void sayAndListen(basket)}
             style={({ pressed }) => [styles.listen, pressed && styles.pressed]}
           >
             <Icon name="speaker" size={26} color={colors.onColor} strokeWidth={2} />
@@ -223,21 +225,62 @@ export default function ConfirmScreen() {
         <Unsupported transcript={state.transcript} intent={state.intent} onAgain={again} onClose={leave} />
       )}
 
-      {state.kind === 'ready' && draft && (
+      {state.kind === 'ready' && basket && (
         <>
           <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
             <Heard text={state.transcript} />
-            {draft.problems.includes('no_product') ? (
+            {basket.items.length === 0 ? (
               <View style={styles.card}>
-                <Txt size={fontSize.headingLg} weight="bold" style={styles.center}>
-                  মালের নাম বুঝিনি
+                <Txt wrap size={fontSize.headingLg} weight="bold" style={styles.center}>
+                  কিছু বুঝিনি
                 </Txt>
                 <BigButton label="আবার বলুন" icon="mic" bg={colors.sale} ink={colors.onColor} onPress={again} />
               </View>
             ) : (
-              <SaleCard draft={draft} onEdit={edit} />
+              basket.items.map((it) => (
+                <ItemRow
+                  key={it.key}
+                  item={it}
+                  onStep={(dir) => edit(stepItem(basket, it.key, dir))}
+                  onPrice={(p) => edit(setItemPrice(basket, it.key, p))}
+                  onRemove={() => edit(removeItem(basket, it.key))}
+                />
+              ))
+            )}
+
+            <View accessibilityRole="radiogroup" accessibilityLabel="নগদ না বাকি" style={styles.toggleRow}>
+              <Toggle
+                label="নগদ"
+                icon="cash"
+                active={!basket.credit}
+                activeBorder={colors.sale}
+                activeBg={colors.saleTint}
+                ink={colors.saleDark}
+                onPress={() => edit(withCredit(basket, false))}
+              />
+              <Toggle
+                label="বাকি"
+                icon="book"
+                active={basket.credit}
+                activeBorder={colors.baki}
+                activeBg={colors.bakiTint}
+                ink={colors.bakiInk}
+                onPress={() => edit(withCredit(basket, true))}
+              />
+            </View>
+            {basket.credit && (
+              <CustomerInput initial={basket.customerName ?? ''} onChange={(t) => edit(withCustomer(basket, t))} />
             )}
           </ScrollView>
+
+          <View style={styles.totalBar}>
+            <Txt size={fontSize.body} weight="semibold" color={colors.onDarkMuted} style={styles.flex}>
+              মোট{basket.items.length > 1 ? ` (${formatNumber(basket.items.length)}টি)` : ''}
+            </Txt>
+            <Txt size={fontSize.amount} weight="bold" color={colors.onColor}>
+              {basket.totalPoisha !== null ? formatTaka(basket.totalPoisha) : '৳ ?'}
+            </Txt>
+          </View>
 
           {answering && (
             <Txt size={fontSize.body} weight="bold" color={colors.saleDark} style={styles.center}>
@@ -259,13 +302,9 @@ export default function ConfirmScreen() {
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="হ্যাঁ"
-              accessibilityState={{ disabled: !canSave(draft) || saving }}
+              accessibilityState={{ disabled: !canSave(basket) || saving }}
               onPress={() => void onYes()}
-              style={({ pressed }) => [
-                styles.yes,
-                (!canSave(draft) || saving) && styles.disabled,
-                pressed && styles.pressed,
-              ]}
+              style={({ pressed }) => [styles.yes, (!canSave(basket) || saving) && styles.disabled, pressed && styles.pressed]}
             >
               <Icon name="check" size={40} color={colors.onColor} strokeWidth={2.8} />
               <Txt size={fontSize.button} weight="bold" color={colors.onColor}>
@@ -287,117 +326,112 @@ function Heard({ text }: { text: string }) {
   );
 }
 
-function SaleCard({ draft, onEdit }: { draft: SaleDraft; onEdit: (d: SaleDraft) => void }) {
-  const [priceText, setPriceText] = useState('');
-  const [customerText, setCustomerText] = useState(draft.customerName ?? '');
-  // decided once: if the card opened without a price, the price field stays while typing
-  const [askPrice] = useState(() => draft.problems.includes('no_price'));
-  const tile = (draft.productName && productTiles[draft.productName]) || colors.neutralTint;
+/** One basket line: name, line total, ✕ / − qty + / editable unit price. */
+function ItemRow(props: {
+  item: ItemDraft;
+  onStep: (dir: 1 | -1) => void;
+  onPrice: (pricePoisha: number) => void;
+  onRemove: () => void;
+}) {
+  const { item } = props;
+  const [priceText, setPriceText] = useState(item.pricePoisha !== null ? formatPriceInput(item.pricePoisha) : '');
+  const tile = (item.productName && productTiles[item.productName]) || colors.neutralTint;
+  const unitBn = UNIT_BN[item.unit];
+  const stored = item.product?.sellPricePoisha ?? null;
 
   return (
-    <>
-      <View style={styles.card}>
-        <View style={[styles.productTile, { backgroundColor: tile }]}>
-          <Icon name="box" size={64} color={colors.ink} strokeWidth={1.4} />
+    <View style={[styles.row, item.problems.length > 0 && styles.rowProblem]}>
+      <View style={styles.rowTop}>
+        <View style={[styles.rowTile, { backgroundColor: tile }]}>
+          <Icon name="box" size={26} color={colors.ink} strokeWidth={1.6} />
         </View>
-        <View style={styles.nameRow}>
-          <Txt size={fontSize.amount} weight="bold">
-            {draft.productName}
+        <View style={styles.flex}>
+          <Txt size={fontSize.button} weight="bold">
+            {item.productName ?? 'নাম বুঝিনি'}
           </Txt>
-          {!draft.product && (
-            <View style={styles.newBadge}>
-              <Txt size={fontSize.caption} weight="bold" color={colors.stock}>
-                নতুন মাল
-              </Txt>
-            </View>
+          {!item.product && item.productName && (
+            <Txt size={fontSize.caption} weight="bold" color={colors.stock}>
+              নতুন মাল
+            </Txt>
           )}
         </View>
-
-        <View style={styles.stepper}>
-          <StepButton icon="minus" label="কমান" onPress={() => onEdit(stepQuantity(draft, -1))} />
-          <Txt size={fontSize.amountLg} weight="bold" style={styles.qty}>
-            {draft.quantity ? formatQty(draft.quantity, draft.unit) : `? ${UNIT_BN[draft.unit]}`}
-          </Txt>
-          <StepButton icon="plus" label="বাড়ান" onPress={() => onEdit(stepQuantity(draft, 1))} />
-        </View>
-
-        {askPrice && (
-          <View style={styles.inputRow}>
-            <Txt size={fontSize.label} weight="bold">
-              প্রতি {UNIT_BN[draft.unit]} দাম ৳
-            </Txt>
-            <TextInput
-              value={priceText}
-              onChangeText={(t) => {
-                setPriceText(t);
-                const v = parseTakaInput(t);
-                if (v) onEdit(withPrice(draft, v));
-              }}
-              keyboardType="numeric"
-              accessibilityLabel={`প্রতি ${UNIT_BN[draft.unit]} দাম`}
-              placeholder="০"
-              placeholderTextColor={colors.muted}
-              style={[styles.input, styles.priceInput]}
-            />
-          </View>
-        )}
-        {draft.amountPoisha !== null && draft.pricePoisha !== null && (
-          <Txt size={fontSize.hero} weight="bold" color={colors.sale}>
-            {formatTaka(draft.amountPoisha)}
-          </Txt>
-        )}
-        {draft.pricePoisha !== null && draft.quantity !== null && draft.quantity !== 1 && (
-          <Txt size={fontSize.captionLg} weight="medium" color={colors.muted}>
-            প্রতি {UNIT_BN[draft.unit]} {formatNumber(draft.pricePoisha / 100)} টাকা
-          </Txt>
-        )}
-        {draft.problems.includes('unit_mismatch') && (
-          <Txt wrap size={fontSize.body} weight="bold" color={colors.bakiInk} style={styles.center}>
-            {draft.productName} {UNIT_BN[draft.unit]}-এ বিক্রি হয়। পরিমাণ ঠিক করুন।
-          </Txt>
-        )}
+        <Txt size={fontSize.listAmount} weight="bold" color={colors.sale}>
+          {item.amountPoisha !== null ? formatTaka(item.amountPoisha) : '৳ ?'}
+        </Txt>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`${item.productName ?? 'এটা'} বাদ দিন`}
+          onPress={props.onRemove}
+          style={({ pressed }) => [styles.remove, pressed && styles.pressed]}
+        >
+          <Icon name="close" size={22} color={colors.ink2} strokeWidth={2.4} />
+        </Pressable>
       </View>
 
-      <View accessibilityRole="radiogroup" accessibilityLabel="নগদ না বাকি" style={styles.toggleRow}>
-        <Toggle
-          label="নগদ"
-          icon="cash"
-          active={!draft.credit}
-          activeBorder={colors.sale}
-          activeBg={colors.saleTint}
-          ink={colors.saleDark}
-          onPress={() => onEdit(withCredit(draft, false))}
+      <View style={styles.rowBottom}>
+        <StepButton icon="minus" label="কমান" onPress={() => props.onStep(-1)} />
+        <Txt size={fontSize.label} weight="bold" style={styles.qty}>
+          {item.quantity ? formatQty(item.quantity, item.unit) : `? ${unitBn}`}
+        </Txt>
+        <StepButton icon="plus" label="বাড়ান" onPress={() => props.onStep(1)} />
+        <View style={styles.flex} />
+        <Txt size={fontSize.body} weight="bold" color={colors.ink2}>
+          ৳
+        </Txt>
+        <TextInput
+          value={priceText}
+          onChangeText={(t) => {
+            setPriceText(t);
+            const v = parseTakaInput(t);
+            if (v) props.onPrice(v);
+          }}
+          keyboardType="numeric"
+          accessibilityLabel={`${item.productName ?? ''} প্রতি ${unitBn} দাম`}
+          placeholder="দাম"
+          placeholderTextColor={colors.muted}
+          style={[styles.input, styles.priceInput, item.priceWarning && styles.priceWarn]}
         />
-        <Toggle
-          label="বাকি"
-          icon="book"
-          active={draft.credit}
-          activeBorder={colors.baki}
-          activeBg={colors.bakiTint}
-          ink={colors.bakiInk}
-          onPress={() => onEdit(withCredit(draft, true))}
-        />
+        <Txt size={fontSize.captionLg} weight="medium" color={colors.muted}>
+          /{unitBn}
+        </Txt>
       </View>
 
-      {draft.credit && (
-        <View style={styles.inputRow}>
-          <Txt size={fontSize.label} weight="bold" color={colors.bakiInk}>
-            কার বাকি?
-          </Txt>
-          <TextInput
-            value={customerText}
-            onChangeText={(t) => {
-              setCustomerText(t);
-              onEdit(withCustomer(draft, t));
-            }}
-            accessibilityLabel="ক্রেতার নাম"
-            placeholder="নাম"
-            placeholderTextColor={colors.muted}
-            style={[styles.input, styles.flex]}
-          />
-        </View>
+      {item.priceWarning && stored !== null && (
+        <Txt wrap size={fontSize.captionLg} weight="bold" color={colors.bakiInk}>
+          সাধারণত {formatTaka(stored)}/{unitBn} — দাম ঠিক আছে তো?
+        </Txt>
       )}
-    </>
+      {item.problems.includes('unit_mismatch') && (
+        <Txt wrap size={fontSize.captionLg} weight="bold" color={colors.bakiInk}>
+          {item.productName} {unitBn}-এ বিক্রি হয়। পরিমাণ ঠিক করুন।
+        </Txt>
+      )}
+    </View>
+  );
+}
+
+/** 6000 poisha → "60", 13333 → "133.33" (ASCII so the numeric keyboard can edit it). */
+const formatPriceInput = (p: number) => String(Math.round(p) / 100);
+
+function CustomerInput({ initial, onChange }: { initial: string; onChange: (t: string) => void }) {
+  const [text, setText] = useState(initial);
+  return (
+    <View style={styles.inputRow}>
+      <Txt size={fontSize.label} weight="bold" color={colors.bakiInk}>
+        কার বাকি?
+      </Txt>
+      <TextInput
+        value={text}
+        onChangeText={(t) => {
+          setText(t);
+          onChange(t);
+        }}
+        accessibilityLabel="ক্রেতার নাম"
+        placeholder="নাম"
+        placeholderTextColor={colors.muted}
+        style={[styles.input, styles.flex]}
+      />
+    </View>
   );
 }
 
@@ -409,7 +443,7 @@ function StepButton({ icon, label, onPress }: { icon: 'plus' | 'minus'; label: s
       onPress={onPress}
       style={({ pressed }) => [styles.step, pressed && styles.pressed]}
     >
-      <Icon name={icon} size={30} color={colors.ink} strokeWidth={2.6} />
+      <Icon name={icon} size={24} color={colors.ink} strokeWidth={2.6} />
     </Pressable>
   );
 }
@@ -435,8 +469,8 @@ function Toggle(props: {
           : { borderColor: colors.divider, backgroundColor: colors.surface },
       ]}
     >
-      <Icon name={props.icon} size={36} color={props.ink} />
-      <Txt size={21} weight="bold" color={props.ink}>
+      <Icon name={props.icon} size={30} color={props.ink} />
+      <Txt size={fontSize.label} weight="bold" color={props.ink}>
         {props.label}
       </Txt>
     </Pressable>
@@ -477,7 +511,7 @@ function Unsupported(props: { transcript: string; intent: Intent; onAgain: () =>
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.bg, padding: spacing.screen, paddingBottom: 18, gap: spacing.lg },
+  screen: { flex: 1, backgroundColor: colors.bg, padding: spacing.screen, paddingBottom: 18, gap: spacing.md },
   top: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   back: {
     width: size.iconButton,
@@ -496,8 +530,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.xs,
   },
-  body: { gap: spacing.lg, paddingBottom: spacing.md },
+  body: { gap: spacing.sm, paddingBottom: spacing.md },
   center: { textAlign: 'center' },
+  flex: { flex: 1 },
   card: {
     backgroundColor: colors.surface,
     borderRadius: radius.hero,
@@ -506,59 +541,77 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.md,
   },
-  productTile: {
-    width: 112,
-    height: 112,
-    borderRadius: radius.productHero,
+  row: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.card,
+    padding: spacing.sm,
+    gap: spacing.xs,
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  rowProblem: { borderColor: colors.bakiBorder },
+  rowTop: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  rowTile: { width: 44, height: 44, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' },
+  remove: {
+    width: size.minTouch,
+    height: size.minTouch,
+    borderRadius: radius.sm,
+    backgroundColor: colors.bg,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  nameRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  newBadge: { backgroundColor: colors.stockTint, borderRadius: radius.pill, paddingHorizontal: 10, paddingVertical: 2 },
-  stepper: { flexDirection: 'row', alignItems: 'center', gap: spacing.lg },
+  rowBottom: { flexDirection: 'row', alignItems: 'center', gap: spacing.xxs },
   step: {
-    width: size.stepper,
-    height: size.stepper,
-    borderRadius: radius.card,
+    width: size.minTouch + 4,
+    height: size.minTouch + 4,
+    borderRadius: radius.sm,
     borderWidth: 2,
     borderColor: colors.border,
     backgroundColor: colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  qty: { minWidth: 120, textAlign: 'center' },
+  qty: { minWidth: 76, textAlign: 'center' },
   inputRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   input: {
-    height: size.iconButton,
+    height: size.minTouch + 4,
     // Android's default input padding clips tall Bangla vowel signs (ি looks like া)
     paddingVertical: 0,
     textAlignVertical: 'center',
     includeFontPadding: true,
     borderWidth: 2,
     borderColor: colors.border,
-    borderRadius: radius.icon,
-    paddingHorizontal: spacing.lg,
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing.sm,
     fontFamily: fonts.bold,
-    fontSize: fontSize.listAmount,
+    fontSize: fontSize.label,
     color: colors.ink,
     backgroundColor: colors.surface,
   },
-  priceInput: { width: 120, textAlign: 'center' },
-  flex: { flex: 1 },
+  priceInput: { width: 76, textAlign: 'center' },
+  priceWarn: { borderColor: colors.baki, borderWidth: 3, backgroundColor: colors.bakiTint },
   toggleRow: { flexDirection: 'row', gap: spacing.sm },
   toggle: {
     flex: 1,
-    height: 92,
+    height: 76,
     borderRadius: radius.button,
     borderWidth: 3,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 4,
+    gap: 2,
+  },
+  totalBar: {
+    backgroundColor: colors.dark,
+    borderRadius: radius.card,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.screen,
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   decide: { flexDirection: 'row', gap: spacing.md },
   no: {
     flex: 1,
-    height: size.bigActionLg,
+    height: size.bigAction,
     borderRadius: radius.section,
     borderWidth: 3,
     borderColor: colors.border,
@@ -569,7 +622,7 @@ const styles = StyleSheet.create({
   },
   yes: {
     flex: 1.6,
-    height: size.bigActionLg,
+    height: size.bigAction,
     borderRadius: radius.section,
     backgroundColor: colors.sale,
     alignItems: 'center',

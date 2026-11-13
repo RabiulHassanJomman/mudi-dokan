@@ -52,10 +52,17 @@ export const FILLER = wordSet([
   'দিলাম', 'দিয়েছি', 'দিছি', 'দিয়ে', 'দাও', 'দেন',
   'গেল', 'গেলো', 'গেছে',
   'আর', 'মোট', 'প্রতি', 'এর', 'কাছে', 'আমি', 'ভাই', 'তো', 'আমার',
+  // item separators in a basket ("চাল ২ কেজি আর ডাল ১ কেজি")
+  'এবং', 'সাথে', 'সঙ্গে', 'একই', 'একসাথে', 'আরো', 'আরও', 'তারপর',
 ]);
+
+/** "<price> করে" = per unit. */
+export const EACH = wordSet(['করে', 'কইরা']);
+/** "প্রতি কেজি", "কেজি প্রতি" = per unit. */
+export const PER = wordSet(['প্রতি']);
 
 export const ALL_KEYWORDS: ReadonlySet<string> = new Set([
   ...PROFIT, ...TODAY, ...STOCK, ...QUESTION, ...PURCHASE, ...NEW,
   ...BUY_MARKER, ...SELL_MARKER, ...DAM, ...SALE, ...BAKI, ...CREDIT,
-  ...TAKE, ...JOMA, ...GAVE, ...EXPENSE, ...SELF_TAKE, ...CASH_BOX, ...MONEY, ...FILLER,
+  ...TAKE, ...JOMA, ...GAVE, ...EXPENSE, ...SELF_TAKE, ...CASH_BOX, ...MONEY, ...FILLER, ...EACH, ...PER,
 ]);

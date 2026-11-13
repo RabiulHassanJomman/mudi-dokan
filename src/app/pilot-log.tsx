@@ -58,6 +58,7 @@ export default function PilotLogScreen() {
         parsed: r.parsed_json ? (JSON.parse(r.parsed_json) as unknown) : undefined,
         outcome: r.outcome,
         edits: r.edits_json ? (JSON.parse(r.edits_json) as string[]) : undefined,
+        saved: r.final_json ? (JSON.parse(r.final_json) as unknown) : undefined,
         stt_error: r.stt_error ?? undefined,
         has_audio: !!r.audio_path,
       })),

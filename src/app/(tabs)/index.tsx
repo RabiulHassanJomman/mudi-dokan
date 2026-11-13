@@ -7,7 +7,7 @@ import { useSQLiteContext } from 'expo-sqlite';
 import { Icon } from '../../components/Icon';
 import { ScreenHeader } from '../../components/ScreenHeader';
 import { Txt } from '../../components/Txt';
-import { pilotStats, recentSales, todayTotals, type PilotStats, type RecentSale } from '../../db/repo';
+import { pilotStats, recentBaskets, todayTotals, type PilotStats, type RecentBasket } from '../../db/repo';
 import { formatQty, formatTaka, toBnDigits } from '../../lib/bn';
 import { useClipPlayer } from '../../lib/useClipPlayer';
 import { colors, fonts, fontSize, productTiles, radius, size, spacing } from '../../theme/tokens';
@@ -25,14 +25,14 @@ export default function SaleScreen() {
   const [typing, setTyping] = useState(false);
   const [text, setText] = useState('');
   const [today, setToday] = useState({ sales: 0, baki: 0 });
-  const [recent, setRecent] = useState<RecentSale[]>([]);
+  const [recent, setRecent] = useState<RecentBasket[]>([]);
   const [stats, setStats] = useState<PilotStats | null>(null);
 
   useFocusEffect(
     useCallback(() => {
       void (async () => {
         setToday(await todayTotals(db, startOfToday()));
-        setRecent(await recentSales(db, 3));
+        setRecent(await recentBaskets(db, 3));
         setStats(await pilotStats(db));
       })();
     }, [db]),
@@ -116,15 +116,15 @@ export default function SaleScreen() {
 
         {recent.map((r) => (
           <View key={r.id} style={[styles.entry, r.credit ? styles.entryCredit : null]}>
-            <View style={[styles.entryTile, { backgroundColor: productTiles[r.product] ?? colors.neutralTint }]}>
+            <View style={[styles.entryTile, { backgroundColor: (r.lines === 1 && productTiles[r.products]) || colors.neutralTint }]}>
               <Icon name="box" size={30} color={colors.ink} strokeWidth={1.6} />
             </View>
             <View style={styles.flex}>
               <Txt size={21} weight="bold">
-                {r.customer ? `${r.product} · ${r.customer}` : r.product}
+                {r.customer ? `${r.products} · ${r.customer}` : r.products}
               </Txt>
               <Txt size={fontSize.bodyLg} weight="medium" color={colors.ink2}>
-                {formatQty(r.quantity, r.unit)}
+                {r.lines === 1 ? formatQty(r.quantity, r.unit) : `${toBnDigits(r.lines)}টি জিনিস`}
               </Txt>
             </View>
             <View style={styles.entryRight}>
@@ -139,7 +139,7 @@ export default function SaleScreen() {
             </View>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={`${r.product} শুনুন`}
+              accessibilityLabel={`${r.products} শুনুন`}
               accessibilityState={{ disabled: !r.audio_path }}
               onPress={() => play(r.audio_path)}
               style={[styles.play, !r.audio_path && styles.disabled]}
