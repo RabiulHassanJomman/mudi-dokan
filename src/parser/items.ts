@@ -29,6 +29,11 @@ const hasPrice = (l: Line) => l.total !== undefined || l.each !== undefined;
 const isEmpty = (l: Line) => !l.product && !l.q && !hasPrice(l);
 
 export function groupItems(slots: readonly Slot[]): SaleItem[] {
+  return groupItemsReport(slots).items;
+}
+
+/** groupItems plus how many stray lines (a price or number with no product or quantity) were dropped. */
+export function groupItemsReport(slots: readonly Slot[]): { items: SaleItem[]; dropped: number } {
   const lines: Line[] = [];
   let cur: Line = {};
   const next = () => {
@@ -69,7 +74,7 @@ export function groupItems(slots: readonly Slot[]): SaleItem[] {
 
   // a stray price with no product or quantity ("… মোট ৬০০") is not a line of its own
   const kept = lines.length > 1 ? lines.filter((l) => l.product || l.q) : lines;
-  return kept.map(finish);
+  return { items: kept.map(finish), dropped: lines.length - kept.length };
 }
 
 function finish(l: Line): SaleItem {

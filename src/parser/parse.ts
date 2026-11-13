@@ -1,8 +1,8 @@
-import { groupItems, type Slot } from './items';
+import { groupItemsReport, type Slot } from './items';
 import * as K from './keywords';
 import { tokenize } from './normalize';
 import { parseNumber } from './numbers';
-import type { Field, Intent, ParseContext, ParsedCommand, Quantity, SaleItem } from './types';
+import type { Field, Intent, LowReason, ParseContext, ParsedCommand, Quantity, SaleItem } from './types';
 import { parseUnit, type UnitMatch } from './units';
 import { nfc } from './util';
 
@@ -190,21 +190,43 @@ function compact(cmd: ParsedCommand): ParsedCommand {
   return out as unknown as ParsedCommand;
 }
 
+/** Token form of a name, as names are compared ("তেলের" → "তেল"). */
+const nameKey = (s: string) => tokenize(s).map(stripGenitive).join(' ');
+
+const LOW_UNKNOWN = { confidence: 'low' as const, lowReasons: ['unknown_intent' as LowReason] };
+
 export function parseCommand(text: string, ctx: ParseContext = {}): ParsedCommand {
   const tokens = tokenize(text);
   const base = { raw: text, normalized: tokens.join(' ') };
-  if (!tokens.length) return { intent: 'unknown', missing: [], ...base };
+  if (!tokens.length) return { intent: 'unknown', missing: [], ...LOW_UNKNOWN, ...base };
+
+  // aliases count as known products; canon() maps them to the product's name
+  const aliases = new Map(Object.entries(ctx.productAliases ?? {}).map(([k, v]) => [nameKey(k), v.normalize('NFC')]));
+  const knownProducts = [...(ctx.knownProducts ?? []), ...aliases.keys()];
+  const knownProductKeys = new Set(knownProducts.map(nameKey));
+  const canon = (name: string) => aliases.get(name) ?? name;
+  const checkProducts = knownProducts.length > 0;
 
   const has = (s: ReadonlySet<string>) => tokens.some((t) => s.has(t));
   const period = has(K.TODAY) ? ('today' as const) : undefined;
 
   // ── queries ────────────────────────────────────────────────
   if (has(K.PROFIT)) {
-    return compact({ intent: 'profit_query', period, missing: [], ...base });
+    return compact({ intent: 'profit_query', period, missing: [], confidence: 'high', ...base });
   }
   if (has(K.STOCK) && !has(K.BAKI) && !has(K.CREDIT) && !has(K.JOMA)) {
-    const product = joinOrUndef(tokens.filter((t) => !isNoise(t)).map(stripGenitive));
-    return compact({ intent: 'stock_query', product, period, missing: product ? [] : ['product'], ...base });
+    const spoken = joinOrUndef(tokens.filter((t) => !isNoise(t)).map(stripGenitive));
+    const product = spoken === undefined ? undefined : canon(spoken);
+    const unmatched = checkProducts && product !== undefined && !knownProductKeys.has(spoken!);
+    return compact({
+      intent: 'stock_query',
+      product,
+      period,
+      missing: product ? [] : ['product'],
+      confidence: unmatched ? 'low' : 'high',
+      lowReasons: unmatched ? ['unmatched_product'] : undefined,
+      ...base,
+    });
   }
 
   // ── numbers and their roles ────────────────────────────────
@@ -297,7 +319,7 @@ export function parseCommand(text: string, ctx: ParseContext = {}): ParsedComman
   const namePos = tokens.map((_, k) => k).filter((k) => !used[k] && !isNoise(tokens[k]!));
   const rawNames = namePos.map((k) => tokens[k]!);
   const names = rawNames.map(stripGenitive);
-  const prodHit = matchKnown(names, ctx.knownProducts);
+  const prodHit = matchKnown(names, knownProducts);
   const afterProd = prodHit ? prodHit.rest : names;
   const custHit = matchKnown(afterProd, ctx.knownCustomers);
   const remaining = custHit ? custHit.rest : afterProd;
@@ -338,7 +360,11 @@ export function parseCommand(text: string, ctx: ParseContext = {}): ParsedComman
   else if (isWithdrawal) intent = 'owner_withdrawal';
   else if (has(K.EXPENSE)) intent = 'expense';
   else if (has(K.PURCHASE) || has(K.NEW)) intent = 'purchase';
-  else if (creditWords && (quantity !== undefined || names.length >= 2 || prodHit !== null)) {
+  else if (
+    (creditWords && (quantity !== undefined || names.length >= 2 || prodHit !== null)) ||
+    // "করিম চাল ১০ কেজি বাকি": goods with a quantity on বাকি = credit sale, not a ledger entry
+    (has(K.BAKI) && quantity !== undefined)
+  ) {
     intent = 'sale';
     credit = true;
   } else if (has(K.BAKI) || creditWords) intent = 'baki';
@@ -380,6 +406,16 @@ export function parseCommand(text: string, ctx: ParseContext = {}): ParsedComman
   }
   if (isLedger || isExpense || isOwner) quantity = undefined;
 
+  // ── confidence: what no rule used ──────────────────────────
+  const lowReasons = new Set<LowReason>();
+  const unconsumed: string[] = [];
+  if (isLedger || isExpense || isOwner) {
+    // these keep one amount; a quantity or a second number was dropped
+    const money = events.filter((e) => e.kind !== 'qty').length;
+    if (events.some((e) => e.kind === 'qty') || money > 1) lowReasons.add('unused_number');
+  }
+  if (intent === 'unknown' || ledgerGuess) lowReasons.add('unknown_intent');
+
   // ── assign names ───────────────────────────────────────────
   let product: string | undefined;
   let item: string | undefined;
@@ -396,21 +432,37 @@ export function parseCommand(text: string, ctx: ParseContext = {}): ParsedComman
   } else if (isExpense) {
     item = joinOrUndef(names);
   } else if (isLedger) {
-    customer = matchKnown(names, ctx.knownCustomers)?.match ?? customerName(names);
+    const hit = matchKnown(names, ctx.knownCustomers);
+    customer = hit?.match ?? customerName(names);
+    if (hit) unconsumed.push(...hit.rest);
+    // a known product inside a ledger entry ("করিম চাল ২০০ টাকা বাকি") is not part of the name
+    else unconsumed.push(...names.filter((n) => knownProductKeys.has(n)));
   } else if (intent === 'stock_query') {
     product = joinOrUndef(names);
+    if (product !== undefined) product = canon(product);
   } else if (intent === 'sale') {
     // customer: a known customer, else (on credit) the first unknown name
-    const productAt = knownPositions(names, ctx.knownProducts);
+    const productAt = knownPositions(names, knownProducts);
     const known = knownSpan(names, ctx.knownCustomers, productAt);
     let custAt: number[] = [];
     if (known) custAt = Array.from({ length: known[1] }, (_, o) => known[0] + o);
     else if (credit) {
       const free = names.map((_, n) => n).filter((n) => !productAt.has(n));
       const adjacent = (a: number, b: number) => b === a + 1 && namePos[b] === namePos[a]! + 1;
-      if (free.length) custAt = [free[0]!];
+      // a name run with no number or unit next to it is the customer ("… তেল দিলাম হাসান কে")
+      const runs: number[][] = [];
+      for (const n of free) {
+        const last = runs[runs.length - 1];
+        if (last && adjacent(last[last.length - 1]!, n)) last.push(n);
+        else runs.push([n]);
+      }
+      const touchesNumber = (r: number[]) =>
+        used[namePos[r[0]!]! - 1] === true || used[namePos[r[r.length - 1]!]! + 1] === true;
+      const apart = productAt.size ? undefined : runs.find((r) => !touchesNumber(r));
+      if (apart) custAt = apart;
+      else if (free.length) custAt = [free[0]!];
       // products are known: the customer is the whole first run of other names
-      if (productAt.size) {
+      if (productAt.size && !apart) {
         for (let n = 1; n < free.length && adjacent(free[n - 1]!, free[n]!); n++) custAt.push(free[n]!);
       }
     }
@@ -421,7 +473,16 @@ export function parseCommand(text: string, ctx: ParseContext = {}): ParsedComman
     const slots: Slot[] = [...events];
     let run: number[] = [];
     const flushRun = () => {
-      if (run.length) slots.push({ at: namePos[run[0]!]!, kind: 'name', text: run.map((n) => names[n]).join(' ') });
+      if (!run.length) return;
+      const spoken = run.map((n) => names[n]!);
+      const text = spoken.join(' ');
+      if (checkProducts && !knownProductKeys.has(text)) {
+        // "লাক্স সাবান" with no alias: সাবান is known, লাক্স is not used by anything
+        const hit = knownSpan(spoken, knownProducts, new Set());
+        if (hit) unconsumed.push(...spoken.filter((_, o) => o < hit[0] || o >= hit[0] + hit[1]));
+        else lowReasons.add('unmatched_product');
+      }
+      slots.push({ at: namePos[run[0]!]!, kind: 'name', text: canon(text) });
       run = [];
     };
     names.forEach((_, n) => {
@@ -431,7 +492,10 @@ export function parseCommand(text: string, ctx: ParseContext = {}): ParsedComman
     });
     flushRun();
 
-    items = groupItems(slots);
+    const grouped = groupItemsReport(slots);
+    items = grouped.items;
+    const incomplete = items.some((it) => !it.product || (!it.quantity && it.total === undefined));
+    if (grouped.dropped > 0 || (items.length > 1 && incomplete)) lowReasons.add('item_count');
     if (items.length === 1) {
       product = items[0]!.product;
       quantity = items[0]!.quantity;
@@ -444,7 +508,7 @@ export function parseCommand(text: string, ctx: ParseContext = {}): ParsedComman
         : undefined;
     }
   } else if (isTrade) {
-    product = prodHit?.match;
+    product = prodHit ? canon(prodHit.match) : undefined;
     customer = custHit?.match;
     if (credit && !product && !customer) {
       customer = customerName(remaining.slice(0, 1));
@@ -485,8 +549,10 @@ export function parseCommand(text: string, ctx: ParseContext = {}): ParsedComman
   }
 
   if (intent === 'unknown' && !ledgerGuess) {
-    return { intent, missing: [], ...base };
+    return { intent, missing: [], ...LOW_UNKNOWN, ...base };
   }
+  if (unconsumed.length) lowReasons.add('unconsumed_word');
+  const reasons = [...lowReasons];
 
   return compact({
     intent,
@@ -504,6 +570,9 @@ export function parseCommand(text: string, ctx: ParseContext = {}): ParsedComman
     isNewProduct,
     period,
     missing,
+    confidence: reasons.length ? 'low' : 'high',
+    lowReasons: reasons.length ? reasons : undefined,
+    unconsumed: unconsumed.length ? unconsumed : undefined,
     ...base,
   });
 }

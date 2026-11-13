@@ -5,3 +5,5 @@ export { parseUnit } from './units';
 export type { UnitMatch } from './units';
 export { normalizeText, tokenize } from './normalize';
 export type * from './types';
+export { hybridParse, shouldEscalate } from './router';
+export type { HybridResult, LlmParse } from './router';

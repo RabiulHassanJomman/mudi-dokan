@@ -10,7 +10,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { parseCommand } from '../src/parser';
+import { parseCommand, shouldEscalate } from '../src/parser';
 import type { Intent, ParseContext, ParsedCommand, Unit } from '../src/parser/types';
 
 // ── setup ──────────────────────────────────────────────────────
@@ -18,7 +18,9 @@ import type { Intent, ParseContext, ParsedCommand, Unit } from '../src/parser/ty
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 /** Newest stable Flash-Lite per ai.google.dev/gemini-api/docs/models (Nov 2026). */
 const DEFAULT_MODEL = 'gemini-3.5-flash-lite';
-const DELAY_MS = 600;
+/** Free tier is ~15 requests/min: keep ≥ 4.5 s between calls. */
+const DELAY_MS = 4500;
+const MAX_429_RETRIES = 3;
 
 const args = process.argv.slice(2);
 const flag = (name: string) => {
@@ -63,6 +65,8 @@ interface Fixture {
 interface Seed {
   products: { name: string; unit: Unit; price: number }[];
   customers: string[];
+  /** Spoken name → product, like the app's product_aliases. */
+  aliases: Record<string, string>;
 }
 
 const fixtures: Fixture[] = readFileSync(join(ROOT, 'eval/fixtures.jsonl'), 'utf8')
@@ -99,7 +103,13 @@ function topProducts(text: string, n = 15) {
   const words = nfc(text).split(' ');
   const windows = [...words, ...words.slice(1).map((w, i) => `${words[i]} ${w}`)];
   return seed.products
-    .map((p) => ({ p, score: nfc(text).includes(p.name) ? 1 : Math.max(...windows.map((w) => dice(w, p.name))) }))
+    .map((p) => {
+      const spellings = [p.name, ...Object.entries(seed.aliases).filter(([, v]) => v === p.name).map(([k]) => k)];
+      const score = Math.max(
+        ...spellings.map((n) => (nfc(text).includes(n) ? 1 : Math.max(...windows.map((w) => dice(w, n))))),
+      );
+      return { p, score };
+    })
     .sort((a, b) => b.score - a.score)
     .slice(0, n)
     .map((x) => x.p);
@@ -146,8 +156,10 @@ intent: sale (selling goods), purchase (shop buys stock: কিনলাম/ক�
 Rules:
 - items only for sale; one entry per line in spoken order; the same product twice stays two lines.
 - product: use ONLY a name from the given product list (map spelling variants and brand words to it, e.g. চাউল → চাল). If none fits, use the spoken word.
-- customer: use the given customer name when it matches (drop ভাই/আপা/সাহেব). credit = true only for বাকি/বাকিতে sales.
-- quantity in the spoken unit (টা/টি/একটা = piece). unit "none" if no unit was said.
+- customer: use the given customer name when it matches (drop ভাই/আপা/সাহেব).
+- "<name> <amount> টাকা বাকি", "<name>-এর নামে <amount> টাকা বাকি লেখেন" (money only, no goods) = intent baki, credit false, items [].
+- credit = true only when goods are taken on বাকি (a sale with items).
+- Keep quantity and unit exactly as spoken (টা/টি/একটা = piece); never convert kg ↔ litre or g ↔ kg. unit "none" if no unit was said.
 - "X টাকা করে", "প্রতি কেজি X", "কেজি X করে", "X টাকা কেজি" = unitPrice; total = quantity × unitPrice.
 - A plain "X টাকা" after a line = that line's total. "X টাকার <product>" = total with no quantity.
 - NEVER invent prices: if no price was said, unitPrice and total are null. Do not use list prices.
@@ -168,13 +180,18 @@ const EXAMPLES: [string, unknown][] = [
       { product: 'আলু', quantity: 4, unit: 'kg', unitPrice: 35, total: 140 },
     ] },
   ],
+  ['মিনা আপা তিনশো টাকা বাকি', { intent: 'baki', customer: 'মিনা', credit: false, amount: 300, item: null, person: null, note: null, items: [] }],
+  ['রশিদের নামে আটশো টাকা বাকি লেখেন', { intent: 'baki', customer: 'রশিদ', credit: false, amount: 800, item: null, person: null, note: null, items: [] }],
   ['মিজান সাতশো টাকা জমা দিল', { intent: 'joma', customer: 'মিজান', credit: false, amount: 700, item: null, person: null, note: null, items: [] }],
   ['গ্যাস বিল আটশো টাকা খরচ', { intent: 'expense', customer: null, credit: false, amount: 800, item: 'গ্যাস বিল', person: null, note: null, items: [] }],
   ['আব্বু তিনশো টাকা নিল ওষুধের জন্য', { intent: 'owner_withdrawal', customer: null, credit: false, amount: 300, item: null, person: 'আব্বু', note: 'ওষুধের জন্য', items: [] }],
 ];
 
 function userText(f: Fixture): string {
-  const products = topProducts(f.text).map((p) => `${p.name} (${p.unit})`).join(', ');
+  const also = (name: string) => Object.entries(seed.aliases).filter(([, v]) => v === name).map(([k]) => k);
+  const products = topProducts(f.text)
+    .map((p) => `${p.name} (${p.unit}${also(p.name).length ? `; also said ${also(p.name).join('/')}` : ''})`)
+    .join(', ');
   return `transcript: ${f.text}\ntab: ${f.tab}\nproducts: ${products}\ncustomers: ${seed.customers.slice(0, 10).join(', ')}`;
 }
 
@@ -183,11 +200,30 @@ interface GeminiOut {
   intent: Intent; customer: string | null; credit: boolean; amount: number | null;
   item: string | null; person: string | null; items: GeminiItem[];
 }
-interface Call { out: GeminiOut | null; error?: string; ms: number; promptTokens: number; outputTokens: number; thoughtTokens: number }
+interface Call {
+  out: GeminiOut | null;
+  /** HTTP/API failure (rate limit, quota, network): not counted as a parse failure. */
+  apiError?: string;
+  /** The model answered but not with usable JSON: a parse failure. */
+  error?: string;
+  ms: number; promptTokens: number; outputTokens: number; thoughtTokens: number;
+}
+
+/** "12s" / "1.5s" from google.rpc.RetryInfo; fallback 10 s. */
+function retryDelayMs(body: unknown): number {
+  const details = (body as { error?: { details?: { retryDelay?: string }[] } } | null)?.error?.details ?? [];
+  const d = details.find((x) => typeof x.retryDelay === 'string')?.retryDelay;
+  const secs = d ? Number.parseFloat(d) : NaN;
+  return Number.isFinite(secs) ? Math.ceil(secs * 1000) + 500 : 10_000;
+}
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-async function callGemini(f: Fixture, retry = true): Promise<Call> {
+/** Network failure → a 599 response, so it is reported as an API error. */
+const fetchOrNull = (url: string, init: RequestInit): Promise<Response> =>
+  fetch(url, init).catch((e: unknown) => new Response(JSON.stringify({ error: { message: String(e) } }), { status: 599 }));
+
+async function callGemini(f: Fixture, attempt = 0): Promise<Call> {
   // Gemini 3 can't turn thinking fully off; "minimal" is the lowest. 2.x takes a 0 budget.
   const thinkingConfig = /^gemini-2/.test(model) ? { thinkingBudget: 0 } : { thinkingLevel: 'minimal' };
   const contents = [
@@ -198,7 +234,7 @@ async function callGemini(f: Fixture, retry = true): Promise<Call> {
     { role: 'user', parts: [{ text: userText(f) }] },
   ];
   const t0 = Date.now();
-  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+  const res = await fetchOrNull(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey! },
     body: JSON.stringify({
@@ -213,12 +249,6 @@ async function callGemini(f: Fixture, retry = true): Promise<Call> {
     }),
   });
   const ms = Date.now() - t0;
-  if (res.status === 429 && retry) {
-    const wait = Number(res.headers.get('retry-after') ?? 0) * 1000 || 5000;
-    console.warn(`  429, retrying once in ${wait / 1000}s`);
-    await sleep(wait);
-    return callGemini(f, false);
-  }
   const body = (await res.json().catch(() => null)) as {
     candidates?: { content?: { parts?: { text?: string }[] } }[];
     usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; thoughtsTokenCount?: number };
@@ -229,7 +259,13 @@ async function callGemini(f: Fixture, retry = true): Promise<Call> {
     outputTokens: body?.usageMetadata?.candidatesTokenCount ?? 0,
     thoughtTokens: body?.usageMetadata?.thoughtsTokenCount ?? 0,
   };
-  if (!res.ok) return { out: null, error: `HTTP ${res.status}: ${body?.error?.message ?? 'no body'}`, ms, ...usage };
+  if (res.status === 429 && attempt < MAX_429_RETRIES) {
+    const wait = retryDelayMs(body);
+    process.stdout.write(`\n  429, waiting ${(wait / 1000).toFixed(1)} s (retry ${attempt + 1}/${MAX_429_RETRIES})`);
+    await sleep(wait);
+    return callGemini(f, attempt + 1);
+  }
+  if (!res.ok) return { out: null, apiError: `HTTP ${res.status}: ${body?.error?.message ?? 'no body'}`, ms, ...usage };
   const text = body?.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('') ?? '';
   try {
     return { out: JSON.parse(text) as GeminiOut, ms, ...usage };
@@ -321,8 +357,11 @@ function diff(e: Expected, n: Norm): string[] {
 
 interface Row {
   text: string; tab: Tab; source: Source; expected: Expected;
-  rule: { out: Norm; fails: string[] };
-  gemini?: { out: Norm | null; fails: string[]; error?: string; ms: number; promptTokens: number; outputTokens: number; thoughtTokens: number };
+  rule: { out: Norm; fails: string[]; confidence: 'high' | 'low'; lowReasons?: string[] };
+  /** fails is null on an API error (excluded from pass %). */
+  gemini?: Omit<Call, 'out'> & { out: Norm | null; fails: string[] | null };
+  /** Rule result when confident, else Gemini's. null = escalated but Gemini had an API error. */
+  hybrid?: { from: 'rule' | 'gemini'; fails: string[] | null };
 }
 
 async function main() {
@@ -330,60 +369,81 @@ async function main() {
     tab,
     knownProducts: seed.products.map((p) => p.name),
     knownCustomers: seed.customers,
+    productAliases: seed.aliases,
   });
   console.log(`${fixtures.length} cases · rule parser${ruleOnly ? '' : ` vs ${model}`}\n`);
   const rows: Row[] = [];
   for (const [k, f] of fixtures.entries()) {
-    const ruleOut = fromRule(parseCommand(f.text, ctx(f.tab)));
-    const row: Row = { ...f, rule: { out: ruleOut, fails: diff(f.expected, ruleOut) } };
+    const parsed = parseCommand(f.text, ctx(f.tab));
+    const ruleOut = fromRule(parsed);
+    const row: Row = {
+      ...f,
+      rule: { out: ruleOut, fails: diff(f.expected, ruleOut), confidence: parsed.confidence, lowReasons: parsed.lowReasons },
+    };
     if (!ruleOnly) {
       if (k > 0) await sleep(DELAY_MS);
-      const c = await callGemini(f);
-      const out = c.out ? fromGemini(c.out) : null;
-      row.gemini = { ...c, out, fails: out ? diff(f.expected, out) : ['error'] };
+      const { out: raw, ...c } = await callGemini(f);
+      const out = raw ? fromGemini(raw) : null;
+      const fails = c.apiError ? null : out ? diff(f.expected, out) : ['bad_json'];
+      row.gemini = { ...c, out, fails };
+      row.hybrid = shouldEscalate(parsed) ? { from: 'gemini', fails } : { from: 'rule', fails: row.rule.fails };
       process.stdout.write(`\r  ${k + 1}/${fixtures.length}`);
     }
     rows.push(row);
   }
   if (!ruleOnly) process.stdout.write('\n\n');
 
-  // pass % overall and per source
-  const pct = (xs: Row[], pick: (r: Row) => string[] | undefined) =>
-    xs.length ? `${Math.round((xs.filter((r) => pick(r)?.length === 0).length / xs.length) * 100)}%` : '—';
+  // pass % overall and per source; API errors are left out of the denominator
+  const pct = (xs: Row[], pick: (r: Row) => string[] | null | undefined) => {
+    const scored = xs.filter((r) => pick(r) != null);
+    if (!scored.length) return '—';
+    const ok = scored.filter((r) => pick(r)!.length === 0).length;
+    return `${Math.round((ok / scored.length) * 100)}% ${ok}/${scored.length}`;
+  };
   const groups: [string, Row[]][] = [
     ['all', rows],
     ['new', rows.filter((r) => r.source === 'new')],
     ['tests', rows.filter((r) => r.source === 'tests')],
   ];
-  console.log('pass %        rule     gemini');
+  console.log('pass %        rule           gemini         hybrid');
   for (const [name, xs] of groups) {
-    console.log(`  ${`${name} (${xs.length})`.padEnd(12)}${pct(xs, (r) => r.rule.fails).padEnd(9)}${ruleOnly ? '—' : pct(xs, (r) => r.gemini?.fails)}`);
+    const cols = [pct(xs, (r) => r.rule.fails), ruleOnly ? '—' : pct(xs, (r) => r.gemini?.fails), ruleOnly ? '—' : pct(xs, (r) => r.hybrid?.fails)];
+    console.log(`  ${`${name} (${xs.length})`.padEnd(12)}${cols.map((c) => c.padEnd(15)).join('')}`);
   }
-
-  // cases where they differ (or, rule-only: every rule failure)
-  const shown = rows.filter((r) =>
-    ruleOnly ? r.rule.fails.length : r.rule.fails.length !== 0 || (r.gemini?.fails.length ?? 0) !== 0,
+  const low = rows.filter((r) => r.rule.confidence === 'low');
+  const lowWrong = low.filter((r) => r.rule.fails.length).length;
+  const highWrong = rows.filter((r) => r.rule.confidence === 'high' && r.rule.fails.length).length;
+  console.log(
+    `\nrule confidence: ${low.length}/${rows.length} low → hybrid asks Gemini ${low.length}× ` +
+      `(low & wrong ${lowWrong}, low & right ${low.length - lowWrong}; high & wrong ${highWrong})`,
   );
+
+  // cases with any failure
+  const mark = (f?: string[] | null) => (f === undefined ? '' : f === null ? 'API error' : f.length ? `✗ ${f.join(', ')}` : '✓');
+  const shown = rows.filter((r) => r.rule.fails.length || r.gemini?.fails?.length || r.hybrid?.fails?.length);
   if (shown.length) console.log(`\ncases with a failure (${shown.length}):`);
   for (const r of shown) {
-    const mark = (f?: string[]) => (f === undefined ? '' : f.length ? `✗ ${f.join(', ')}` : '✓');
     console.log(`\n  “${r.text}” [${r.source}, ${r.tab}]`);
-    console.log(`    rule   ${mark(r.rule.fails)}`);
+    console.log(`    rule   ${mark(r.rule.fails)}  (${r.rule.confidence}${r.rule.lowReasons ? `: ${r.rule.lowReasons.join(', ')}` : ''})`);
     if (r.gemini) console.log(`    gemini ${mark(r.gemini.fails)}${r.gemini.error ? ` (${r.gemini.error})` : ''}`);
+    if (r.hybrid) console.log(`    hybrid ${mark(r.hybrid.fails)} (from ${r.hybrid.from})`);
   }
 
-  // Gemini cost/latency
-  const calls = rows.map((r) => r.gemini).filter((g): g is NonNullable<Row['gemini']> => !!g && !g.error);
+  // Gemini cost/latency (successful calls only)
+  const calls = rows.map((r) => r.gemini).filter((g): g is NonNullable<Row['gemini']> => !!g && !g.apiError);
   if (calls.length) {
     const avg = (f: (g: (typeof calls)[number]) => number) => Math.round(calls.reduce((s, g) => s + f(g), 0) / calls.length);
     const sorted = calls.map((g) => g.ms).sort((a, b) => a - b);
     console.log(
-      `\ngemini ${model}: ${calls.length} ok calls · avg tokens in ${avg((g) => g.promptTokens)} / out ${avg((g) => g.outputTokens)}` +
+      `\ngemini ${model}: ${calls.length} calls · avg tokens in ${avg((g) => g.promptTokens)} / out ${avg((g) => g.outputTokens)}` +
         ` / thinking ${avg((g) => g.thoughtTokens)} · latency avg ${avg((g) => g.ms)} ms, p50 ${sorted[Math.floor(sorted.length / 2)]} ms, max ${sorted.at(-1)} ms`,
     );
   }
-  const errors = rows.filter((r) => r.gemini?.error).length;
-  if (errors) console.log(`gemini errors: ${errors}`);
+  const apiErrors = rows.filter((r) => r.gemini?.apiError);
+  if (apiErrors.length) {
+    console.log(`\nAPI errors (not counted as failures): ${apiErrors.length}`);
+    for (const r of apiErrors) console.log(`  “${r.text}”: ${r.gemini!.apiError}`);
+  }
 
   const dir = join(ROOT, 'eval/results');
   mkdirSync(dir, { recursive: true });

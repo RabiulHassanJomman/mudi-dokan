@@ -49,8 +49,21 @@ export type Field =
   | 'buyPrice'
   | 'sellPrice';
 
+/** Why the rule parser is unsure (confidence "low" → the router may ask the LLM). */
+export type LowReason =
+  | 'unconsumed_word' // a word no rule used (brand before a known product, a product in a ledger entry)
+  | 'unused_number' // a number or quantity the intent dropped
+  | 'unmatched_product' // a product name not in knownProducts / productAliases
+  | 'item_count' // basket lines uncertain (stray price dropped, a line with no quantity or price)
+  | 'unknown_intent';
+
 export interface ParsedCommand {
   intent: Intent;
+  /** "low" when a word/number went unused, a product is unknown, or the line count is unsure. */
+  confidence: 'high' | 'low';
+  lowReasons?: LowReason[];
+  /** Words (not fillers) no rule used. */
+  unconsumed?: string[];
   /** Product name as spoken, e.g. "চাল". */
   product?: string;
   /** What the money was spent on (expense only), e.g. "বিদ্যুৎ বিল". */
@@ -91,6 +104,8 @@ export interface ParseContext {
   /** Known names help split "করিম চাল" into customer + product. */
   knownProducts?: string[];
   knownCustomers?: string[];
+  /** Spoken name → product (product_aliases): {"চাউল": "চাল", "লাক্স সাবান": "সাবান"}. */
+  productAliases?: Readonly<Record<string, string>>;
   /** Extra names that mean the owner/family (e.g. device names); মালিক/আব্বু/আম্মু are built in. */
   ownerNames?: string[];
   /** This phone's role (Setup step ২). Decides what "৩০০ টাকা নিলাম" means; unset = staff. */
