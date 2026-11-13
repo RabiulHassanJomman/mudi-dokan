@@ -7,6 +7,7 @@ import { useSQLiteContext } from 'expo-sqlite';
 import { Icon } from '../../components/Icon';
 import { ScreenHeader } from '../../components/ScreenHeader';
 import { Txt } from '../../components/Txt';
+import { buildLabel } from '../../lib/buildInfo';
 import { pilotStats, recentBaskets, todayTotals, type PilotStats, type RecentBasket } from '../../db/repo';
 import { formatQty, formatTaka, toBnDigits } from '../../lib/bn';
 import { useClipPlayer } from '../../lib/useClipPlayer';
@@ -158,6 +159,11 @@ export default function SaleScreen() {
               : ''}
           </Txt>
         </Pressable>
+        {__DEV__ && (
+          <Txt size={fontSize.caption} weight="medium" color={colors.muted} style={styles.build}>
+            {buildLabel()}
+          </Txt>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -252,6 +258,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   disabled: { opacity: 0.35 },
+  build: { textAlign: 'center' },
   logLink: {
     flexDirection: 'row',
     alignItems: 'center',

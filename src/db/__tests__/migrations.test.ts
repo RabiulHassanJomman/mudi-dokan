@@ -183,3 +183,18 @@ describe('v_stock = purchases − sales', () => {
     ).toThrow(/FOREIGN KEY/);
   });
 });
+
+describe('v4', () => {
+  it('adds sales.line_no and voice_logs.stt_ok', () => {
+    const cols = (t: string) => (raw.prepare(`PRAGMA table_info(${t})`).all() as { name: string }[]).map((c) => c.name);
+    expect(cols('sales')).toContain('line_no');
+    expect(cols('voice_logs')).toContain('stt_ok');
+  });
+
+  it('stt_ok is 0, 1 or null', () => {
+    raw.exec(`INSERT INTO voice_logs (id, transcript, device_name, device_id, created_at, updated_at) VALUES ('v', 't', 'd', 'd', 1, 1)`);
+    expect(() => raw.exec(`UPDATE voice_logs SET stt_ok = 2 WHERE id = 'v'`)).toThrow();
+    raw.exec(`UPDATE voice_logs SET stt_ok = 1 WHERE id = 'v'`);
+  });
+});
+

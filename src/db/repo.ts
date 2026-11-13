@@ -3,7 +3,8 @@
  * small DB interface that expo-sqlite's SQLiteDatabase satisfies, so it is
  * tested on node:sqlite.
  */
-import { basketSummary, type BasketDraft, type ProductInfo } from '../domain/basket';
+import { basketSummary, storedLine, type BasketDraft, type ProductInfo } from '../domain/basket';
+import { ENTRY_TABLES, noDeleteTrigger } from './migrations';
 import type { ParsedCommand, Unit } from '../parser/types';
 
 type Bind = string | number | null;
@@ -152,6 +153,8 @@ export interface VoiceLogRow {
   final_json: string | null;
   entry_table: string | null;
   entry_id: string | null;
+  /** Pilot reviewer: 1 = STT heard it right, 0 = wrong, null = not checked. */
+  stt_ok: number | null;
   created_at: number;
 }
 
@@ -160,6 +163,10 @@ export const getVoiceLog = (db: Db, id: string) =>
 
 export async function setParsed(db: Db, w: Writer, id: string, parsed: ParsedCommand): Promise<void> {
   await db.runAsync('UPDATE voice_logs SET parsed_json = ?, updated_at = ? WHERE id = ?', JSON.stringify(parsed), w.now(), id);
+}
+
+export async function setSttOk(db: Db, w: Writer, id: string, ok: boolean | null): Promise<void> {
+  await db.runAsync('UPDATE voice_logs SET stt_ok = ?, updated_at = ? WHERE id = ?', ok === null ? null : ok ? 1 : 0, w.now(), id);
 }
 
 /** Only a pending log changes outcome (a saved entry is never "un-saved" by leaving the screen). */
@@ -208,10 +215,11 @@ export async function saveBasket(
     const entry = () => ({ voice_log_id: voiceLogId, device_name: w.deviceName, ...rowCols(w) });
     let firstSaleId: string | null = null;
 
-    for (const it of b.items) {
-      if (!it.productName || it.quantity === null || it.pricePoisha === null || it.amountPoisha === null) {
+    for (const [n, it] of b.items.entries()) {
+      if (!it.productName || it.quantity === null || it.amountPoisha === null) {
         throw new Error(`basket line ${it.key} is not complete`);
       }
+      const line = storedLine(it);
       let productId = it.product?.id ?? created.get(it.productName);
       if (!productId) {
         productId = w.newId();
@@ -220,7 +228,7 @@ export async function saveBasket(
           id: productId,
           name: it.productName,
           unit: it.unit,
-          sell_price_poisha: it.pricePoisha,
+          sell_price_poisha: line.pricePoisha,
           ...rowCols(w),
         });
       }
@@ -230,10 +238,11 @@ export async function saveBasket(
       await insert(db, 'sales', {
         id: saleId,
         basket_id: basketId,
+        line_no: n + 1,
         product_id: productId,
-        quantity: it.quantity,
-        spoken_unit: it.unit,
-        sell_price_poisha: it.pricePoisha,
+        quantity: line.quantity,
+        spoken_unit: line.spokenUnit,
+        sell_price_poisha: line.pricePoisha,
         amount_poisha: it.amountPoisha,
         cost_price_poisha: cost ?? 0,
         cost_known: cost === null ? 0 : 1,
@@ -292,7 +301,7 @@ export const recentBaskets = (db: Db, limit = 3) =>
             MAX(c.name) AS customer,
             MAX(v.audio_path) AS audio_path,
             MAX(s.created_at) AS created_at
-     FROM (SELECT * FROM v_sales ORDER BY created_at) s
+     FROM (SELECT * FROM v_sales ORDER BY created_at, line_no) s
      JOIN products p ON p.id = s.product_id
      LEFT JOIN customers c ON c.id = s.customer_id
      LEFT JOIN voice_logs v ON v.id = s.voice_log_id
@@ -320,6 +329,9 @@ export interface PilotStats {
   cancelled: number;
   unsupported: number;
   sttError: number;
+  /** Voice logs the reviewer marked, and how many of those STT heard right. */
+  sttChecked: number;
+  sttOk: number;
   /** saved without edits ÷ (saved + edited + cancelled). The pilot target is 80%. */
   accuracy: number | null;
 }
@@ -339,12 +351,38 @@ export async function pilotStats(db: Db, since = 0): Promise<PilotStats> {
     sttError: n('stt_error'),
   };
   const decided = s.saved + s.edited + s.cancelled;
+  const stt = await db.getFirstAsync<{ checked: number; ok: number | null }>(
+    'SELECT COUNT(stt_ok) AS checked, SUM(stt_ok) AS ok FROM voice_logs WHERE created_at >= ?',
+    since,
+  );
   return {
     total: rows.reduce((a, r) => a + r.n, 0),
     ...s,
+    sttChecked: stt?.checked ?? 0,
+    sttOk: stt?.ok ?? 0,
     accuracy: decided ? Math.round((s.saved / decided) * 100) : null,
   };
 }
 
 export const pilotLog = (db: Db, limit = 500) =>
   db.getAllAsync<VoiceLogRow>('SELECT * FROM voice_logs ORDER BY created_at DESC LIMIT ?', limit);
+
+/**
+ * "পাইলট ডাটা মুছুন": empties every entry, product, customer and voice log so the
+ * real pilot starts clean. Keeps this device. The append-only DELETE guards are
+ * dropped and re-created inside one transaction. Returns the audio files to delete.
+ */
+export async function wipePilotData(db: Db): Promise<string[]> {
+  const audio = await db.getAllAsync<{ audio_path: string }>(
+    'SELECT audio_path FROM voice_logs WHERE audio_path IS NOT NULL',
+  );
+  await db.withTransactionAsync(async () => {
+    for (const t of ENTRY_TABLES) await db.runAsync(`DROP TRIGGER ${t}_no_delete`);
+    // children before parents (foreign keys)
+    for (const t of ['ledger', 'sales', 'purchases', 'expenses', 'owner_withdrawals', 'day_close', 'product_aliases', 'products', 'customers', 'voice_logs']) {
+      await db.runAsync(`DELETE FROM ${t}`);
+    }
+    for (const t of ENTRY_TABLES) await db.runAsync(noDeleteTrigger(t));
+  });
+  return audio.map((a) => a.audio_path);
+}

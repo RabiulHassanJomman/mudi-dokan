@@ -3,6 +3,7 @@
  * Every sale has items[]; each item carries unitPrice and total when they can be worked out.
  */
 import { check, type Case } from './helpers';
+import { parseCommand } from '../parse';
 
 const kg = (value: number) => ({ value, unit: 'kg' as const });
 
@@ -235,4 +236,18 @@ describe.each([
   ['single item', singles],
 ] as const)('%s', (_, cases) => {
   it.each(cases.map((c) => [c.text, c] as const))('%s', (_n, c) => check(c));
+});
+
+describe('priceKind: which price was spoken (the confirm card edits that one)', () => {
+  const kinds = (t: string) => (parseCommand(t, { tab: 'sale' }).items ?? []).map((i) => i.priceKind);
+  it.each([
+    ['৩ কেজি চাল ২০০ টাকা', ['total']],
+    ['২০০ টাকা করে ৩ কেজি চাল', ['unit']],
+    ['চাল ৩ কেজি, কেজি ২০০ করে', ['unit']],
+    ['চাল ৩ কেজি প্রতি কেজি ২০০', ['unit']],
+    ['চাল ৩ কেজি ২০০ টাকা কেজি', ['unit']],
+    ['১০০ টাকার চিনি', ['total']],
+    ['চাল ২ কেজি', [undefined]],
+    ['চাল ২ কেজি ১২০ টাকা ডাল ১ কেজি ১১০ টাকা করে সাবান ২টা', ['total', 'unit', undefined]],
+  ] as const)('%s', (t, k) => expect(kinds(t)).toEqual(k));
 });

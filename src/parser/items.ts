@@ -81,6 +81,7 @@ function finish(l: Line): SaleItem {
     const priceUnit = l.each.unit ?? q?.unit;
     // "চাল ৩, কেজি ২০০ করে": a unitless quantity takes the price's unit
     if (q && !q.unit && priceUnit) q = { value: q.value, unit: priceUnit };
+    item.priceKind = 'unit';
     item.unitPrice = round2(l.each.v);
     if (priceUnit) item.priceUnit = priceUnit;
     if (q) {
@@ -88,6 +89,7 @@ function finish(l: Line): SaleItem {
       if (inPriceUnit !== null) item.total = round2(inPriceUnit * l.each.v);
     }
   } else if (l.total !== undefined) {
+    item.priceKind = 'total';
     item.total = l.total;
     if (q && q.value > 0) {
       item.unitPrice = round2(l.total / q.value);

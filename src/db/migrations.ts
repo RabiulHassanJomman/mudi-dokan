@@ -34,11 +34,14 @@ export const ENTRY_TABLES = [
   'day_close',
 ] as const;
 
+/** The DELETE guard on its own: wipePilotData drops and re-creates it. */
+export const noDeleteTrigger = (table: string) => `CREATE TRIGGER ${table}_no_delete BEFORE DELETE ON ${table}
+BEGIN SELECT RAISE(ABORT, '${table} is append-only: insert a correction row with corrects_id'); END;`;
+
 const appendOnly = (table: string) => `
 CREATE TRIGGER ${table}_no_update BEFORE UPDATE ON ${table}
 BEGIN SELECT RAISE(ABORT, '${table} is append-only: insert a correction row with corrects_id'); END;
-CREATE TRIGGER ${table}_no_delete BEFORE DELETE ON ${table}
-BEGIN SELECT RAISE(ABORT, '${table} is append-only: insert a correction row with corrects_id'); END;
+${noDeleteTrigger(table)}
 CREATE INDEX ${table}_corrects ON ${table}(corrects_id);
 CREATE INDEX ${table}_created ON ${table}(created_at);
 -- rows not replaced by a later correction
@@ -182,8 +185,14 @@ ALTER TABLE ledger ADD COLUMN basket_id TEXT;
 ALTER TABLE voice_logs ADD COLUMN final_json TEXT;        -- the saved lines (pilot log)
 `;
 
+/** v4: line order inside a basket; the pilot reviewer's "did STT hear it right?" mark. */
+const V4 = `
+ALTER TABLE sales ADD COLUMN line_no INTEGER;                -- 1, 2, 3 … within basket_id
+ALTER TABLE voice_logs ADD COLUMN stt_ok INTEGER CHECK (stt_ok IS NULL OR stt_ok IN (0,1));
+`;
+
 /** Index i holds the SQL that takes the DB from user_version i to i + 1. */
-export const MIGRATIONS: readonly string[] = [V1, V2, V3];
+export const MIGRATIONS: readonly string[] = [V1, V2, V3, V4];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;
 

@@ -35,6 +35,8 @@ export interface SaleItem {
   priceUnit?: Unit;
   /** Line total: spoken ("২০০ টাকা"), or quantity × unitPrice. */
   total?: number;
+  /** Which price was spoken: the line total ("২০০ টাকা") or a per-unit price ("২০০ টাকা করে"). */
+  priceKind?: 'total' | 'unit';
 }
 
 export type Field =

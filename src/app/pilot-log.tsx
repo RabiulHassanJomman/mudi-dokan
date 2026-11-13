@@ -1,13 +1,15 @@
 import { useCallback, useState } from 'react';
-import { FlatList, Pressable, Share, StyleSheet, View } from 'react-native';
+import { Alert, FlatList, Pressable, Share, StyleSheet, View } from 'react-native';
+import { File } from 'expo-file-system';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useFocusEffect } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 
 import { Icon } from '../components/Icon';
 import { Txt } from '../components/Txt';
-import { pilotLog, pilotStats, type Outcome, type PilotStats, type VoiceLogRow } from '../db/repo';
-import { getDevice } from '../device';
+import { pilotLog, pilotStats, setSttOk, wipePilotData, type Outcome, type PilotStats, type VoiceLogRow } from '../db/repo';
+import { getDevice, writer } from '../device';
+import { BUILD, buildLabel } from '../lib/buildInfo';
 import { formatNumber, toBnDigits } from '../lib/bn';
 import { useClipPlayer } from '../lib/useClipPlayer';
 import { colors, fontSize, radius, size, spacing } from '../theme/tokens';
@@ -33,14 +35,47 @@ export default function PilotLogScreen() {
   const [stats, setStats] = useState<PilotStats | null>(null);
   const [rows, setRows] = useState<VoiceLogRow[]>([]);
 
+  const load = useCallback(async () => {
+    setStats(await pilotStats(db));
+    setRows(await pilotLog(db, 300));
+  }, [db]);
   useFocusEffect(
     useCallback(() => {
-      void (async () => {
-        setStats(await pilotStats(db));
-        setRows(await pilotLog(db, 300));
-      })();
-    }, [db]),
+      void load();
+    }, [load]),
   );
+
+  /** Reviewer listened to the clip: did STT write what was said? Tap again to clear. */
+  const markStt = async (r: VoiceLogRow, ok: boolean) => {
+    const next = r.stt_ok === (ok ? 1 : 0) ? null : ok;
+    await setSttOk(db, writer(), r.id, next);
+    await load();
+  };
+
+  const wipe = () =>
+    Alert.alert(
+      'পাইলট ডাটা মুছবেন?',
+      'সব বিক্রি, বাকি, মাল, ক্রেতা, পাইলট লগ আর রেকর্ড মুছে যাবে। ফেরত আনা যাবে না। আগে শেয়ার করে রাখুন।',
+      [
+        { text: 'না', style: 'cancel' },
+        {
+          text: 'মুছুন',
+          style: 'destructive',
+          onPress: () =>
+            void (async () => {
+              const audio = await wipePilotData(db);
+              for (const uri of audio) {
+                try {
+                  new File(uri).delete();
+                } catch {
+                  // already gone
+                }
+              }
+              await load();
+            })(),
+        },
+      ],
+    );
 
   const share = async () => {
     const all = await pilotLog(db, 5000);
@@ -49,6 +84,7 @@ export default function PilotLogScreen() {
       app: 'mudi-dokan',
       exported_at: new Date().toISOString(),
       device: { name: device.name, role: device.role },
+      build: BUILD,
       stats: await pilotStats(db),
       logs: all.map((r) => ({
         at: new Date(r.created_at).toISOString(),
@@ -60,6 +96,7 @@ export default function PilotLogScreen() {
         edits: r.edits_json ? (JSON.parse(r.edits_json) as string[]) : undefined,
         saved: r.final_json ? (JSON.parse(r.final_json) as unknown) : undefined,
         stt_error: r.stt_error ?? undefined,
+        stt_ok: r.stt_ok === null ? undefined : r.stt_ok === 1,
         has_audio: !!r.audio_path,
       })),
     };
@@ -94,6 +131,7 @@ export default function PilotLogScreen() {
             মোট {formatNumber(stats.total)} · ঠিক {formatNumber(stats.saved)} · ঠিক করে {formatNumber(stats.edited)} · বাতিল{' '}
             {formatNumber(stats.cancelled)} · অন্য কাজ {formatNumber(stats.unsupported)} · শোনা যায়নি{' '}
             {formatNumber(stats.sttError)}
+            {stats.sttChecked > 0 ? ` · শোনা ঠিক ${formatNumber(stats.sttOk)}/${formatNumber(stats.sttChecked)}` : ''}
           </Txt>
         </View>
       )}
@@ -102,6 +140,18 @@ export default function PilotLogScreen() {
         data={rows}
         keyExtractor={(r) => r.id}
         contentContainerStyle={styles.list}
+        ListFooterComponent={
+          <View style={styles.footer}>
+            <Pressable accessibilityRole="button" onPress={wipe} style={({ pressed }) => [styles.wipe, pressed && styles.pressed]}>
+              <Txt size={fontSize.body} weight="bold" color={colors.bakiInk}>
+                পাইলট ডাটা মুছুন
+              </Txt>
+            </Pressable>
+            <Txt size={fontSize.caption} weight="medium" color={colors.muted} style={styles.center}>
+              {buildLabel()}
+            </Txt>
+          </View>
+        }
         ListEmptyComponent={
           <Txt wrap size={fontSize.body} weight="medium" color={colors.muted} style={styles.center}>
             এখনো কিছু নেই। বিক্রি পাতায় মাইক চেপে বলুন।
@@ -130,6 +180,15 @@ export default function PilotLogScreen() {
                   {parsed?.intent ? ` · ${parsed.intent}` : ''}
                   {item.edits_json ? ` · বদল: ${(JSON.parse(item.edits_json) as string[]).join(', ')}` : ''}
                 </Txt>
+                {item.source === 'voice' && !!item.transcript && (
+                  <View style={styles.sttRow}>
+                    <Txt size={fontSize.caption} weight="semibold" color={colors.muted}>
+                      শোনা:
+                    </Txt>
+                    <SttChip label="ঠিক" on={item.stt_ok === 1} onPress={() => void markStt(item, true)} />
+                    <SttChip label="ভুল" on={item.stt_ok === 0} onPress={() => void markStt(item, false)} />
+                  </View>
+                )}
               </View>
               <View style={[styles.badge, { backgroundColor: o.bg }]}>
                 <Txt size={fontSize.caption} weight="bold" color={o.ink}>
@@ -141,6 +200,22 @@ export default function PilotLogScreen() {
         }}
       />
     </SafeAreaView>
+  );
+}
+
+function SttChip({ label, on, onPress }: { label: string; on: boolean; onPress: () => void }) {
+  return (
+    <Pressable
+      accessibilityRole="checkbox"
+      accessibilityLabel={`শোনা ${label}`}
+      accessibilityState={{ checked: on }}
+      onPress={onPress}
+      style={[styles.chip, on && (label === 'ঠিক' ? styles.chipOk : styles.chipBad)]}
+    >
+      <Txt size={fontSize.caption} weight="bold" color={on ? colors.onColor : colors.ink2}>
+        {label}
+      </Txt>
+    </Pressable>
   );
 }
 
@@ -183,5 +258,29 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   disabled: { opacity: 0.35 },
+  sttRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginTop: 4 },
+  chip: {
+    minWidth: 56,
+    minHeight: 36,
+    paddingHorizontal: 10,
+    borderRadius: radius.pill,
+    borderWidth: 2,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  chipOk: { backgroundColor: colors.sale, borderColor: colors.sale },
+  chipBad: { backgroundColor: colors.baki, borderColor: colors.baki },
+  footer: { gap: spacing.sm, paddingTop: spacing.lg, alignItems: 'center' },
+  wipe: {
+    minHeight: size.iconButton,
+    paddingHorizontal: 20,
+    borderRadius: radius.pill,
+    borderWidth: 2,
+    borderColor: colors.baki,
+    backgroundColor: colors.bakiTint,
+    justifyContent: 'center',
+  },
+  pressed: { opacity: 0.85 },
   badge: { borderRadius: radius.pill, paddingHorizontal: 10, paddingVertical: 4 },
 });

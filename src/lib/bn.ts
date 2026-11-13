@@ -28,6 +28,19 @@ export const UNIT_BN: Readonly<Record<Unit, string>> = {
   bosta: 'বস্তা',
 };
 
+/** "তেল সাধারণত লিটারে" — the unit with the locative ending. */
+export const UNIT_BN_LOC: Readonly<Record<Unit, string>> = {
+  kg: 'কেজিতে',
+  g: 'গ্রামে',
+  litre: 'লিটারে',
+  ml: 'মিলিতে',
+  piece: 'পিসে',
+  packet: 'প্যাকেটে',
+  dozen: 'ডজনে',
+  hali: 'হালিতে',
+  bosta: 'বস্তায়',
+};
+
 /** 2, kg → "২ কেজি". */
 export const formatQty = (value: number, unit: Unit): string => `${formatNumber(value, 3)} ${UNIT_BN[unit]}`;
 

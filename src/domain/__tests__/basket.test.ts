@@ -6,8 +6,12 @@ import {
   diffBaskets,
   readback,
   removeItem,
+  otherPriceText,
+  priceWarningText,
   setItemPrice,
+  setItemTotal,
   stepItem,
+  unitWarningText,
   withCredit,
   withCustomer,
   type BasketDraft,
@@ -126,8 +130,9 @@ describe('basketFromParse', () => {
     expect(canSave(b)).toBe(false);
   });
 
-  it('kg for a piece product is a mismatch', () => {
-    expect(basket('ডিম ২ কেজি').items[0]!.problems).toContain('unit_mismatch');
+  it('kg for a piece product: warned, not blocked, not converted', () => {
+    const i = basket('ডিম ২ কেজি').items[0]!;
+    expect(i).toMatchObject({ quantity: 2, unit: 'kg', unitWarning: true, problems: [] });
   });
 
   it('credit needs a customer', () => {
@@ -138,6 +143,84 @@ describe('basketFromParse', () => {
 
   it('nothing heard', () => {
     expect(basket('বিক্রি').problems).toContain('no_items');
+  });
+});
+
+describe('price mode: the price box edits what was spoken', () => {
+  it.each([
+    ['৩ কেজি চাল ২০০ টাকা', 'total'],
+    ['২০০ টাকা করে ৩ কেজি চাল', 'unit'],
+    ['চাল ৩ কেজি, কেজি ২০০ করে', 'unit'],
+    ['চাল ৩ কেজি ২০০ টাকা কেজি', 'unit'],
+    ['১০০ টাকার চিনি', 'total'],
+    ['চাল ২ কেজি', 'total'], // price from the DB: manual edits default to the line total
+    ['আটা ২ কেজি', 'total'], // new product, no price
+  ] as const)('%s → %s', (t, m) => expect(basket(t).items[0]!.priceMode).toBe(m));
+
+  it('the other value is shown small underneath', () => {
+    expect(otherPriceText(basket('৩ কেজি চাল ২০০ টাকা').items[0]!)).toBe('৳ ৬৬.৬৭/কেজি');
+    expect(otherPriceText(basket('২০০ টাকা করে ৩ কেজি চাল').items[0]!)).toBe('মোট ৳ ৬০০');
+    expect(otherPriceText(basket('আটা ২ কেজি').items[0]!)).toBeNull();
+  });
+
+  it('setItemTotal: line total is kept, unit price derived, warning cleared', () => {
+    const b0 = basket('চাল ৩ কেজি ৪০০ টাকা');
+    const b = setItemTotal(b0, '0', 18000);
+    expect(b.items[0]).toMatchObject({ quantity: 3, pricePoisha: 6000, amountPoisha: 18000, priceWarning: false });
+    expect(b.totalPoisha).toBe(18000);
+  });
+
+  it('total mode: ± scales the line total at the same unit price', () => {
+    const b = stepItem(basket('চাল ২ কেজি ২০০ টাকা'), '0', 1);
+    expect(lines(b)).toEqual([['চাল', 2.5, 'kg', 10000, 25000]]);
+  });
+
+  it('unit mode: ± keeps the unit price', () => {
+    const b = stepItem(basket('২০০ টাকা করে ৩ কেজি চাল'), '0', 1);
+    expect(lines(b)).toEqual([['চাল', 3.5, 'kg', 20000, 70000]]);
+  });
+
+  it('typed total with no quantity yet: total stays, price follows the quantity', () => {
+    let b = setItemTotal(basket('আটা'), '0', 5000);
+    expect(b.items[0]).toMatchObject({ amountPoisha: 5000, pricePoisha: null, problems: ['no_quantity'] });
+    b = stepItem(b, '0', 1);
+    expect(b.items[0]).toMatchObject({ quantity: 1, amountPoisha: 5000, pricePoisha: 5000, problems: [] });
+  });
+
+  it('price warning text compares like with like', () => {
+    expect(priceWarningText(basket('চাল ২ কেজি ২০০ টাকা').items[0]!)).toBe('সাধারণত ২ কেজি ৳ ১২০ — দাম ঠিক আছে তো?');
+    expect(priceWarningText(basket('২০০ টাকা করে ৩ কেজি চাল').items[0]!)).toBe('সাধারণত ৳ ৬০/কেজি — দাম ঠিক আছে তো?');
+    expect(priceWarningText(basket('চাল ২ কেজি').items[0]!)).toBeNull();
+  });
+});
+
+describe('unit mismatch: warned like the price, never auto-converted', () => {
+  const litreOil = new Map([...catalog, ['তেল', P('তেল', 'litre', 17000)]]);
+
+  it('"৫ কেজি তেল" when তেল sells by the litre', () => {
+    const b = basket('৫ কেজি তেল', litreOil);
+    expect(b.items[0]).toMatchObject({ quantity: 5, unit: 'kg', unitWarning: true, problems: [] });
+    expect(lines(b)).toEqual([['তেল', 5, 'kg', 17000, 85000]]);
+    expect(canSave(b)).toBe(true);
+    expect(unitWarningText(b.items[0]!)).toBe('তেল সাধারণত লিটারে — ঠিক আছে তো?');
+    expect(readback(b)).toBe('তেল ৫ কেজি, ৮৫০ টাকা। তেল সাধারণত লিটারে। ঠিক আছে?');
+  });
+
+  it('with a spoken price', () => {
+    const b = basket('৫ কেজি তেল ৯০০ টাকা', litreOil);
+    expect(lines(b)).toEqual([['তেল', 5, 'kg', 18000, 90000]]);
+    expect(b.items[0]).toMatchObject({ unitWarning: true, priceWarning: false });
+  });
+
+  it('same-kind units still convert without a warning', () => {
+    const b = basket('৫০০ মিলি তেল', litreOil);
+    expect(b.items[0]).toMatchObject({ quantity: 0.5, unit: 'litre', unitWarning: false });
+    expect(unitWarningText(b.items[0]!)).toBeNull();
+    expect(basket('৫০০ গ্রাম চাল').items[0]).toMatchObject({ quantity: 0.5, unit: 'kg', unitWarning: false });
+  });
+
+  it('a new product takes the spoken unit, no warning', () => {
+    expect(basket('আটা ২ কেজি ১০০ টাকা').items[0]).toMatchObject({ unit: 'kg', unitWarning: false });
   });
 });
 

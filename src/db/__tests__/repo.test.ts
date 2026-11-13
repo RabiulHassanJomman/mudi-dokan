@@ -10,6 +10,8 @@ import {
   recentBaskets,
   saveBasket,
   setOutcome,
+  setSttOk,
+  wipePilotData,
   todayTotals,
 } from '../repo';
 import { migratedDb, testWriter } from './nodeDb';
@@ -89,6 +91,30 @@ describe('saveBasket', () => {
     });
   });
 
+  it('numbers the lines of a basket (line_no, from 1)', async () => {
+    const { db, w, raw } = await setup();
+    const { basketId } = await sell(db, w, 'চাল ১ কেজি ৬০ টাকা ডাল ১ কেজি ১১০ টাকা তেল ১ কেজি ১৭৫ টাকা');
+    expect(
+      raw.prepare('SELECT p.name, s.line_no FROM sales s JOIN products p ON p.id = s.product_id WHERE basket_id = ? ORDER BY line_no').all(basketId),
+    ).toEqual([
+      { name: 'চাল', line_no: 1 },
+      { name: 'ডাল', line_no: 2 },
+      { name: 'তেল', line_no: 3 },
+    ]);
+  });
+
+  it('a mismatched unit is saved 1:1 in the product unit, spoken unit kept', async () => {
+    const { db, w, raw } = await setup();
+    raw.prepare(
+      `INSERT INTO products (id, name, unit, sell_price_poisha, device_id, created_at, updated_at)
+       VALUES ('oil', 'তেল', 'litre', 17000, 'dev-1', 1, 1)`,
+    ).run();
+    await sell(db, w, '৫ কেজি তেল');
+    expect(raw.prepare('SELECT quantity, spoken_unit, sell_price_poisha, amount_poisha FROM sales').all()).toEqual([
+      { quantity: 5, spoken_unit: 'kg', sell_price_poisha: 17000, amount_poisha: 85000 },
+    ]);
+  });
+
   it('second sale reuses the stored price; stock goes down', async () => {
     const { db, w, raw } = await setup();
     await sell(db, w, 'চাল ২ কেজি ১২০ টাকা');
@@ -157,6 +183,16 @@ describe('reads', () => {
     expect(await knownNames(db)).toEqual({ products: ['চাল'], customers: ['করিম'] });
   });
 
+  it('recent baskets list products in line order even when saved in the same millisecond', async () => {
+    const { db, raw } = await setup();
+    const sameMs = { ...testWriter(), now: () => 5_000 };
+    const text = 'তেল ১ কেজি ১৭৫ টাকা চাল ১ কেজি ৬০ টাকা ডাল ১ কেজি ১১০ টাকা';
+    const logId = await createVoiceLog(db, sameMs, { transcript: text, source: 'typed', contextTab: 'sale' });
+    await saveBasket(db, sameMs, await draft(db, text), logId, []);
+    expect(raw.prepare('SELECT COUNT(DISTINCT created_at) AS n FROM sales').get()).toEqual({ n: 1 });
+    expect((await recentBaskets(db, 1))[0]!.products).toBe('তেল, চাল, ডাল');
+  });
+
   it('recent baskets group lines; today totals', async () => {
     const { db, w } = await setup();
     await sell(db, w, 'চাল ২ কেজি ১২০ টাকা');
@@ -183,7 +219,35 @@ describe('reads', () => {
     await setOutcome(db, w, u, 'unsupported');
     expect(await getVoiceLog(db, c)).toMatchObject({ outcome: 'cancelled' });
     expect(await pilotStats(db)).toEqual({
-      total: 6, saved: 2, edited: 1, cancelled: 1, unsupported: 1, sttError: 1, accuracy: 50,
+      total: 6, saved: 2, edited: 1, cancelled: 1, unsupported: 1, sttError: 1, sttChecked: 0, sttOk: 0, accuracy: 50,
     });
+  });
+
+  it('stt_ok: the reviewer marks whether STT heard right', async () => {
+    const { db, w } = await setup();
+    const id = await createVoiceLog(db, w, { transcript: 'চাউল দুই', source: 'voice', contextTab: 'sale' });
+    expect(await getVoiceLog(db, id)).toMatchObject({ stt_ok: null });
+    await setSttOk(db, w, id, false);
+    expect(await getVoiceLog(db, id)).toMatchObject({ stt_ok: 0 });
+    await setSttOk(db, w, id, null);
+    expect(await getVoiceLog(db, id)).toMatchObject({ stt_ok: null });
+  });
+});
+
+describe('wipePilotData', () => {
+  it('empties sales, products, customers, logs; keeps the device; append-only still holds', async () => {
+    const { db, w, raw } = await setup();
+    await sell(db, w, 'করিম বাকিতে নিল চাল ১ কেজি ৬০ টাকা');
+    await createVoiceLog(db, w, { transcript: 'x', source: 'voice', contextTab: 'sale', audioPath: 'file:///a.wav' });
+    const audio = await wipePilotData(db);
+    expect(audio).toEqual(['file:///a.wav']);
+    for (const t of ['products', 'customers', 'sales', 'ledger', 'voice_logs', 'product_aliases']) {
+      expect({ t, ...(raw.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get() as object) }).toEqual({ t, n: 0 });
+    }
+    expect(raw.prepare('SELECT COUNT(*) AS n FROM devices').get()).toEqual({ n: 1 });
+    // triggers are back
+    await sell(db, w, 'চাল ১ কেজি ৬০ টাকা');
+    expect(() => raw.exec('DELETE FROM sales')).toThrow(/append-only/);
+    expect(() => raw.exec('UPDATE sales SET quantity = 9')).toThrow(/append-only/);
   });
 });

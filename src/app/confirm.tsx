@@ -11,10 +11,14 @@ import {
   basketFromParse,
   canSave,
   diffBaskets,
+  otherPriceText,
+  priceWarningText,
   readback,
   removeItem,
   setItemPrice,
+  setItemTotal,
   stepItem,
+  unitWarningText,
   withCredit,
   withCustomer,
   type BasketDraft,
@@ -23,7 +27,7 @@ import {
 import { classifyAnswer } from '../domain/confirmWords';
 import { createVoiceLog, findProducts, getVoiceLog, knownNames, saveBasket, setOutcome, setParsed } from '../db/repo';
 import { getDevice, writer } from '../device';
-import { UNIT_BN, formatNumber, formatQty, formatTaka, parseTakaInput } from '../lib/bn';
+import { UNIT_BN, formatNumber, formatQty, formatTaka, parseTakaInput, toBnDigits } from '../lib/bn';
 import { speak, stopSpeaking } from '../lib/speak';
 import { parseCommand } from '../parser';
 import type { Intent } from '../parser/types';
@@ -242,7 +246,9 @@ export default function ConfirmScreen() {
                   key={it.key}
                   item={it}
                   onStep={(dir) => edit(stepItem(basket, it.key, dir))}
-                  onPrice={(p) => edit(setItemPrice(basket, it.key, p))}
+                  onPrice={(p) =>
+                    edit(it.priceMode === 'unit' ? setItemPrice(basket, it.key, p) : setItemTotal(basket, it.key, p))
+                  }
                   onRemove={() => edit(removeItem(basket, it.key))}
                 />
               ))
@@ -326,18 +332,34 @@ function Heard({ text }: { text: string }) {
   );
 }
 
-/** One basket line: name, line total, ✕ / − qty + / editable unit price. */
+/**
+ * One basket line: name, line total, ✕ / − qty + / price box.
+ * The price box edits what was spoken (line total, or per-unit price for "করে/প্রতি");
+ * the other value is shown small underneath.
+ */
 function ItemRow(props: {
   item: ItemDraft;
   onStep: (dir: 1 | -1) => void;
-  onPrice: (pricePoisha: number) => void;
+  /** Line total or unit price, by item.priceMode. */
+  onPrice: (poisha: number) => void;
   onRemove: () => void;
 }) {
   const { item } = props;
-  const [priceText, setPriceText] = useState(item.pricePoisha !== null ? formatPriceInput(item.pricePoisha) : '');
+  const editsTotal = item.priceMode === 'total';
+  const value = editsTotal ? item.amountPoisha : item.pricePoisha;
+  const [priceText, setPriceText] = useState(value !== null ? formatPriceInput(value) : '');
+  // ± changes a line total: show the new one unless it is what the user is typing
+  useEffect(() => {
+    if (value !== null && parseTakaInput(priceText) !== value) setPriceText(formatPriceInput(value));
+    // only when the value changes from outside
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+
   const tile = (item.productName && productTiles[item.productName]) || colors.neutralTint;
   const unitBn = UNIT_BN[item.unit];
-  const stored = item.product?.sellPricePoisha ?? null;
+  const other = otherPriceText(item);
+  const priceWarn = priceWarningText(item);
+  const unitWarn = unitWarningText(item);
 
   return (
     <View style={[styles.row, item.problems.length > 0 && styles.rowProblem]}>
@@ -370,48 +392,61 @@ function ItemRow(props: {
 
       <View style={styles.rowBottom}>
         <StepButton icon="minus" label="কমান" onPress={() => props.onStep(-1)} />
-        <Txt size={fontSize.label} weight="bold" style={styles.qty}>
-          {item.quantity ? formatQty(item.quantity, item.unit) : `? ${unitBn}`}
-        </Txt>
+        <View style={[styles.qtyBox, item.unitWarning && styles.warnBox]}>
+          <Txt size={fontSize.label} weight="bold" style={styles.center}>
+            {item.quantity ? formatQty(item.quantity, item.unit) : `? ${unitBn}`}
+          </Txt>
+        </View>
         <StepButton icon="plus" label="বাড়ান" onPress={() => props.onStep(1)} />
         <View style={styles.flex} />
-        <Txt size={fontSize.body} weight="bold" color={colors.ink2}>
-          ৳
-        </Txt>
-        <TextInput
-          value={priceText}
-          onChangeText={(t) => {
-            setPriceText(t);
-            const v = parseTakaInput(t);
-            if (v) props.onPrice(v);
-          }}
-          keyboardType="numeric"
-          accessibilityLabel={`${item.productName ?? ''} প্রতি ${unitBn} দাম`}
-          placeholder="দাম"
-          placeholderTextColor={colors.muted}
-          style={[styles.input, styles.priceInput, item.priceWarning && styles.priceWarn]}
-        />
-        <Txt size={fontSize.captionLg} weight="medium" color={colors.muted}>
-          /{unitBn}
-        </Txt>
+        <View style={styles.priceCol}>
+          <View style={styles.priceRow}>
+            <Txt size={fontSize.body} weight="bold" color={colors.ink2}>
+              {editsTotal ? 'মোট ৳' : '৳'}
+            </Txt>
+            <TextInput
+              value={priceText}
+              onChangeText={(t) => {
+                setPriceText(toBnDigits(t));
+                const v = parseTakaInput(t);
+                if (v) props.onPrice(v);
+              }}
+              keyboardType="numeric"
+              accessibilityLabel={editsTotal ? `${item.productName ?? ''} মোট দাম` : `${item.productName ?? ''} প্রতি ${unitBn} দাম`}
+              placeholder="দাম"
+              placeholderTextColor={colors.muted}
+              style={[styles.input, styles.priceInput, item.priceWarning && styles.warnBox]}
+            />
+            {!editsTotal && (
+              <Txt size={fontSize.captionLg} weight="medium" color={colors.muted}>
+                /{unitBn}
+              </Txt>
+            )}
+          </View>
+          {other && (
+            <Txt size={fontSize.caption} weight="semibold" color={colors.muted}>
+              {other}
+            </Txt>
+          )}
+        </View>
       </View>
 
-      {item.priceWarning && stored !== null && (
+      {unitWarn && (
         <Txt wrap size={fontSize.captionLg} weight="bold" color={colors.bakiInk}>
-          সাধারণত {formatTaka(stored)}/{unitBn} — দাম ঠিক আছে তো?
+          {unitWarn}
         </Txt>
       )}
-      {item.problems.includes('unit_mismatch') && (
+      {priceWarn && (
         <Txt wrap size={fontSize.captionLg} weight="bold" color={colors.bakiInk}>
-          {item.productName} {unitBn}-এ বিক্রি হয়। পরিমাণ ঠিক করুন।
+          {priceWarn}
         </Txt>
       )}
     </View>
   );
 }
 
-/** 6000 poisha → "60", 13333 → "133.33" (ASCII so the numeric keyboard can edit it). */
-const formatPriceInput = (p: number) => String(Math.round(p) / 100);
+/** 6000 poisha → "৬০", 13333 → "১৩৩.৩৩" (typed ASCII digits are turned Bangla as they come). */
+const formatPriceInput = (p: number) => toBnDigits(Math.round(p) / 100);
 
 function CustomerInput({ initial, onChange }: { initial: string; onChange: (t: string) => void }) {
   const [text, setText] = useState(initial);
@@ -571,7 +606,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  qty: { minWidth: 76, textAlign: 'center' },
+  qtyBox: {
+    minWidth: 80,
+    height: size.minTouch + 4,
+    paddingHorizontal: 4,
+    borderRadius: radius.sm,
+    borderWidth: 3,
+    borderColor: 'transparent',
+    justifyContent: 'center',
+  },
+  priceCol: { alignItems: 'flex-end', gap: 2 },
+  priceRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xxs },
   inputRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   input: {
     height: size.minTouch + 4,
@@ -589,7 +634,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
   },
   priceInput: { width: 76, textAlign: 'center' },
-  priceWarn: { borderColor: colors.baki, borderWidth: 3, backgroundColor: colors.bakiTint },
+  warnBox: { borderColor: colors.baki, borderWidth: 3, backgroundColor: colors.bakiTint },
   toggleRow: { flexDirection: 'row', gap: spacing.sm },
   toggle: {
     flex: 1,
