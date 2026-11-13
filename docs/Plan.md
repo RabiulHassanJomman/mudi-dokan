@@ -28,8 +28,8 @@ Main features (MVP)
 7.  🧾 Khoroch (expense): "বিদ্যুৎ বিল ৫০০ টাকা খরচ", "চা নাস্তা ৫০ খরচ", "ভাড়া দিলাম ২০০০" bolle khoroch entry hobe (ki, koto taka). Cash screen er "খরচ বলুন" button e "খরচ" shobdo chara-o hobe. Khoroch cash theke kome ar net profit theke bad jay (feature 5).
 8.  🏁 Opening cash: prothombar chalu korar somoy (Setup) "এখন ক্যাশে কত টাকা?" — bole, type kore ba note gune deoa jabe. Etai prothom diner গতকালের ক্যাশ.
 9.  💵 Din sheshe cash milano (Cash + CashCount screen): হাতে থাকার কথা = গতকালের ক্যাশ + নগদ বিক্রি + বাকি জমা − খরচ − nogod kena − মালিক নিল. "গুনে মিলান" e note (১০০০…১০) gune "গুনে পেলাম" er sathe milabe, kom/beshi dekhabe. "দিন শেষ করুন" = din bondho, gune paoa taka porer diner opening cash.
-10. 👤 Malik/poribar er taka nea (owner_withdrawal): "মালিক ৫০০ নিল", "আব্বু ১০০০ নিল বাসার জন্য", "বাসার জন্য ৩০০ টাকা নিলাম". Ke nilo (person), koto, keno (note).
-    First-person ("৩০০ টাকা নিলাম", "৫০০ তুললাম", naam chara) phone er role dekhe: role owner → owner_withdrawal, person = device_name; role staff → expense, item "অগ্রিম বেতন", person = device_name (lav theke bad jabe). Naam bolle ("মালিক ৫০০ নিল") role jai hok owner_withdrawal. Hate thakar kotha cash theke kome, kintu khoroch na, tai lav hisab e ashe na.
+10. 👤 Malik/poribar er taka nea (owner_withdrawal): "মালিক ৫০০ নিল", "আব্বু ১০০০ নিল বাসার জন্য". Ke nilo (person), koto, keno (note).
+    First-person ("৩০০ টাকা নিলাম", "৫০০ তুললাম", naam chara) phone er role dekhe: role owner → owner_withdrawal, person = device_name; role staff ba role set na thakle → expense, item "অগ্রিম বেতন", person = device_name (lav theke bad jabe). Naam bolle ("মালিক ৫০০ নিল") role jai hok owner_withdrawal. Hate thakar kotha cash theke kome, kintu khoroch na, tai lav hisab e ashe na.
 Jara porte pare na, tader jonno UX
 • Screen er majhe ekta boro 🎤 button, niche 3 ta icon tab.
 • Prottek command er por app bole shonabe, jemon "চাল ২ কেজি, ১২০ টাকা। ঠিক আছে?" Tarpor boro ✅/❌ button chapa jabe, ba mukhe "হ্যাঁ"/"না" bola jabe.
@@ -54,15 +54,23 @@ Audio save
 expo-speech-recognition er recordingOptions.persist (Android 13+): recognizer nijei audio file save kore. File age phone e save hoy, internet pele Google Drive er "Dokan Audio" folder e upload hoy (Google Sign-In, drive.file scope). Drive fileId Firestore er voice_logs e save hoy; onno phone oi fileId diye download kore bajay. Upload fail hole retry queue.
 Bujha (parsing)
 Nijer rule-based Bangla parser: shongkha shobdo ("আড়াই", "পাঁচশ"), unit, keyword dhore
-Table: products (naam, unit, stock, kena dam, becha dam), purchases (kena: poriman, kena dam), sales (poriman, becha dam, sei somoyer kena dam), customers (baki), ledger (baki/joma er itihas), expenses (khoroch: item, taka), owner_withdrawals (malik nilo: person, taka, note), day_close (din shesh: opening cash, thakar kotha, gune paoa, note count; setup er opening cash o ekhane). Prottek row e id (UUID), device_id, updated_at thakbe sync er jonno.
+Table: products (naam, unit, becha dam; stock ar gor kena dam store hoy na — v_stock view e purchases − sales theke hisab), purchases (kena: poriman, kena dam), sales (poriman, becha dam, sei somoyer kena dam), customers (baki), ledger (baki/joma er itihas), expenses (khoroch: item, taka), owner_withdrawals (malik nilo: person, taka, note), day_close (din shesh: opening cash, thakar kotha, gune paoa, note count; setup er opening cash o ekhane). Prottek row e id (UUID), device_id, updated_at thakbe sync er jonno.
 voice_logs (audio file, transcript, kon phone, somoy). Prottek entry (purchase, sale, ledger, expense, owner_withdrawal) e voice_log_id thakbe; correction entry corrects_id diye ager entry ke point korbe.
 product_aliases (alias → product): STT eki maal alada banane likhte pare ("পেঁয়াজ"/"পিঁয়াজ"); audio shune naam thik korle vul banan ta automatic alias hoye jabe. ledger e party_type (customer/supplier) — supplier/মহাজন Phase 3, kintu column MVP schema tei thakbe jate pore migration na lage. Prottek entry te device_name (phone e ekbar set kora naam, jemon "Abbu", "Karmochari 1").
 devices (device_id, device_name, role: owner | staff, updated_at): Setup step ২ e set hoy, settings theke bodlano jay. Parser pure thake: app parseCommand e ctx.deviceRole ar ctx.deviceName pathay (ownerNames er moto).
-Phase
-1.  Pilot (2–3 din): shudhu mic → text → parse prototype. Asol dokane bhir er moddhe 50–100 ta asol command test. 80% er kom thik hole command design bodlano (choto command, list theke beche newa). Sync ar audio er age eta.
-2.  MVP: upore 10 ta feature (khoroch, opening cash, din sheshe cash milano ar malik er taka nea soho), voice diye confirm, offline DB, multi-phone sync, voice e undo ("ভুল হয়েছে"/"বাতিল" bolle shesh entry correction diye ulte jabe), product naam alias, ar prottek entry te phone/karmochari er naam.
-3.  Tarpor: supplier/mohajon er baki ("রহিম ট্রেডার্স থেকে ৫০ কেজি চাল বাকিতে কিনলাম"), "আজকের হিসাব" voice summary (bikri, baki, joma, khoroch ar cash e koto thaka uchit bole debe; screen ta MVP te ache), protidin raat e Drive e backup (Excel/JSON), masher hisab bole shonano, kom stock alert.
-4.  Pore: barcode scan (ager POS kaj er sathe jora), customer ke SMS e baki mone koriye deoa.
+Phase (incremental build order)
+Parser (Phase 1) done. Tarpor ek ek step e, prottek step er shesh e app phone e chole:
+1.  Expo shell (dev build, TypeScript) + design token + bottom tab bar (বিক্রি / মাল / বাকি, placeholder screen) + SQLite schema with migrations (devices soho). App parser import kore.
+2.  Listening → Confirm → sale save + pilot debug log (transcript, parse result, user thik korlo ki na). ← ekhan theke dokane test shuru (50–100 asol command; 80% er kom thik hole command design bodlano).
+3.  Pick-by-picture fallback (Pick screen: chobi, number pad, type kora).
+4.  Stock, Baki, Customer screen.
+5.  Cash, CashCount, History (phone e save kora audio replay).
+6.  Pilot log theke parser/command fix.
+7.  Firestore sync + multi-phone.
+8.  Drive audio upload, retry queue, 30 din por auto-delete.
+MVP er baki (step gulor sathe/pore): voice e undo ("ভুল হয়েছে"/"বাতিল" bolle shesh entry correction diye ulte jabe), product naam alias, Setup screen (device_name + role, opening cash).
+After MVP: supplier/mohajon er baki ("রহিম ট্রেডার্স থেকে ৫০ কেজি চাল বাকিতে কিনলাম"), "আজকের হিসাব" voice summary, protidin raat e Drive e backup (Excel/JSON), masher hisab bole shonano, kom stock alert.
+Pore: barcode scan (ager POS kaj er sathe jora), customer ke SMS e baki mone koriye deoa.
 Risk
 • Naam vul shona: STT maal ba customer er naam vul likhte pare. Tai mil na hole kachakachi naam suggest korbe, ar confirm chara kichu save hobe na.
 • Internet: Google Bangla STT shadharonoto online e kaj kore. Offline chalate phone e Bangla offline pack download korte hobe, seta test kore dekhte hobe.
@@ -122,7 +130,8 @@ Status
 • Done: parser e device role — ctx.deviceRole/deviceName; staff er "নিলাম" = expense "অগ্রিম বেতন". `npm test` → 309 passing.
 • Done: parser e `owner_withdrawal` intent (`person`, `amount`, `note`; মালিক/আব্বু/আম্মু ba ctx.ownerNames + taka, ba "নিলাম" + taka). `npm test` → 295 passing.
 • Done: parser e `expense` intent (`item` + `amount`; "খরচ" shobdo, ba ভাড়া/বিল/বেতন/নাস্তা/মালিক + taka, ba tab = expense). `npm test` → 279 passing.
-• Next: pilot — asol dokane 50–100 ta command diye parser test, vul gulo test case banano.
+• Done: Build step 1 — Expo SDK 58 dev build shell (src/app, expo-router), design token (src/theme/tokens.ts, Hind Siliguri embed), বিক্রি/মাল/বাকি tab bar + placeholder, SQLite schema v1 + migration (src/db, 22 test), app parser import kore (বিক্রি tab e "পার্সার পরীক্ষা" debug box ar DB status). `npm test` → 331 passing.
+• Next: build step 2 — Listening → Confirm → sale save + pilot debug log.
 • Decisions log:
   – Test: Jest + ts-jest.
   – "X চাল ১ কেজি বাকিতে নিল" = ekta `sale` with `credit: true`; app layer sale + baki duto row likhbe.
@@ -136,3 +145,7 @@ Status
   – Nov 13: "মালিক" expense na — notun `owner_withdrawal` intent ar owner_withdrawals table. Expected cash theke kome, profit e na.
   – Nov 13: Lav er uttor = বিক্রি, মোট লাভ (gross), খরচ, আসল লাভ (net = gross − খরচ). Purchase ar owner_withdrawal lav e dhora hoy na.
   – Nov 13: prottek phone er role (owner | staff), devices table e device_name er sathe; Setup step ২ e set. First-person cash nea: owner → owner_withdrawal, staff → expense "অগ্রিম বেতন"; dutotei person = device_name.
+  – Nov 13: role set na thakle first-person cash nea staff hishebe (expense "অগ্রিম বেতন") — lav theke lukano na thake.
+  – Nov 13: Phase gulo incremental build order e (step 1–8); pilot shuru step 2 te.
+  – Nov 13: Stack: Expo SDK 58 (RN 0.88), expo-router (src/app) JS tabs with custom tab bar, expo-sqlite, Hind Siliguri expo-font plugin diye embed (Android e family = file naam, weight onujayi alada family). android/ folder generate hoy (prebuild), git e nei.
+  – Nov 13: DB: taka INTEGER poisha (৳1 = 100) e; poriman REAL product er unit e. Entry table (purchases, sales, ledger, expenses, owner_withdrawals, day_close) e UPDATE/DELETE trigger diye bondho; correction = notun row corrects_id soho, v_<table> view shudhu shesh version dekhay. Migration: PRAGMA user_version, prottek step transaction e.

@@ -1,0 +1,43 @@
+{
+  "expo": {
+    "name": "মুদি দোকান",
+    "slug": "mudi-dokan",
+    "version": "0.1.0",
+    "scheme": "mudidokan",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "icon": "./assets/images/icon.png",
+    "platforms": [
+      "android"
+    ],
+    "android": {
+      "package": "com.mudidokan.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#0F6B4F",
+        "foregroundImage": "./assets/images/android-icon-foreground.png",
+        "backgroundImage": "./assets/images/android-icon-background.png",
+        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "plugins": [
+      "expo-router",
+      "expo-status-bar",
+      "expo-sqlite",
+      [
+        "expo-font",
+        {
+          "fonts": [
+            "./node_modules/@expo-google-fonts/hind-siliguri/400Regular/HindSiliguri_400Regular.ttf",
+            "./node_modules/@expo-google-fonts/hind-siliguri/500Medium/HindSiliguri_500Medium.ttf",
+            "./node_modules/@expo-google-fonts/hind-siliguri/600SemiBold/HindSiliguri_600SemiBold.ttf",
+            "./node_modules/@expo-google-fonts/hind-siliguri/700Bold/HindSiliguri_700Bold.ttf"
+          ]
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

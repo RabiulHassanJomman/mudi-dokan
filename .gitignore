@@ -1,2 +1,32 @@
+# dependencies
 node_modules/
+
+# Expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# generated native folders (Continuous Native Generation: config lives in app.json)
+/android
+/ios
+
+# Native
+.kotlin/
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.keystore
+!debug.keystore
+
+# Metro
+.metro-health-check*
+
+# debug / misc
+npm-debug.*
+*.tsbuildinfo
+.DS_Store
+.env*.local
 coverage/

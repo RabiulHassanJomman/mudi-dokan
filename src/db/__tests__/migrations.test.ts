@@ -1,0 +1,185 @@
+/**
+ * Runs the real migration SQL on Node's built-in SQLite (node:sqlite),
+ * the same engine family expo-sqlite uses on the phone.
+ */
+import type { DatabaseSync as DatabaseSyncT } from 'node:sqlite';
+import { ENTRY_TABLES, MIGRATIONS, SCHEMA_VERSION, migrate, type MigratableDb } from '../migrations';
+
+// getBuiltinModule bypasses Jest's resolver, which doesn't know prefix-only builtins
+const { DatabaseSync } = process.getBuiltinModule('node:sqlite') as typeof import('node:sqlite');
+
+const adapter = (db: DatabaseSyncT): MigratableDb => ({
+  execAsync: async (sql) => {
+    db.exec(sql);
+  },
+  getFirstAsync: async <T>(sql: string) => (db.prepare(sql).get() as T | undefined) ?? null,
+});
+
+const now = 1_763_000_000_000;
+const row = (id: string) => ({ id, device_id: 'd1', created_at: now, updated_at: now });
+const entry = (id: string) => ({ ...row(id), device_name: 'আব্বু' });
+
+function insert(db: DatabaseSyncT, table: string, values: Record<string, unknown>): void {
+  const cols = Object.keys(values);
+  db.prepare(`INSERT INTO ${table} (${cols.join(',')}) VALUES (${cols.map(() => '?').join(',')})`).run(
+    ...(Object.values(values) as (string | number | null)[]),
+  );
+}
+
+let raw: DatabaseSyncT;
+let db: MigratableDb;
+
+beforeEach(async () => {
+  raw = new DatabaseSync(':memory:');
+  db = adapter(raw);
+  await migrate(db);
+});
+afterEach(() => raw.close());
+
+describe('migrate', () => {
+  it('sets user_version to the latest schema', async () => {
+    expect(await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version')).toEqual({
+      user_version: SCHEMA_VERSION,
+    });
+    expect(SCHEMA_VERSION).toBe(MIGRATIONS.length);
+  });
+
+  it('is idempotent', async () => {
+    await expect(migrate(db)).resolves.toBe(SCHEMA_VERSION);
+  });
+
+  it('refuses a DB from a newer app', async () => {
+    raw.exec(`PRAGMA user_version = ${SCHEMA_VERSION + 1}`);
+    await expect(migrate(db)).rejects.toThrow(/newer/);
+  });
+
+  it('rolls back a failed step and keeps the old version', async () => {
+    const fresh = new DatabaseSync(':memory:');
+    const bad: MigratableDb = {
+      ...adapter(fresh),
+      execAsync: async (sql) => {
+        if (sql.includes('CREATE TABLE devices')) fresh.exec(`CREATE TABLE half (x); ${'SELECT nope FROM nowhere;'}`);
+        else fresh.exec(sql);
+      },
+    };
+    await expect(migrate(bad)).rejects.toThrow();
+    expect(fresh.prepare('PRAGMA user_version').get()).toEqual({ user_version: 0 });
+    expect(fresh.prepare("SELECT name FROM sqlite_master WHERE name = 'half'").get()).toBeUndefined();
+    fresh.close();
+  });
+
+  it('creates every table from the plan', () => {
+    const names = (raw.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as { name: string }[]).map(
+      (r) => r.name,
+    );
+    expect(names).toEqual(
+      expect.arrayContaining([
+        'devices', 'products', 'product_aliases', 'customers', 'voice_logs',
+        'purchases', 'sales', 'ledger', 'expenses', 'owner_withdrawals', 'day_close',
+      ]),
+    );
+  });
+
+  it('gives every table id, device_id, created_at, updated_at', () => {
+    const tables = raw.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as { name: string }[];
+    for (const { name } of tables) {
+      const cols = (raw.prepare(`PRAGMA table_info(${name})`).all() as { name: string }[]).map((c) => c.name);
+      expect({ name, cols }).toEqual({ name, cols: expect.arrayContaining(['id', 'device_id', 'created_at', 'updated_at']) });
+    }
+  });
+});
+
+describe('devices', () => {
+  it('stores device_name with role owner | staff, default staff', () => {
+    insert(raw, 'devices', { ...row('d1'), device_name: 'আব্বু', role: 'owner' });
+    insert(raw, 'devices', { ...row('d2'), device_name: 'কর্মচারী ১' });
+    expect(raw.prepare('SELECT device_name, role FROM devices ORDER BY id').all()).toEqual([
+      { device_name: 'আব্বু', role: 'owner' },
+      { device_name: 'কর্মচারী ১', role: 'staff' },
+    ]);
+  });
+
+  it('rejects other roles', () => {
+    expect(() => insert(raw, 'devices', { ...row('d3'), device_name: 'x', role: 'boss' })).toThrow(/CHECK/);
+  });
+
+  it('allows renaming (devices are not entries)', () => {
+    insert(raw, 'devices', { ...row('d1'), device_name: 'আব্বু' });
+    raw.exec("UPDATE devices SET device_name = 'রহমান' WHERE id = 'd1'");
+    expect(raw.prepare('SELECT device_name FROM devices').get()).toEqual({ device_name: 'রহমান' });
+  });
+});
+
+describe('entries are append-only', () => {
+  beforeEach(() => {
+    insert(raw, 'products', { ...row('p1'), name: 'চাল', unit: 'kg', sell_price_poisha: 6000 });
+    insert(raw, 'expenses', { ...entry('e1'), item: 'বিদ্যুৎ বিল', amount_poisha: 50000 });
+  });
+
+  it.each(ENTRY_TABLES)('%s has update/delete triggers and an effective view', (t) => {
+    const triggers = (
+      raw.prepare("SELECT name FROM sqlite_master WHERE type = 'trigger' AND tbl_name = ?").all(t) as { name: string }[]
+    ).map((r) => r.name);
+    expect(triggers.sort()).toEqual([`${t}_no_delete`, `${t}_no_update`]);
+    expect(raw.prepare("SELECT name FROM sqlite_master WHERE type = 'view' AND name = ?").get(`v_${t}`)).toBeTruthy();
+  });
+
+  it('blocks UPDATE and DELETE', () => {
+    expect(() => raw.exec("UPDATE expenses SET amount_poisha = 1 WHERE id = 'e1'")).toThrow(/append-only/);
+    expect(() => raw.exec("DELETE FROM expenses WHERE id = 'e1'")).toThrow(/append-only/);
+  });
+
+  it('a correction row replaces the original in the v_ view', () => {
+    insert(raw, 'expenses', { ...entry('e2'), item: 'বিদ্যুৎ বিল', amount_poisha: 45000, corrects_id: 'e1' });
+    expect(raw.prepare('SELECT id, amount_poisha FROM v_expenses').all()).toEqual([{ id: 'e2', amount_poisha: 45000 }]);
+    expect(raw.prepare('SELECT COUNT(*) AS n FROM expenses').get()).toEqual({ n: 2 });
+  });
+
+  it('master data can still be updated', () => {
+    raw.exec("UPDATE products SET sell_price_poisha = 6500 WHERE id = 'p1'");
+    expect(raw.prepare('SELECT sell_price_poisha FROM products').get()).toEqual({ sell_price_poisha: 6500 });
+  });
+});
+
+describe('v_stock = purchases − sales', () => {
+  beforeEach(() => {
+    insert(raw, 'products', { ...row('p1'), name: 'চাল', unit: 'kg', sell_price_poisha: 6000 });
+    insert(raw, 'purchases', {
+      ...entry('pu1'), product_id: 'p1', quantity: 50, buy_price_poisha: 5500, sell_price_poisha: 6000, total_poisha: 275000,
+    });
+    insert(raw, 'sales', {
+      ...entry('s1'), product_id: 'p1', quantity: 2, sell_price_poisha: 6000, amount_poisha: 12000, cost_price_poisha: 5500,
+    });
+  });
+
+  const stock = () => raw.prepare("SELECT stock FROM v_stock WHERE product_id = 'p1'").get();
+
+  it('subtracts sales from purchases', () => {
+    expect(stock()).toEqual({ stock: 48 });
+  });
+
+  it('uses the corrected quantity, not the original', () => {
+    insert(raw, 'sales', {
+      ...entry('s2'), product_id: 'p1', quantity: 1, sell_price_poisha: 6000, amount_poisha: 6000,
+      cost_price_poisha: 5500, corrects_id: 's1',
+    });
+    expect(stock()).toEqual({ stock: 49 });
+  });
+
+  it('a credit sale needs a customer', () => {
+    expect(() =>
+      insert(raw, 'sales', {
+        ...entry('s3'), product_id: 'p1', quantity: 1, sell_price_poisha: 6000, amount_poisha: 6000,
+        cost_price_poisha: 5500, credit: 1,
+      }),
+    ).toThrow(/CHECK/);
+  });
+
+  it('enforces foreign keys', () => {
+    expect(() =>
+      insert(raw, 'sales', {
+        ...entry('s4'), product_id: 'nope', quantity: 1, sell_price_poisha: 1, amount_poisha: 1, cost_price_poisha: 1,
+      }),
+    ).toThrow(/FOREIGN KEY/);
+  });
+});
