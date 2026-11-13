@@ -19,7 +19,6 @@ const implicit: Case[] = [
   { text: 'কর্মচারীর বেতন আট হাজার দিলাম', expected: { intent: 'expense', item: 'কর্মচারীর বেতন', amount: 8000 } },
   { text: 'কারেন্ট বিল দিলাম সাড়ে সাতশ টাকা', expected: { intent: 'expense', item: 'কারেন্ট বিল', amount: 750 } },
   { text: 'গাড়িভাড়া ১৫০', expected: { intent: 'expense', item: 'গাড়িভাড়া', amount: 150 } },
-  { text: 'মালিক ২০০ টাকা নিল', expected: { intent: 'expense', item: 'মালিক', amount: 200 } },
 ];
 
 const context: Case[] = [

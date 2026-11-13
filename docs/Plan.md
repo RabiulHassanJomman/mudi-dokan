@@ -17,11 +17,18 @@ Main features (MVP)
 2.  🛒 Bikri: "চাল ২ কেজি" bolle stock kombe ar ajker bikri te jog hobe. "১০০ টাকার চিনি" bolleo hobe, app nije poriman hisab korbe.
 3.  📒 Baki khata: "করিম ২০০ টাকা বাকি" ba "করিম ১০০ জমা" diye hisab rakha jabe. "করিম চাল ১ কেজি বাকিতে নিল" bolle eki sathe bikri ar baki dutoi hobe.
 4.  Stock jana: "চাল কত আছে?" jiggesh korle app bole debe koto ache ar dam koto.
-5.  💰 Lav hisab: prottek bikri te sei somoyer kena dam save hobe. "আজ লাভ কত?" jiggesh korle ajker bikri, kena khoroch ar lav bole debe.
+5.  💰 Lav hisab: prottek bikri te sei somoyer kena dam save hobe. "আজ লাভ কত?" (ba "এই মাসে লাভ কত") er uttor e 4 ta jinish bolbe, ei kromey:
+    – বিক্রি (sales) = shob bikri (nogod + baki) er mot dam.
+    – মোট লাভ (gross profit) = বিক্রি − bikri kora maal er kena dam (prottek sale e save kora sei somoyer kena dam × poriman).
+    – খরচ (expenses) = oi somoyer shob expense entry (feature 7).
+    – আসল লাভ (net profit) = মোট লাভ − খরচ.
+    Malik/poribar er nea taka (owner_withdrawal, feature 10) lav e dhora hobe na — eta khoroch na. Maal kena (purchase) o khoroch na; sheta bikri hole kena dam hishebe ashe.
+    TTS: "আজ বিক্রি ৪,৮৫০ টাকা। মোট লাভ ৯২০। খরচ ৫৭০। আসল লাভ ৩৫০ টাকা।"
 6.  🎧 Voice reference: prottek voice command er audio save hobe, tar transcript ar je entry hoyeche tar sathe link kore. Itihas list e prottek entry te ▶️ button thakbe: shune naam, poriman ba dam er vul thik kora jabe. Thik korle original entry muchbe na; ekta correction entry hobe, ager ar porer dui hisab-i dekha jabe.
-7.  🧾 Khoroch (expense): "বিদ্যুৎ বিল ৫০০ টাকা খরচ", "চা নাস্তা ৫০ খরচ", "ভাড়া দিলাম ২০০০" bolle khoroch entry hobe (ki, koto taka). Cash screen er "খরচ বলুন" button e "খরচ" shobdo chara-o hobe. Khoroch cash theke kome; lav hisab e operating khoroch alada dekhano jabe.
+7.  🧾 Khoroch (expense): "বিদ্যুৎ বিল ৫০০ টাকা খরচ", "চা নাস্তা ৫০ খরচ", "ভাড়া দিলাম ২০০০" bolle khoroch entry hobe (ki, koto taka). Cash screen er "খরচ বলুন" button e "খরচ" shobdo chara-o hobe. Khoroch cash theke kome ar net profit theke bad jay (feature 5).
 8.  🏁 Opening cash: prothombar chalu korar somoy (Setup) "এখন ক্যাশে কত টাকা?" — bole, type kore ba note gune deoa jabe. Etai prothom diner গতকালের ক্যাশ.
-9.  💵 Din sheshe cash milano (Cash + CashCount screen): হাতে থাকার কথা = গতকালের ক্যাশ + নগদ বিক্রি + বাকি জমা − খরচ (− nogod kena). "গুনে মিলান" e note (১০০০…১০) gune "গুনে পেলাম" er sathe milabe, kom/beshi dekhabe. "দিন শেষ করুন" = din bondho, gune paoa taka porer diner opening cash.
+9.  💵 Din sheshe cash milano (Cash + CashCount screen): হাতে থাকার কথা = গতকালের ক্যাশ + নগদ বিক্রি + বাকি জমা − খরচ − nogod kena − মালিক নিল. "গুনে মিলান" e note (১০০০…১০) gune "গুনে পেলাম" er sathe milabe, kom/beshi dekhabe. "দিন শেষ করুন" = din bondho, gune paoa taka porer diner opening cash.
+10. 👤 Malik/poribar er taka nea (owner_withdrawal): "মালিক ৫০০ নিল", "আব্বু ১০০০ নিল বাসার জন্য", "বাসার জন্য ৩০০ টাকা নিলাম". Ke nilo (person; na bolle ei phone er device_name), koto, keno (note). Hate thakar kotha cash theke kome, kintu khoroch na, tai lav hisab e ashe na.
 Jara porte pare na, tader jonno UX
 • Screen er majhe ekta boro 🎤 button, niche 3 ta icon tab.
 • Prottek command er por app bole shonabe, jemon "চাল ২ কেজি, ১২০ টাকা। ঠিক আছে?" Tarpor boro ✅/❌ button chapa jabe, ba mukhe "হ্যাঁ"/"না" bola jabe.
@@ -46,12 +53,12 @@ Audio save
 expo-speech-recognition er recordingOptions.persist (Android 13+): recognizer nijei audio file save kore. File age phone e save hoy, internet pele Google Drive er "Dokan Audio" folder e upload hoy (Google Sign-In, drive.file scope). Drive fileId Firestore er voice_logs e save hoy; onno phone oi fileId diye download kore bajay. Upload fail hole retry queue.
 Bujha (parsing)
 Nijer rule-based Bangla parser: shongkha shobdo ("আড়াই", "পাঁচশ"), unit, keyword dhore
-Table: products (naam, unit, stock, kena dam, becha dam), purchases (kena: poriman, kena dam), sales (poriman, becha dam, sei somoyer kena dam), customers (baki), ledger (baki/joma er itihas), expenses (khoroch: item, taka), day_close (din shesh: opening cash, thakar kotha, gune paoa, note count; setup er opening cash o ekhane). Prottek row e id (UUID), device_id, updated_at thakbe sync er jonno.
-voice_logs (audio file, transcript, kon phone, somoy). Prottek entry (purchase, sale, ledger, expense) e voice_log_id thakbe; correction entry corrects_id diye ager entry ke point korbe.
+Table: products (naam, unit, stock, kena dam, becha dam), purchases (kena: poriman, kena dam), sales (poriman, becha dam, sei somoyer kena dam), customers (baki), ledger (baki/joma er itihas), expenses (khoroch: item, taka), owner_withdrawals (malik nilo: person, taka, note), day_close (din shesh: opening cash, thakar kotha, gune paoa, note count; setup er opening cash o ekhane). Prottek row e id (UUID), device_id, updated_at thakbe sync er jonno.
+voice_logs (audio file, transcript, kon phone, somoy). Prottek entry (purchase, sale, ledger, expense, owner_withdrawal) e voice_log_id thakbe; correction entry corrects_id diye ager entry ke point korbe.
 product_aliases (alias → product): STT eki maal alada banane likhte pare ("পেঁয়াজ"/"পিঁয়াজ"); audio shune naam thik korle vul banan ta automatic alias hoye jabe. ledger e party_type (customer/supplier) — supplier/মহাজন Phase 3, kintu column MVP schema tei thakbe jate pore migration na lage. Prottek entry te device_name (phone e ekbar set kora naam, jemon "Abbu", "Karmochari 1").
 Phase
 1.  Pilot (2–3 din): shudhu mic → text → parse prototype. Asol dokane bhir er moddhe 50–100 ta asol command test. 80% er kom thik hole command design bodlano (choto command, list theke beche newa). Sync ar audio er age eta.
-2.  MVP: upore 9 ta feature (khoroch, opening cash ar din sheshe cash milano soho), voice diye confirm, offline DB, multi-phone sync, voice e undo ("ভুল হয়েছে"/"বাতিল" bolle shesh entry correction diye ulte jabe), product naam alias, ar prottek entry te phone/karmochari er naam.
+2.  MVP: upore 10 ta feature (khoroch, opening cash, din sheshe cash milano ar malik er taka nea soho), voice diye confirm, offline DB, multi-phone sync, voice e undo ("ভুল হয়েছে"/"বাতিল" bolle shesh entry correction diye ulte jabe), product naam alias, ar prottek entry te phone/karmochari er naam.
 3.  Tarpor: supplier/mohajon er baki ("রহিম ট্রেডার্স থেকে ৫০ কেজি চাল বাকিতে কিনলাম"), "আজকের হিসাব" voice summary (bikri, baki, joma, khoroch ar cash e koto thaka uchit bole debe; screen ta MVP te ache), protidin raat e Drive e backup (Excel/JSON), masher hisab bole shonano, kom stock alert.
 4.  Pore: barcode scan (ager POS kaj er sathe jora), customer ke SMS e baki mone koriye deoa.
 Risk
@@ -79,7 +86,7 @@ Screen list (design file → naam → kaj → main elements → kothay theke kho
 7.  Baki.dc.html — বাকি খাতা tab. Header + শুনুন. ক্রেতা / মহাজন toggle — MVP te মহাজন tab lukano thakbe (Phase 3), toggle ta-o dekhabe na; shudhu ক্রেতা list. Orange "মোট পাবো" total card. Customer list: initial avatar, naam, ৳ baki, ▶️. Niche orange "বাকি / জমা বলুন" (mic). Bottom nav. Opens from: bottom nav. Naam tap → Customer.
 8.  Customer.dc.html — ক্রেতার হিসাব (e.g. করিম). Back (→ Baki), ফোন (tel:), শুনুন. Header card: avatar, naam, "পাবো ৳ ২,৩০০". জমা নিন (green) / বাকি দিন (orange) button. "হিসাব" ledger list: + (baki, orange) / − (joma, green) sign, ki, kobe, ৳, ▶️. Opens from: Baki list er naam.
 9.  History.dc.html — আজকের খাতা (শুনে ঠিক করা). Voice reference + correction. Back + শুনুন. Filter chip: সব / বিক্রি / বাকি / খরচ. Entry row: ▶️ (audio), icon tile, title, poriman, ৳, edit (✎). Thik kora entry te blue border + "~~৩ কেজি~~ → ১ কেজি". Legend: "নীল দাগ = শুনে ঠিক করা হয়েছে". Opens from: Cash screen, ar Main er "আজ বিক্রি" tile (today's sales).
-10. Cash.dc.html — আজকের ক্যাশ. Din sheshe cash milano (MVP). Back + শুনুন. Hisab card: গতকালের ক্যাশ + নগদ বিক্রি + বাকি জমা পেলাম − খরচ. Dark "হাতে থাকার কথা ৳" card. "আজকের খরচ" list (মাল কেনা নগদ, বিদ্যুৎ বিল, মালিক নিল, চা-নাস্তা) with ▶️. Niche খরচ বলুন (orange) / গুনে মিলান (green). Opens from: Main "হাতে ক্যাশ" card. Goes to: CashCount (গুনে মিলান), History, Listening (খরচ বলুন, tab = expense).
+10. Cash.dc.html — আজকের ক্যাশ. Din sheshe cash milano (MVP). Back + শুনুন. Hisab card: গতকালের ক্যাশ + নগদ বিক্রি + বাকি জমা পেলাম − খরচ − মালিক নিল. Dark "হাতে থাকার কথা ৳" card. "আজকের খরচ" list (মাল কেনা নগদ, বিদ্যুৎ বিল, চা-নাস্তা) with ▶️. Design e "মালিক নিল" khoroch list e ache — MVP te eta alada row/line hobe ("মালিক নিল"), khoroch total e na. Niche খরচ বলুন (orange) / গুনে মিলান (green). Opens from: Main "হাতে ক্যাশ" card. Goes to: CashCount (গুনে মিলান), History, Listening (খরচ বলুন, tab = expense).
 11. CashCount.dc.html — নোট গুনে মিলানো / "নোট গুনুন". Note row (১০০০ / ৫০০ / ২০০ / ১০০ / ৫০ / ২০ / ১০): rongin note chip, − count +, ৳ total. থাকার কথা vs গুনে পেলাম tile, orange status ("৳ ৫০ কম আছে"), "দিন শেষ করুন". Opens from: Cash "গুনে মিলান", Setup step ৩. Back → Cash.
 
 Navigation: ekhono wire kora baki (design e link nei)
@@ -110,6 +117,7 @@ Design tokens
 Status
 • Done: Phase 1 parser — src/parser/ (pure TS, no RN imports), `npm test` → 257 passing. Number words (১–৯৯, আধা/দেড়/আড়াই, সাড়ে/সোয়া/পৌনে, শ/হাজার/লাখ), units (কেজি, গ্রাম, লিটার, পিস/টা, প্যাকেট, ডজন, হালি, বস্তা, পোয়া), intents (bikri, kena, baki, joma, stock, lav). Plan er sob example test e ache.
 • Done: UI design review — 11 screen ar design token "Screens" section e likha (code na).
+• Done: parser e `owner_withdrawal` intent (`person`, `amount`, `note`; মালিক/আব্বু/আম্মু ba ctx.ownerNames + taka, ba "নিলাম" + taka). `npm test` → 295 passing.
 • Done: parser e `expense` intent (`item` + `amount`; "খরচ" shobdo, ba ভাড়া/বিল/বেতন/নাস্তা/মালিক + taka, ba tab = expense). `npm test` → 279 passing.
 • Next: pilot — asol dokane 50–100 ta command diye parser test, vul gulo test case banano.
 • Decisions log:
@@ -122,3 +130,5 @@ Status
   – Nov 13: মহাজন Phase 3 thakbe; MVP te tab lukano, ledger.party_type schema te thakbe.
   – Nov 13: History khule Cash screen ar Main er "আজ বিক্রি" tile theke.
   – Parser: expense er naam `item` field e (product na). "দিল" (she/he dilo) + taka = joma; "দিলাম" + ভাড়া/বিল ityadi = expense. "আজকের খরচ কত" (expense query) ekhono nei — todo.
+  – Nov 13: "মালিক" expense na — notun `owner_withdrawal` intent ar owner_withdrawals table. Expected cash theke kome, profit e na.
+  – Nov 13: Lav er uttor = বিক্রি, মোট লাভ (gross), খরচ, আসল লাভ (net = gross − খরচ). Purchase ar owner_withdrawal lav e dhora hoy na.

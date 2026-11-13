@@ -163,7 +163,8 @@ export function parseCommand(text: string, ctx: ParseContext = {}): ParsedComman
   }
 
   // ── names ──────────────────────────────────────────────────
-  const names = tokens.filter((t, k) => !used[k] && !isNoise(t)).map(stripGenitive);
+  const rawNames = tokens.filter((t, k) => !used[k] && !isNoise(t));
+  const names = rawNames.map(stripGenitive);
   const prodHit = matchKnown(names, ctx.knownProducts);
   const afterProd = prodHit ? prodHit.rest : names;
   const custHit = matchKnown(afterProd, ctx.knownCustomers);
@@ -175,10 +176,29 @@ export function parseCommand(text: string, ctx: ParseContext = {}): ParsedComman
     (t) => K.EXPENSE_HINT.has(t) || K.EXPENSE_HINT_SUFFIXES.some((s) => t.length > s.length && t.endsWith(s)),
   );
   const hasMoney = amount !== undefined || bare.length > 0 || prices.length > 0;
+
+  // owner/family withdrawal: an owner name (or "নিলাম") + money, and no stronger keyword
+  let ownerIdx = names.findIndex((t) => K.OWNER.has(t));
+  let ownerName = ownerIdx >= 0 ? names[ownerIdx] : undefined;
+  if (ownerName === undefined) {
+    const hit = matchKnown(names, ctx.ownerNames);
+    if (hit) {
+      ownerName = hit.match;
+      const first = hit.match.split(' ')[0]!;
+      ownerIdx = names.indexOf(first);
+    }
+  }
+  const strongerKeyword = [K.EXPENSE, K.BAKI, K.CREDIT, K.JOMA, K.SALE, K.PURCHASE, K.NEW].some(has);
+  const isWithdrawal =
+    !strongerKeyword &&
+    quantity === undefined &&
+    ((ownerName !== undefined && (hasMoney || has(K.TAKE))) || (has(K.SELF_TAKE) && hasMoney));
+
   let intent: Intent;
   let credit = false;
   let ledgerGuess = false;
-  if (has(K.EXPENSE)) intent = 'expense';
+  if (isWithdrawal) intent = 'owner_withdrawal';
+  else if (has(K.EXPENSE)) intent = 'expense';
   else if (has(K.PURCHASE) || has(K.NEW)) intent = 'purchase';
   else if (creditWords && (quantity !== undefined || names.length >= 2 || prodHit !== null)) {
     intent = 'sale';
@@ -200,6 +220,7 @@ export function parseCommand(text: string, ctx: ParseContext = {}): ParsedComman
   const isLedger = intent === 'baki' || intent === 'joma' || ledgerGuess;
   const isTrade = intent === 'sale' || intent === 'purchase';
   const isExpense = intent === 'expense';
+  const isOwner = intent === 'owner_withdrawal';
 
   // ── resolve leftover numbers by intent ─────────────────────
   if (intent === 'sale') {
@@ -215,13 +236,20 @@ export function parseCommand(text: string, ctx: ParseContext = {}): ParsedComman
     if (isTrade && quantity === undefined && amount === undefined) quantity = { value: b };
     else amount ??= b;
   }
-  if (isLedger || isExpense) quantity = undefined;
+  if (isLedger || isExpense || isOwner) quantity = undefined;
 
   // ── assign names ───────────────────────────────────────────
   let product: string | undefined;
   let item: string | undefined;
   let customer: string | undefined;
-  if (isExpense) {
+  let person: string | undefined;
+  let note: string | undefined;
+  if (isOwner) {
+    person = ownerName;
+    const width = ownerName ? ownerName.split(' ').length : 0;
+    // keep the note as spoken ("ওষুধের জন্য"), no genitive stripping
+    note = joinOrUndef(rawNames.filter((_, k) => ownerIdx < 0 || k < ownerIdx || k >= ownerIdx + width));
+  } else if (isExpense) {
     item = joinOrUndef(names);
   } else if (isLedger) {
     customer = matchKnown(names, ctx.knownCustomers)?.match ?? customerName(names);
@@ -254,6 +282,7 @@ export function parseCommand(text: string, ctx: ParseContext = {}): ParsedComman
     if (amount === undefined) missing.push('amount');
   }
   if (intent === 'stock_query' && !product) missing.push('product');
+  if (isOwner && amount === undefined) missing.push('amount');
   if (isExpense) {
     if (!item) missing.push('item');
     if (amount === undefined) missing.push('amount');
@@ -274,6 +303,8 @@ export function parseCommand(text: string, ctx: ParseContext = {}): ParsedComman
     product,
     item,
     customer,
+    person,
+    note,
     quantity,
     amount,
     buyPrice: intent === 'purchase' ? buyPrice : undefined,

@@ -30,11 +30,21 @@ export const EXPENSE = wordSet(['খরচ', 'খরচা', 'খরছ']);
  * Words that name an expense without saying "খরচ": "ভাড়া দিলাম ২০০০".
  * NOT in ALL_KEYWORDS — they stay in the item name.
  */
-export const EXPENSE_HINT = wordSet(['ভাড়া', 'বিল', 'বেতন', 'মজুরি', 'নাস্তা', 'মালিক']);
+export const EXPENSE_HINT = wordSet(['ভাড়া', 'বিল', 'বেতন', 'মজুরি', 'নাস্তা']);
 /** Fused forms: "গাড়িভাড়া", "কারেন্টবিল". */
 export const EXPENSE_HINT_SUFFIXES = ['ভাড়া', 'বিল'].map((s) => s.normalize('NFC'));
 
-export const MONEY =wordSet(['টাকা', 'টাকার', 'টাকায়', 'tk']);
+/**
+ * Owner/family taking cash out — not an expense, excluded from profit.
+ * NOT in ALL_KEYWORDS — the name stays as `person`.
+ */
+export const OWNER = wordSet(['মালিক', 'আব্বু', 'আব্বা', 'আম্মু', 'আম্মা']);
+/** "I took" — with money, an owner withdrawal by whoever holds this phone. */
+export const SELF_TAKE = wordSet(['নিলাম', 'নিয়েছি', 'নিছি', 'তুললাম', 'তুলেছি']);
+/** "from the cash box" — context words, dropped from the note. */
+export const CASH_BOX = wordSet(['ক্যাশ', 'ক্যাশে', 'ক্যাশের', 'থেকে', 'ড্রয়ার']);
+
+export const MONEY = wordSet(['টাকা', 'টাকার', 'টাকায়', 'tk']);
 
 export const FILLER = wordSet([
   'করলাম', 'করেছি', 'করেছে', 'করল', 'করলো', 'করে', 'করছে', 'করো',
@@ -47,5 +57,5 @@ export const FILLER = wordSet([
 export const ALL_KEYWORDS: ReadonlySet<string> = new Set([
   ...PROFIT, ...TODAY, ...STOCK, ...QUESTION, ...PURCHASE, ...NEW,
   ...BUY_MARKER, ...SELL_MARKER, ...DAM, ...SALE, ...BAKI, ...CREDIT,
-  ...TAKE, ...JOMA, ...GAVE, ...EXPENSE, ...MONEY, ...FILLER,
+  ...TAKE, ...JOMA, ...GAVE, ...EXPENSE, ...SELF_TAKE, ...CASH_BOX, ...MONEY, ...FILLER,
 ]);

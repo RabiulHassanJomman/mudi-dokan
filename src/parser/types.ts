@@ -4,6 +4,7 @@ export type Intent =
   | 'baki'
   | 'joma'
   | 'expense'
+  | 'owner_withdrawal'
   | 'stock_query'
   | 'profit_query'
   | 'unknown';
@@ -42,6 +43,10 @@ export interface ParsedCommand {
   item?: string;
   /** Customer name as spoken, e.g. "করিম". */
   customer?: string;
+  /** Who took cash out (owner_withdrawal), e.g. "মালিক", "আব্বু". Empty = this phone's device_name. */
+  person?: string;
+  /** Free-text reason (owner_withdrawal), e.g. "বাসার জন্য". */
+  note?: string;
   quantity?: Quantity;
   /** Total taka: "১০০ টাকার চিনি", "২০০ টাকা বাকি", "চাল ২ কেজি ১২০ টাকা", "ভাড়া ২০০০". */
   amount?: number;
@@ -66,4 +71,6 @@ export interface ParseContext {
   /** Known names help split "করিম চাল" into customer + product. */
   knownProducts?: string[];
   knownCustomers?: string[];
+  /** Extra names that mean the owner/family (e.g. device names); মালিক/আব্বু/আম্মু are built in. */
+  ownerNames?: string[];
 }

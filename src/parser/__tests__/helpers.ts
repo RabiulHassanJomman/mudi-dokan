@@ -21,7 +21,7 @@ export interface Case {
 
 /** Fields absent from `expected` that must also be absent from the result. */
 const CHECKED: (keyof ParsedCommand)[] = [
-  'product', 'item', 'customer', 'quantity', 'amount', 'buyPrice', 'sellPrice', 'credit', 'isNewProduct',
+  'product', 'item', 'customer', 'person', 'note', 'quantity', 'amount', 'buyPrice', 'sellPrice', 'credit', 'isNewProduct',
 ];
 
 export function check({ text, expected, ctx }: Case): void {

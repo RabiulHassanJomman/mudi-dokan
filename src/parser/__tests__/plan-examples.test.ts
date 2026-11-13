@@ -68,6 +68,12 @@ const cases: Case[] = [
   { text: 'বিদ্যুৎ বিল ৫০০ টাকা খরচ', expected: { intent: 'expense', item: 'বিদ্যুৎ বিল', amount: 500 } },
   { text: 'চা নাস্তা ৫০ খরচ', expected: { intent: 'expense', item: 'চা নাস্তা', amount: 50 } },
   { text: 'ভাড়া দিলাম ২০০০', expected: { intent: 'expense', item: 'ভাড়া', amount: 2000 } },
+  // owner withdrawal, MVP feature 10
+  { text: 'মালিক ৫০০ নিল', expected: { intent: 'owner_withdrawal', person: 'মালিক', amount: 500 } },
+  {
+    text: 'আব্বু ১০০০ নিল বাসার জন্য',
+    expected: { intent: 'owner_withdrawal', person: 'আব্বু', amount: 1000, note: 'বাসার জন্য' },
+  },
 ];
 
 describe('docs/Plan.md examples', () => {
