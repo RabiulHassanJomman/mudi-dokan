@@ -73,7 +73,7 @@ export interface ParseContext {
   knownCustomers?: string[];
   /** Extra names that mean the owner/family (e.g. device names); মালিক/আব্বু/আম্মু are built in. */
   ownerNames?: string[];
-  /** This phone's role (Setup step ২). Decides what "৩০০ টাকা নিলাম" means. */
+  /** This phone's role (Setup step ২). Decides what "৩০০ টাকা নিলাম" means; unset = staff. */
   deviceRole?: 'owner' | 'staff';
   /** This phone's device_name ("আব্বু", "কর্মচারী ১"); becomes `person` for first-person commands. */
   deviceName?: string;

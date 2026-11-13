@@ -18,12 +18,13 @@ const withdrawals: Case[] = [
     expected: { intent: 'owner_withdrawal', person: 'আব্বা', amount: 1500, note: 'ওষুধের জন্য' },
   },
   { text: 'মালিক ৩০০', expected: { intent: 'owner_withdrawal', person: 'মালিক', amount: 300 } },
-  // first person, no name: the phone's device_name says who
+  // first person on an owner phone (staff/unset: see device-role.test.ts)
   {
     text: 'বাসার জন্য ৩০০ টাকা নিলাম',
+    ctx: { deviceRole: 'owner' },
     expected: { intent: 'owner_withdrawal', amount: 300, note: 'বাসার জন্য' },
   },
-  { text: 'ক্যাশ থেকে ৫০০ তুললাম', expected: { intent: 'owner_withdrawal', amount: 500 } },
+  { text: 'ক্যাশ থেকে ৫০০ তুললাম', ctx: { deviceRole: 'owner' }, expected: { intent: 'owner_withdrawal', amount: 500 } },
   { text: 'মালিক নিল', expected: { intent: 'owner_withdrawal', person: 'মালিক', missing: ['amount'] } },
 ];
 

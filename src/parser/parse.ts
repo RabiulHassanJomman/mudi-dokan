@@ -198,7 +198,8 @@ export function parseCommand(text: string, ctx: ParseContext = {}): ParsedComman
 
   // "৩০০ টাকা নিলাম": who took it depends on whose phone this is
   const firstPerson = isWithdrawal && ownerName === undefined;
-  const staffAdvance = firstPerson && ctx.deviceRole === 'staff';
+  // role not set → staff: an unknown phone's cash-out is counted, not hidden from profit
+  const staffAdvance = firstPerson && ctx.deviceRole !== 'owner';
 
   let intent: Intent;
   let credit = false;

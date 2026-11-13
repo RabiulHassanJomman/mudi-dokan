@@ -57,12 +57,12 @@ const unchanged: Case[] = [
   { text: 'বিদ্যুৎ বিল ৫০০ টাকা খরচ', ctx: staff, expected: { intent: 'expense', item: 'বিদ্যুৎ বিল', amount: 500 } },
   { text: 'চাল ২ কেজি', ctx: owner, expected: { intent: 'sale', product: 'চাল', quantity: { value: 2, unit: 'kg' } } },
   { text: 'করিম ৫০০ টাকা দিল', ctx: staff, expected: { intent: 'joma', customer: 'করিম', amount: 500 } },
-  // role not set: owner withdrawal, person from deviceName if known
-  { text: '৩০০ টাকা নিলাম', expected: { intent: 'owner_withdrawal', amount: 300 } },
+  // role not set: treated as staff (safer: counted as expense, not hidden from profit)
+  { text: '৩০০ টাকা নিলাম', expected: { intent: 'expense', item: 'অগ্রিম বেতন', amount: 300 } },
   {
     text: '৩০০ টাকা নিলাম',
     ctx: { deviceName: 'আম্মু' },
-    expected: { intent: 'owner_withdrawal', person: 'আম্মু', amount: 300 },
+    expected: { intent: 'expense', item: 'অগ্রিম বেতন', person: 'আম্মু', amount: 300 },
   },
 ];
 
