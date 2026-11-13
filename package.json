@@ -10,7 +10,8 @@
     "test": "jest",
     "typecheck": "tsc --noEmit",
     "doctor": "expo-doctor",
-    "eval:gemini": "tsx scripts/eval-gemini.ts"
+    "eval:gemini": "tsx scripts/eval-gemini.ts",
+    "eval:import": "tsx scripts/eval-import.ts"
   },
   "devDependencies": {
     "@types/jest": "^30.0.0",

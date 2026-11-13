@@ -30,4 +30,9 @@ Input = Bangla voice, output = big icons + TTS. Full plan: @docs/PLAN.md
 ## Commands
 - test: npm test
 - run: npx expo run:android
+- release APK (no Metro, for the shop phone): npm run apk
+  → android/app/build/outputs/apk/release/app-release.apk; install with
+  `adb install -r <apk>` (debug-key signed, so it installs over the dev build and keeps data)
+- eval (Mac only): npm run eval:gemini [-- --rule-only]; pilot log → fixtures:
+  npm run eval:import -- pilot.jsonl
 

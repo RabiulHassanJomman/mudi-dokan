@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 
 import { parseCommand, shouldEscalate } from '../src/parser';
 import type { Intent, ParseContext, ParsedCommand, Unit } from '../src/parser/types';
+import type { Expected, ExpectedItem, Fixture, Seed, Tab } from './eval-types';
 
 // ── setup ──────────────────────────────────────────────────────
 
@@ -20,7 +21,9 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DEFAULT_MODEL = 'gemini-3.5-flash-lite';
 /** Free tier is ~15 requests/min: keep ≥ 4.5 s between calls. */
 const DELAY_MS = 4500;
-const MAX_429_RETRIES = 3;
+/** 429 and 503 are retried up to 3×: 429 waits the error's retryDelay, 503 backs off 2 s, 5 s, 10 s. */
+const MAX_RETRIES = 3;
+const BACKOFF_503_MS = [2000, 5000, 10_000];
 
 const args = process.argv.slice(2);
 const flag = (name: string) => {
@@ -35,38 +38,6 @@ const apiKey = process.env.GEMINI_API_KEY;
 if (!ruleOnly && !apiKey) {
   console.error('GEMINI_API_KEY is not set.\n  export GEMINI_API_KEY=<key from aistudio.google.com>  (or run with --rule-only)');
   process.exit(1);
-}
-
-type Tab = NonNullable<ParseContext['tab']>;
-type Source = 'new' | 'tests';
-
-/** The fields we compare; same names as ParsedCommand. */
-interface ExpectedItem {
-  product?: string;
-  quantity?: { value: number; unit?: Unit };
-  unitPrice?: number;
-  total?: number;
-}
-interface Expected {
-  intent: Intent;
-  customer?: string;
-  credit?: boolean;
-  amount?: number;
-  items?: ExpectedItem[];
-  item?: string;
-  person?: string;
-}
-interface Fixture {
-  text: string;
-  tab: Tab;
-  source: Source;
-  expected: Expected;
-}
-interface Seed {
-  products: { name: string; unit: Unit; price: number }[];
-  customers: string[];
-  /** Spoken name → product, like the app's product_aliases. */
-  aliases: Record<string, string>;
 }
 
 const fixtures: Fixture[] = readFileSync(join(ROOT, 'eval/fixtures.jsonl'), 'utf8')
@@ -259,9 +230,9 @@ async function callGemini(f: Fixture, attempt = 0): Promise<Call> {
     outputTokens: body?.usageMetadata?.candidatesTokenCount ?? 0,
     thoughtTokens: body?.usageMetadata?.thoughtsTokenCount ?? 0,
   };
-  if (res.status === 429 && attempt < MAX_429_RETRIES) {
-    const wait = retryDelayMs(body);
-    process.stdout.write(`\n  429, waiting ${(wait / 1000).toFixed(1)} s (retry ${attempt + 1}/${MAX_429_RETRIES})`);
+  if ((res.status === 429 || res.status === 503) && attempt < MAX_RETRIES) {
+    const wait = res.status === 429 ? retryDelayMs(body) : BACKOFF_503_MS[attempt]!;
+    process.stdout.write(`\n  ${res.status}, waiting ${(wait / 1000).toFixed(1)} s (retry ${attempt + 1}/${MAX_RETRIES})`);
     await sleep(wait);
     return callGemini(f, attempt + 1);
   }
@@ -355,8 +326,7 @@ function diff(e: Expected, n: Norm): string[] {
 
 // ── run ────────────────────────────────────────────────────────
 
-interface Row {
-  text: string; tab: Tab; source: Source; expected: Expected;
+interface Row extends Fixture {
   rule: { out: Norm; fails: string[]; confidence: 'high' | 'low'; lowReasons?: string[] };
   /** fails is null on an API error (excluded from pass %). */
   gemini?: Omit<Call, 'out'> & { out: Norm | null; fails: string[] | null };
@@ -404,12 +374,23 @@ async function main() {
     ['all', rows],
     ['new', rows.filter((r) => r.source === 'new')],
     ['tests', rows.filter((r) => r.source === 'tests')],
+    // held out: real shop commands, never used to write parser rules
+    ['pilot', rows.filter((r) => r.source === 'pilot')],
+    ['  edited', rows.filter((r) => r.source === 'pilot' && r.edited)],
   ];
-  console.log('pass %        rule           gemini         hybrid');
+  console.log('pass %          rule           gemini         hybrid');
   for (const [name, xs] of groups) {
+    if (name === '  edited' && !xs.length) continue;
     const cols = [pct(xs, (r) => r.rule.fails), ruleOnly ? '—' : pct(xs, (r) => r.gemini?.fails), ruleOnly ? '—' : pct(xs, (r) => r.hybrid?.fails)];
-    console.log(`  ${`${name} (${xs.length})`.padEnd(12)}${cols.map((c) => c.padEnd(15)).join('')}`);
+    console.log(`  ${`${name} (${xs.length})`.padEnd(14)}${cols.map((c) => c.padEnd(15)).join('')}`);
   }
+  const pilotNow = rows.filter((r) => r.source === 'pilot');
+  if (pilotNow.length)
+    console.log(
+      `\npilot = held-out score. "edited" = the shopkeeper fixed the confirm card, i.e. the app's parser was wrong then;` +
+        ` the other pilot cases were accepted as parsed, so they mostly catch regressions.` +
+        (pilotNow.some((r) => r.review) ? ` ${pilotNow.filter((r) => r.review).length} pilot cases are marked review.` : ''),
+    );
   const low = rows.filter((r) => r.rule.confidence === 'low');
   const lowWrong = low.filter((r) => r.rule.fails.length).length;
   const highWrong = rows.filter((r) => r.rule.confidence === 'high' && r.rule.fails.length).length;

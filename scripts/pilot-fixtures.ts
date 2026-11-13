@@ -1,0 +1,149 @@
+/**
+ * Pilot log entry (the app's "শেয়ার" export) → eval fixture with source "pilot".
+ * Pure; the CLI is scripts/eval-import.ts.
+ *
+ * The expected result is what the shopkeeper confirmed: the parse as shown on the
+ * confirm card, with their edits applied. A field the user did not touch keeps the
+ * parser's value (it was accepted as is), so a spoken "৫০০ গ্রাম" stays 500 g even
+ * though the app saved 0.5 kg. A field they edited takes the saved value.
+ */
+import type { ParsedCommand, Unit } from '../src/parser/types';
+import type { Expected, ExpectedItem, Fixture, Seed, Tab } from './eval-types';
+
+/** One saved line, as basketSummary() writes it to voice_logs.final_json. */
+export interface SavedItem {
+  product: string;
+  new_product?: boolean;
+  quantity: number;
+  unit: Unit;
+  price_poisha: number;
+  amount_poisha: number;
+  price_mode?: 'total' | 'unit';
+}
+export interface SavedBasket {
+  credit: boolean;
+  customer: string | null;
+  total_poisha: number;
+  items: SavedItem[];
+}
+/** One entry of the export's `logs` array (src/app/pilot-log.tsx). */
+export interface PilotLog {
+  id?: string;
+  at?: string;
+  source?: 'voice' | 'typed';
+  tab?: string | null;
+  transcript?: string;
+  parsed?: Partial<ParsedCommand>;
+  outcome?: string;
+  edits?: string[];
+  saved?: SavedBasket;
+  stt_ok?: boolean;
+}
+
+export type SkipReason = 'not_saved' | 'no_transcript' | 'stt_wrong' | 'no_result';
+export type Converted = { fixture: Fixture } | { skip: SkipReason };
+
+const TABS: readonly Tab[] = ['sale', 'purchase', 'ledger', 'stock', 'expense'] as Tab[];
+const taka = (poisha: number) => Math.round(poisha) / 100;
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+export function fixtureFromLog(log: PilotLog): Converted {
+  if (log.outcome !== 'saved' && log.outcome !== 'saved_edited') return { skip: 'not_saved' };
+  const text = log.transcript?.trim();
+  if (!text) return { skip: 'no_transcript' };
+  // STT wrote something else than was said: the confirmed result is not what this text means
+  if (log.stt_ok === false) return { skip: 'stt_wrong' };
+  const saved = log.saved;
+  if (!saved || !Array.isArray(saved.items)) return { skip: 'no_result' };
+
+  const edits = new Set(log.edits ?? []);
+  const review: string[] = [];
+  const parsedItems = log.parsed?.items ?? [];
+
+  // confirm card keys are indexes into the parsed basket; removed lines are gone from saved
+  const kept = parsedItems.map((_, k) => k).filter((k) => !edits.has(`items[${k}].removed`));
+  if (kept.length !== saved.items.length) review.push('item_count');
+
+  const items: ExpectedItem[] = saved.items.map((s, j) => {
+    const k = kept[j] ?? j;
+    const p = kept.length === saved.items.length ? parsedItems[k] : undefined;
+    const edited = (f: string) => edits.has(`items[${k}].${f}`);
+    const qtyEdited = edited('quantity') || edited('unit');
+    const priceEdited = edited('pricePoisha') || edited('amountPoisha');
+    const out: ExpectedItem = { product: s.product };
+
+    if (p?.quantity && !qtyEdited) out.quantity = { ...p.quantity };
+    else if (p?.quantity || qtyEdited) out.quantity = { value: s.quantity, unit: s.unit };
+    else if (!p) out.quantity = { value: s.quantity, unit: s.unit };
+    // else: price-only line ("১০০ টাকার চিনি"), the app worked the quantity out
+
+    // unitPrice is compared only for a spoken per-unit price ("করে/প্রতি"); for a spoken
+    // total the parser also derives one, but that is not something that was said
+    const spokenPrice = p?.total !== undefined || p?.unitPrice !== undefined;
+    const perUnit = p?.priceKind === 'unit';
+    if (spokenPrice && !priceEdited && !qtyEdited) {
+      if (p!.total !== undefined) out.total = p!.total;
+      if (perUnit && p!.unitPrice !== undefined) out.unitPrice = p!.unitPrice;
+    } else if (spokenPrice) {
+      out.total = taka(s.amount_poisha);
+      if (perUnit || s.price_mode === 'unit') out.unitPrice = taka(s.price_poisha);
+    } else if (priceEdited) {
+      // the shopkeeper typed a price nobody said, or the parser missed a spoken one
+      review.push(`items[${j}].price`);
+    }
+    if (!p && review.indexOf('item_count') < 0) review.push(`items[${j}]`);
+    return out;
+  });
+
+  const expected: Expected = { intent: 'sale', items };
+  const customer = saved.customer?.trim();
+  if (customer) expected.customer = customer;
+  if (saved.credit) expected.credit = true;
+  if (items.length && items.every((i) => i.total !== undefined)) expected.amount = round2(items.reduce((t, i) => t + i.total!, 0));
+
+  const tab = TABS.includes(log.tab as Tab) ? (log.tab as Tab) : 'sale';
+  const fixture: Fixture = { text, tab, source: 'pilot', expected, edited: log.outcome === 'saved_edited' };
+  if (log.id) fixture.pilot_id = log.id;
+  if (review.length) fixture.review = review;
+  return { fixture };
+}
+
+/** The export is one JSON object ({ logs: [...] }); also take a JSON array or JSONL of logs/exports. */
+export function readPilotLogs(content: string): PilotLog[] {
+  const flatten = (v: unknown): PilotLog[] =>
+    Array.isArray(v) ? v.flatMap(flatten) : v && typeof v === 'object' && 'logs' in v ? flatten((v as { logs: unknown }).logs) : v && typeof v === 'object' ? [v as PilotLog] : [];
+  const trimmed = content.trim();
+  if (!trimmed) return [];
+  try {
+    return flatten(JSON.parse(trimmed));
+  } catch {
+    return trimmed
+      .split('\n')
+      .filter((l) => l.trim())
+      .flatMap((l, n) => {
+        try {
+          return flatten(JSON.parse(l));
+        } catch {
+          throw new Error(`line ${n + 1} is not JSON`);
+        }
+      });
+  }
+}
+
+/** Products and customers the shop confirmed that the seed list lacks (the app would know them). */
+export function seedAdditions(seed: Seed, fixtures: readonly Fixture[], logs: readonly PilotLog[]) {
+  const products = new Map<string, Seed['products'][number]>();
+  const customers = new Set<string>();
+  const known = new Set(seed.products.map((p) => p.name));
+  const ids = new Set(fixtures.map((f) => f.pilot_id).filter(Boolean));
+  for (const l of logs) {
+    if (!l.saved || (l.id && !ids.has(l.id))) continue;
+    for (const s of l.saved.items) {
+      if (!known.has(s.product) && !products.has(s.product) && s.price_poisha > 0)
+        products.set(s.product, { name: s.product, unit: s.unit, price: taka(s.price_poisha) });
+    }
+    const c = l.saved.customer?.trim();
+    if (c && !seed.customers.includes(c)) customers.add(c);
+  }
+  return { products: [...products.values()], customers: [...customers] };
+}

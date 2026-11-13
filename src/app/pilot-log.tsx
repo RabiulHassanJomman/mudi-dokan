@@ -87,8 +87,10 @@ export default function PilotLogScreen() {
       build: BUILD,
       stats: await pilotStats(db),
       logs: all.map((r) => ({
+        id: r.id,
         at: new Date(r.created_at).toISOString(),
         source: r.source,
+        tab: r.context_tab ?? undefined,
         transcript: r.transcript,
         alternatives: r.alternatives_json ? (JSON.parse(r.alternatives_json) as string[]) : undefined,
         parsed: r.parsed_json ? (JSON.parse(r.parsed_json) as unknown) : undefined,

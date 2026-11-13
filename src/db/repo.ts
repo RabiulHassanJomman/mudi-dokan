@@ -144,6 +144,8 @@ export interface VoiceLogRow {
   id: string;
   transcript: string;
   source: 'voice' | 'typed';
+  /** The tab that was open (the command's default intent). */
+  context_tab: string | null;
   parsed_json: string | null;
   audio_path: string | null;
   alternatives_json: string | null;
