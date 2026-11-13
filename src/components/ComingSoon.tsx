@@ -20,7 +20,7 @@ export function ComingSoon({ icon, tint, ink, text, step }: Props) {
       <View style={[styles.tile, { backgroundColor: tint }]}>
         <Icon name={icon} size={48} color={ink} strokeWidth={1.6} />
       </View>
-      <Txt size={fontSize.label} weight="bold" style={styles.center}>
+      <Txt wrap size={fontSize.label} weight="bold" style={styles.center}>
         {text}
       </Txt>
       <Txt size={fontSize.captionLg} weight="medium" color={colors.muted} style={styles.center}>

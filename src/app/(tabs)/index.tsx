@@ -1,131 +1,182 @@
-import { useEffect, useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { useCallback, useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { router, useFocusEffect } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 
-import { toBanglaDigits } from '../../components/ComingSoon';
 import { Icon } from '../../components/Icon';
 import { ScreenHeader } from '../../components/ScreenHeader';
 import { Txt } from '../../components/Txt';
-import { SCHEMA_VERSION } from '../../db/migrations';
-import { parseCommand } from '../../parser';
-import { colors, fonts, fontSize, radius, size, spacing } from '../../theme/tokens';
+import { pilotStats, recentSales, todayTotals, type PilotStats, type RecentSale } from '../../db/repo';
+import { formatQty, formatTaka, toBnDigits } from '../../lib/bn';
+import { useClipPlayer } from '../../lib/useClipPlayer';
+import { colors, fonts, fontSize, productTiles, radius, size, spacing } from '../../theme/tokens';
 
-/** বিক্রি (home). Step 1: shell only — mic wiring is step 2. */
+const startOfToday = () => {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+};
+
+/** বিক্রি (home): big mic, today's numbers, last entries. */
 export default function SaleScreen() {
+  const db = useSQLiteContext();
+  const play = useClipPlayer();
+  const [typing, setTyping] = useState(false);
+  const [text, setText] = useState('');
+  const [today, setToday] = useState({ sales: 0, baki: 0 });
+  const [recent, setRecent] = useState<RecentSale[]>([]);
+  const [stats, setStats] = useState<PilotStats | null>(null);
+
+  useFocusEffect(
+    useCallback(() => {
+      void (async () => {
+        setToday(await todayTotals(db, startOfToday()));
+        setRecent(await recentSales(db, 3));
+        setStats(await pilotStats(db));
+      })();
+    }, [db]),
+  );
+
+  const submitTyped = () => {
+    const t = text.trim();
+    if (!t) return;
+    setText('');
+    setTyping(false);
+    router.push({ pathname: '/confirm', params: { text: t, tab: 'sale' } });
+  };
+
   return (
     <SafeAreaView edges={['top']} style={styles.screen}>
       <ScreenHeader title="আমার দোকান" />
       <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
+        <View style={styles.tiles}>
+          <View style={[styles.tile, { backgroundColor: colors.sale }]}>
+            <Icon name="cash" size={30} color={colors.onColor} />
+            <View style={styles.flex}>
+              <Txt numberOfLines={1} size={fontSize.listAmount} weight="bold" color={colors.onColor}>
+                {formatTaka(today.sales)}
+              </Txt>
+              <Txt numberOfLines={1} size={fontSize.captionLg} weight="medium" color={colors.onColor}>
+                আজ বিক্রি
+              </Txt>
+            </View>
+          </View>
+          <View style={[styles.tile, { backgroundColor: colors.bakiTint }]}>
+            <Icon name="book" size={30} color={colors.bakiInk} />
+            <View style={styles.flex}>
+              <Txt numberOfLines={1} size={fontSize.listAmount} weight="bold" color={colors.bakiInk}>
+                {formatTaka(today.baki)}
+              </Txt>
+              <Txt numberOfLines={1} size={fontSize.captionLg} weight="medium" color={colors.bakiInk}>
+                আজ বাকি
+              </Txt>
+            </View>
+          </View>
+        </View>
+
         <View style={styles.micArea}>
-          <View
-            accessible
+          <Pressable
             accessibilityRole="button"
-            accessibilityLabel="বলতে চাপুন (ধাপ ২-এ চালু হবে)"
-            accessibilityState={{ disabled: true }}
-            style={styles.mic}
+            accessibilityLabel="বলতে চাপুন"
+            onPress={() => router.push({ pathname: '/listening', params: { tab: 'sale' } })}
+            style={({ pressed }) => [styles.mic, pressed && { transform: [{ scale: 0.96 }] }]}
           >
             <Icon name="mic" size={84} color={colors.onColor} />
-          </View>
+          </Pressable>
           <Txt size={fontSize.prompt} weight="bold">
             চাপুন, বলুন
           </Txt>
-          <Txt size={fontSize.captionLg} weight="medium" color={colors.muted}>
-            মাইক ধাপ ২-এ চালু হবে
-          </Txt>
+          {typing ? (
+            <View style={styles.typeRow}>
+              <TextInput
+                autoFocus
+                value={text}
+                onChangeText={setText}
+                onSubmitEditing={submitTyped}
+                returnKeyType="done"
+                accessibilityLabel="লিখে দিন"
+                placeholder="যেমন: চাল ২ কেজি"
+                placeholderTextColor={colors.muted}
+                style={styles.input}
+              />
+              <Pressable accessibilityRole="button" accessibilityLabel="ঠিক আছে" onPress={submitTyped} style={styles.go}>
+                <Icon name="check" size={28} color={colors.onColor} strokeWidth={2.6} />
+              </Pressable>
+            </View>
+          ) : (
+            <Pressable accessibilityRole="button" onPress={() => setTyping(true)} style={styles.typeButton}>
+              <Icon name="keyboard" size={24} color={colors.ink2} />
+              <Txt size={17} weight="semibold" color={colors.ink2}>
+                লিখুন
+              </Txt>
+            </Pressable>
+          )}
         </View>
-        <ParserCheck />
-        <DbStatus />
+
+        {recent.map((r) => (
+          <View key={r.id} style={[styles.entry, r.credit ? styles.entryCredit : null]}>
+            <View style={[styles.entryTile, { backgroundColor: productTiles[r.product] ?? colors.neutralTint }]}>
+              <Icon name="box" size={30} color={colors.ink} strokeWidth={1.6} />
+            </View>
+            <View style={styles.flex}>
+              <Txt size={21} weight="bold">
+                {r.customer ? `${r.product} · ${r.customer}` : r.product}
+              </Txt>
+              <Txt size={fontSize.bodyLg} weight="medium" color={colors.ink2}>
+                {formatQty(r.quantity, r.unit)}
+              </Txt>
+            </View>
+            <View style={styles.entryRight}>
+              <Txt size={fontSize.button} weight="bold">
+                {formatTaka(r.amount_poisha)}
+              </Txt>
+              {!!r.credit && (
+                <Txt size={fontSize.caption} weight="bold" color={colors.bakiInk}>
+                  বাকি
+                </Txt>
+              )}
+            </View>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`${r.product} শুনুন`}
+              accessibilityState={{ disabled: !r.audio_path }}
+              onPress={() => play(r.audio_path)}
+              style={[styles.play, !r.audio_path && styles.disabled]}
+            >
+              <Icon name="play" size={22} color={colors.sale} />
+            </Pressable>
+          </View>
+        ))}
+
+        <Pressable accessibilityRole="button" onPress={() => router.push('/pilot-log')} style={styles.logLink}>
+          <Icon name="list" size={20} color={colors.muted} />
+          <Txt size={fontSize.captionLg} weight="semibold" color={colors.muted}>
+            পাইলট লগ
+            {stats && stats.total > 0
+              ? ` · ${toBnDigits(stats.total)}টি কমান্ড${stats.accuracy !== null ? ` · ${toBnDigits(stats.accuracy)}% ঠিক` : ''}`
+              : ''}
+          </Txt>
+        </Pressable>
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-const FIELD_LABELS: Record<string, string> = {
-  intent: 'কাজ',
-  product: 'মাল',
-  item: 'খরচ',
-  customer: 'ক্রেতা',
-  person: 'কে',
-  quantity: 'পরিমাণ',
-  amount: 'টাকা',
-  buyPrice: 'কেনা দাম',
-  sellPrice: 'বেচা দাম',
-  credit: 'বাকিতে',
-  isNewProduct: 'নতুন মাল',
-  note: 'কারণ',
-  period: 'সময়',
-  missing: 'বাকি আছে',
-};
-
-/** Debug: type a command and see what the parser makes of it (proves the app runs src/parser). */
-function ParserCheck() {
-  const [text, setText] = useState('চাল ২ কেজি');
-  const rows = useMemo(() => {
-    const { raw: _raw, normalized: _norm, ...fields } = parseCommand(text, { tab: 'sale' });
-    return Object.entries(fields)
-      .filter(([, v]) => !(Array.isArray(v) && v.length === 0))
-      .map(([k, v]) => [FIELD_LABELS[k] ?? k, typeof v === 'object' ? JSON.stringify(v) : String(v)] as const);
-  }, [text]);
-
-  return (
-    <View style={styles.card}>
-      <Txt size={fontSize.captionLg} weight="bold" color={colors.muted}>
-        পার্সার পরীক্ষা (লিখে দেখুন)
-      </Txt>
-      <TextInput
-        value={text}
-        onChangeText={setText}
-        accessibilityLabel="কমান্ড লিখুন"
-        placeholder="লিখে দিন…"
-        placeholderTextColor={colors.muted}
-        style={styles.input}
-      />
-      {rows.map(([k, v]) => (
-        <View key={k} style={styles.row}>
-          <Txt size={fontSize.body} weight="medium" color={colors.ink2}>
-            {k}
-          </Txt>
-          <Txt size={fontSize.body} weight="bold" style={styles.value}>
-            {v}
-          </Txt>
-        </View>
-      ))}
-    </View>
-  );
-}
-
-/** Debug: confirms the SQLite schema migrated on this phone. */
-function DbStatus() {
-  const db = useSQLiteContext();
-  const [status, setStatus] = useState('ডাটাবেস দেখছি…');
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      const v = await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version');
-      const t = await db.getFirstAsync<{ n: number }>(
-        "SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
-      );
-      if (!alive) return;
-      const ok = v?.user_version === SCHEMA_VERSION;
-      setStatus(
-        `${ok ? 'ডাটাবেস ঠিক আছে' : 'ডাটাবেস সমস্যা'} · সংস্করণ ${toBanglaDigits(v?.user_version ?? 0)} · ${toBanglaDigits(t?.n ?? 0)}টি টেবিল`,
-      );
-    })().catch((e: unknown) => alive && setStatus(`ডাটাবেস সমস্যা: ${String(e)}`));
-    return () => {
-      alive = false;
-    };
-  }, [db]);
-  return (
-    <Txt size={fontSize.caption} weight="medium" color={colors.muted} style={styles.dbStatus}>
-      {status}
-    </Txt>
-  );
-}
-
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
-  body: { paddingHorizontal: spacing.screen, paddingBottom: spacing.xl, gap: spacing.lg },
+  body: { paddingHorizontal: spacing.screen, paddingBottom: spacing.xl, gap: spacing.sm },
+  flex: { flex: 1 },
+  tiles: { flexDirection: 'row', gap: spacing.sm },
+  tile: {
+    flex: 1,
+    borderRadius: radius.card,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
   micArea: { alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.xl },
   mic: {
     width: size.mic,
@@ -136,11 +187,26 @@ const styles = StyleSheet.create({
     backgroundColor: colors.sale,
     alignItems: 'center',
     justifyContent: 'center',
-    opacity: 0.6,
   },
-  card: { backgroundColor: colors.surface, borderRadius: radius.card, padding: spacing.lg, gap: spacing.xs },
+  typeButton: {
+    height: 48,
+    paddingHorizontal: 18,
+    borderRadius: radius.pill,
+    borderWidth: 2,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  typeRow: { flexDirection: 'row', gap: spacing.xs, alignSelf: 'stretch' },
   input: {
+    flex: 1,
     height: size.iconButton,
+    // Android's default input padding clips tall Bangla vowel signs (ি looks like া)
+    paddingVertical: 0,
+    textAlignVertical: 'center',
+    includeFontPadding: true,
     borderWidth: 2,
     borderColor: colors.border,
     borderRadius: radius.icon,
@@ -150,7 +216,47 @@ const styles = StyleSheet.create({
     color: colors.ink,
     backgroundColor: colors.surface,
   },
-  row: { flexDirection: 'row', justifyContent: 'space-between', gap: spacing.md },
-  value: { flexShrink: 1, textAlign: 'right' },
-  dbStatus: { textAlign: 'center' },
+  go: {
+    width: size.iconButton,
+    height: size.iconButton,
+    borderRadius: radius.icon,
+    backgroundColor: colors.sale,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  entry: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.card,
+    padding: spacing.sm,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  entryCredit: { borderColor: colors.bakiBorder },
+  entryTile: {
+    width: size.listTile,
+    height: size.listTile,
+    borderRadius: radius.icon,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  entryRight: { alignItems: 'flex-end' },
+  play: {
+    width: size.iconButton,
+    height: size.iconButton,
+    borderRadius: radius.pill,
+    backgroundColor: colors.saleTint,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  disabled: { opacity: 0.35 },
+  logLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xxs,
+    minHeight: size.minTouch,
+  },
 });

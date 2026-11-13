@@ -34,7 +34,20 @@
             "./node_modules/@expo-google-fonts/hind-siliguri/700Bold/HindSiliguri_700Bold.ttf"
           ]
         }
-      ]
+      ],
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "কথা শুনে হিসাব লিখতে মাইক লাগবে।",
+          "speechRecognitionPermission": "কথা শুনে হিসাব লিখতে অনুমতি লাগবে।",
+          "androidSpeechServicePackages": [
+            "com.google.android.googlequicksearchbox",
+            "com.google.android.as"
+          ]
+        }
+      ],
+      "expo-audio",
+      "expo-asset"
     ],
     "experiments": {
       "typedRoutes": true

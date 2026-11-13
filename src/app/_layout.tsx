@@ -11,6 +11,12 @@ export default function RootLayout() {
       <StatusBar style="dark" />
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.bg } }}>
         <Stack.Screen name="(tabs)" />
+        <Stack.Screen
+          name="listening"
+          options={{ presentation: 'fullScreenModal', animation: 'fade', contentStyle: { backgroundColor: colors.listening.bg } }}
+        />
+        <Stack.Screen name="confirm" options={{ animation: 'slide_from_bottom' }} />
+        <Stack.Screen name="pilot-log" />
       </Stack>
     </SQLiteProvider>
   );

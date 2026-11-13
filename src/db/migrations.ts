@@ -159,8 +159,23 @@ CREATE VIEW v_stock AS
   FROM products p WHERE p.archived = 0;
 `;
 
+/** v2 (build step 2): pilot debug log on voice_logs; sales before any purchase have unknown cost. */
+const V2 = `
+ALTER TABLE voice_logs ADD COLUMN source TEXT NOT NULL DEFAULT 'voice' CHECK (source IN ('voice','typed'));
+ALTER TABLE voice_logs ADD COLUMN context_tab TEXT;
+ALTER TABLE voice_logs ADD COLUMN alternatives_json TEXT;   -- other STT guesses
+ALTER TABLE voice_logs ADD COLUMN stt_error TEXT;           -- no-speech, network, ...
+-- pending → saved | saved_edited | cancelled | unsupported | stt_error
+ALTER TABLE voice_logs ADD COLUMN outcome TEXT NOT NULL DEFAULT 'pending'
+  CHECK (outcome IN ('pending','saved','saved_edited','cancelled','unsupported','stt_error'));
+ALTER TABLE voice_logs ADD COLUMN edits_json TEXT;          -- fields the user changed on the confirm card
+ALTER TABLE voice_logs ADD COLUMN entry_table TEXT;
+ALTER TABLE voice_logs ADD COLUMN entry_id TEXT;
+ALTER TABLE sales ADD COLUMN cost_known INTEGER NOT NULL DEFAULT 1 CHECK (cost_known IN (0,1));
+`;
+
 /** Index i holds the SQL that takes the DB from user_version i to i + 1. */
-export const MIGRATIONS: readonly string[] = [V1];
+export const MIGRATIONS: readonly string[] = [V1, V2];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;
 

@@ -1,7 +1,9 @@
 import Svg, { Circle, Path, Rect } from 'react-native-svg';
 
 /** Stroke icons from the design (24×24 viewBox, round caps). */
-export type IconName = 'cart' | 'box' | 'book' | 'speaker' | 'mic' | 'keyboard';
+export type IconName =
+  | 'cart' | 'box' | 'book' | 'speaker' | 'mic' | 'keyboard'
+  | 'back' | 'plus' | 'minus' | 'check' | 'close' | 'cash' | 'play' | 'list';
 
 interface Props {
   name: IconName;
@@ -48,6 +50,20 @@ export function Icon({ name, size = 24, color, strokeWidth = 1.8 }: Props) {
           <Path {...p} d="M12 18v3" />
         </>
       )}
+      {name === 'back' && <Path {...p} d="M15 6l-6 6 6 6" />}
+      {name === 'plus' && <Path {...p} d="M5 12h14M12 5v14" />}
+      {name === 'minus' && <Path {...p} d="M5 12h14" />}
+      {name === 'check' && <Path {...p} d="M5 12l5 5 9-10" />}
+      {name === 'close' && <Path {...p} d="M6 6l12 12M18 6L6 18" />}
+      {name === 'cash' && (
+        <>
+          <Rect {...p} x={2} y={6} width={20} height={12} rx={2} />
+          <Circle {...p} cx={12} cy={12} r={3} />
+          <Path {...p} d="M6 12h.01M18 12h.01" />
+        </>
+      )}
+      {name === 'play' && <Path d="M8 5v14l11-7z" fill={color} />}
+      {name === 'list' && <Path {...p} d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />}
       {name === 'keyboard' && (
         <>
           <Rect {...p} x={2} y={6} width={20} height={12} rx={2} />

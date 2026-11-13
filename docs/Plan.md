@@ -131,7 +131,8 @@ Status
 • Done: parser e `owner_withdrawal` intent (`person`, `amount`, `note`; মালিক/আব্বু/আম্মু ba ctx.ownerNames + taka, ba "নিলাম" + taka). `npm test` → 295 passing.
 • Done: parser e `expense` intent (`item` + `amount`; "খরচ" shobdo, ba ভাড়া/বিল/বেতন/নাস্তা/মালিক + taka, ba tab = expense). `npm test` → 279 passing.
 • Done: Build step 1 — Expo SDK 58 dev build shell (src/app, expo-router), design token (src/theme/tokens.ts, Hind Siliguri embed), বিক্রি/মাল/বাকি tab bar + placeholder, SQLite schema v1 + migration (src/db, 22 test), app parser import kore (বিক্রি tab e "পার্সার পরীক্ষা" debug box ar DB status). `npm test` → 331 passing.
-• Next: build step 2 — Listening → Confirm → sale save + pilot debug log.
+• Done: build step 2 (Pixel 7 e type kora path test hoyeche; voice path user er test baki) — 🎤 → শুনছি (bn-BD STT, audio phone e save) → নিশ্চিত করুন (TTS readback, হ্যাঁ/না bola ba button, poriman +/−, নগদ/বাকি, notun maal er dam) → sale save (baki hole ledger row-o). "লিখুন" type kora command-o eki confirm card e jay. Home e আজ বিক্রি/আজ বাকি ar shesh 3 ta entry (▶️). Pilot log screen: shob command, ki holo, ▶️, accuracy % (target 80%), JSON share. `npm test` → 389 passing.
+• Next: dokane pilot (50–100 command) → log share → step 3 (Pick-by-picture) ar step 6 er parser fix.
 • Decisions log:
   – Test: Jest + ts-jest.
   – "X চাল ১ কেজি বাকিতে নিল" = ekta `sale` with `credit: true`; app layer sale + baki duto row likhbe.
@@ -149,3 +150,9 @@ Status
   – Nov 13: Phase gulo incremental build order e (step 1–8); pilot shuru step 2 te.
   – Nov 13: Stack: Expo SDK 58 (RN 0.88), expo-router (src/app) JS tabs with custom tab bar, expo-sqlite, Hind Siliguri expo-font plugin diye embed (Android e family = file naam, weight onujayi alada family). android/ folder generate hoy (prebuild), git e nei.
   – Nov 13: DB: taka INTEGER poisha (৳1 = 100) e; poriman REAL product er unit e. Entry table (purchases, sales, ledger, expenses, owner_withdrawals, day_close) e UPDATE/DELETE trigger diye bondho; correction = notun row corrects_id soho, v_<table> view shudhu shesh version dekhay. Migration: PRAGMA user_version, prottek step transaction e.
+  – Nov 13: Pilot log = voice_logs table (schema v2): source (voice/typed), alternatives, stt_error, outcome (saved / saved_edited / cancelled / unsupported / stt_error), edits (confirm card e ki bodlalo). Accuracy = edit chara saved ÷ (saved + edited + cancelled). Confirm theke kichu na kore chole gele = cancelled.
+  – Nov 13: Step 2 te shudhu bikri save hoy; onno intent (baki, joma, khoroch…) parse hoy, log e "unsupported" hoy, save hoy na.
+  – Nov 13: Notun maal: prothom bikri tei product toiri hoy (unit = bola unit, dam = bola mot dam ÷ poriman ba confirm card e likha dam). Kena na thakle sale.cost_known = 0 (lav hisab e alada dhorte hobe).
+  – Nov 13: Ei phone er device_id/naam/role expo-sqlite kv-store e (sync hoy na); Setup na howa porjonto naam "এই ফোন", role nei (= staff).
+  – Nov 13: Audio clip app er document folder e (cache na), jate 30 din porjonto thake.
+  – Nov 13: Android e Bangla text auto-width box e shesh shobdo hariye jay ("আজ বাকি" → "আজ"), tai Txt default ek line (wrap prop diye beshi line). TextInput e paddingVertical 0, na hole ি er matha kete jay.
