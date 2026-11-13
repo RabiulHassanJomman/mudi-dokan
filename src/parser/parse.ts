@@ -171,20 +171,27 @@ export function parseCommand(text: string, ctx: ParseContext = {}): ParsedComman
 
   // ── intent ─────────────────────────────────────────────────
   const creditWords = has(K.CREDIT) || (has(K.BAKI) && has(K.TAKE));
+  const expenseHint = tokens.some(
+    (t) => K.EXPENSE_HINT.has(t) || K.EXPENSE_HINT_SUFFIXES.some((s) => t.length > s.length && t.endsWith(s)),
+  );
+  const hasMoney = amount !== undefined || bare.length > 0 || prices.length > 0;
   let intent: Intent;
   let credit = false;
   let ledgerGuess = false;
-  if (has(K.PURCHASE) || has(K.NEW)) intent = 'purchase';
+  if (has(K.EXPENSE)) intent = 'expense';
+  else if (has(K.PURCHASE) || has(K.NEW)) intent = 'purchase';
   else if (creditWords && (quantity !== undefined || names.length >= 2 || prodHit !== null)) {
     intent = 'sale';
     credit = true;
   } else if (has(K.BAKI) || creditWords) intent = 'baki';
   else if (has(K.JOMA)) intent = 'joma';
   else if (has(K.SALE)) intent = 'sale';
+  else if (expenseHint && hasMoney && quantity === undefined) intent = 'expense';
   else if (has(K.GAVE) && amount !== undefined && quantity === undefined) intent = 'joma';
   else if (ctx.tab === 'sale') intent = 'sale';
   else if (ctx.tab === 'purchase') intent = 'purchase';
   else if (ctx.tab === 'stock') intent = 'stock_query';
+  else if (ctx.tab === 'expense') intent = 'expense';
   else if (ctx.tab === 'ledger') {
     intent = 'unknown'; // baki or joma? the confirm card asks
     ledgerGuess = true;
@@ -192,6 +199,7 @@ export function parseCommand(text: string, ctx: ParseContext = {}): ParsedComman
 
   const isLedger = intent === 'baki' || intent === 'joma' || ledgerGuess;
   const isTrade = intent === 'sale' || intent === 'purchase';
+  const isExpense = intent === 'expense';
 
   // ── resolve leftover numbers by intent ─────────────────────
   if (intent === 'sale') {
@@ -207,12 +215,15 @@ export function parseCommand(text: string, ctx: ParseContext = {}): ParsedComman
     if (isTrade && quantity === undefined && amount === undefined) quantity = { value: b };
     else amount ??= b;
   }
-  if (isLedger) quantity = undefined;
+  if (isLedger || isExpense) quantity = undefined;
 
   // ── assign names ───────────────────────────────────────────
   let product: string | undefined;
+  let item: string | undefined;
   let customer: string | undefined;
-  if (isLedger) {
+  if (isExpense) {
+    item = joinOrUndef(names);
+  } else if (isLedger) {
     customer = matchKnown(names, ctx.knownCustomers)?.match ?? customerName(names);
   } else if (intent === 'stock_query') {
     product = joinOrUndef(names);
@@ -243,6 +254,10 @@ export function parseCommand(text: string, ctx: ParseContext = {}): ParsedComman
     if (amount === undefined) missing.push('amount');
   }
   if (intent === 'stock_query' && !product) missing.push('product');
+  if (isExpense) {
+    if (!item) missing.push('item');
+    if (amount === undefined) missing.push('amount');
+  }
 
   const isNewProduct = intent === 'purchase' && has(K.NEW) ? true : undefined;
   if (isNewProduct) {
@@ -257,6 +272,7 @@ export function parseCommand(text: string, ctx: ParseContext = {}): ParsedComman
   return compact({
     intent,
     product,
+    item,
     customer,
     quantity,
     amount,

@@ -64,6 +64,10 @@ const cases: Case[] = [
     ctx: { tab: 'sale' },
     expected: { intent: 'sale', product: 'চাল', quantity: { value: 2, unit: 'kg' } },
   },
+  // খরচ (expense), MVP feature 7
+  { text: 'বিদ্যুৎ বিল ৫০০ টাকা খরচ', expected: { intent: 'expense', item: 'বিদ্যুৎ বিল', amount: 500 } },
+  { text: 'চা নাস্তা ৫০ খরচ', expected: { intent: 'expense', item: 'চা নাস্তা', amount: 50 } },
+  { text: 'ভাড়া দিলাম ২০০০', expected: { intent: 'expense', item: 'ভাড়া', amount: 2000 } },
 ];
 
 describe('docs/Plan.md examples', () => {

@@ -25,12 +25,21 @@ export const JOMA = wordSet(['জমা', 'শোধ', 'পরিশোধ']);
 /** "gave" — with only an amount, a payment (joma). */
 export const GAVE = wordSet(['দিল', 'দিলো', 'দিয়েছে', 'দিছে', 'দিলেন', 'দিয়েছেন']);
 
-export const MONEY = wordSet(['টাকা', 'টাকার', 'টাকায়', 'tk']);
+export const EXPENSE = wordSet(['খরচ', 'খরচা', 'খরছ']);
+/**
+ * Words that name an expense without saying "খরচ": "ভাড়া দিলাম ২০০০".
+ * NOT in ALL_KEYWORDS — they stay in the item name.
+ */
+export const EXPENSE_HINT = wordSet(['ভাড়া', 'বিল', 'বেতন', 'মজুরি', 'নাস্তা', 'মালিক']);
+/** Fused forms: "গাড়িভাড়া", "কারেন্টবিল". */
+export const EXPENSE_HINT_SUFFIXES = ['ভাড়া', 'বিল'].map((s) => s.normalize('NFC'));
+
+export const MONEY =wordSet(['টাকা', 'টাকার', 'টাকায়', 'tk']);
 
 export const FILLER = wordSet([
   'করলাম', 'করেছি', 'করেছে', 'করল', 'করলো', 'করে', 'করছে', 'করো',
   'হলো', 'হল', 'হয়েছে', 'হইছে', 'হবে',
-  'দিলাম', 'দিয়ে', 'দাও', 'দেন',
+  'দিলাম', 'দিয়েছি', 'দিছি', 'দিয়ে', 'দাও', 'দেন',
   'গেল', 'গেলো', 'গেছে',
   'আর', 'মোট', 'প্রতি', 'এর', 'কাছে', 'আমি', 'ভাই', 'তো', 'আমার',
 ]);
@@ -38,5 +47,5 @@ export const FILLER = wordSet([
 export const ALL_KEYWORDS: ReadonlySet<string> = new Set([
   ...PROFIT, ...TODAY, ...STOCK, ...QUESTION, ...PURCHASE, ...NEW,
   ...BUY_MARKER, ...SELL_MARKER, ...DAM, ...SALE, ...BAKI, ...CREDIT,
-  ...TAKE, ...JOMA, ...GAVE, ...MONEY, ...FILLER,
+  ...TAKE, ...JOMA, ...GAVE, ...EXPENSE, ...MONEY, ...FILLER,
 ]);
