@@ -369,10 +369,30 @@ CREATE TABLE sync_inbox (
 `;
 
 /**
+ * v12 (build step 8): Google Drive. voice_logs.drive_file_id and audio_status are in the
+ * schema since v1 (synced): 'local' → 'uploaded' (drive_file_id set) → 'expired' (90-day
+ * retention removed the clip everywhere). New, local only (never synced, not in backups):
+ * audio_queue = this phone's clips waiting to go up, with the retry backoff. Clips already
+ * on the phone (pilot) are queued. A 'drive:*' key in sync_meta holds folder ids and times.
+ */
+const V12 = `
+CREATE TABLE audio_queue (
+  voice_log_id TEXT PRIMARY KEY NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  next_at INTEGER NOT NULL DEFAULT 0,       -- not before this (ms); backoff after a failure
+  last_error TEXT,
+  queued_at INTEGER NOT NULL
+) WITHOUT ROWID;
+INSERT INTO audio_queue (voice_log_id, queued_at)
+  SELECT id, created_at FROM voice_logs
+  WHERE audio_path IS NOT NULL AND drive_file_id IS NULL AND audio_status = 'local';
+`;
+
+/**
  * Index i holds the SQL that takes the DB from user_version i to i + 1.
  * Append only; never edit or renumber a shipped one.
  */
-export const MIGRATIONS: readonly string[] = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11];
+export const MIGRATIONS: readonly string[] = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12];
 
 /**
  * Nov 14 fork: an early main build shipped v7 = customers.note (no Gemini columns) while

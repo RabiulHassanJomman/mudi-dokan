@@ -12,7 +12,7 @@ export interface Account {
 }
 
 let configured = false;
-function configure(): void {
+export function configure(): void {
   if (configured) return;
   const webClientId = Constants.expoConfig?.extra?.googleWebClientId as string | undefined;
   GoogleSignin.configure({ webClientId });

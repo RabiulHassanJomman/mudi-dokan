@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
 import { signIn, signOut } from '../sync/auth';
+import { enableDrive } from '../drive/app';
 import { useSyncStatus } from '../sync/app';
 import { PHASE_BN, SHOP_ADOPTED_BN, agoBn } from '../sync/words';
 import { formatNumber } from '../lib/bn';
@@ -43,6 +44,8 @@ export function AccountCard({ showSync = false }: { showSync?: boolean }) {
     setBusy(false);
     if (r.ok) {
       void speak('দোকানের অ্যাকাউন্টে ঢোকা হয়েছে। সিঙ্ক শুরু হচ্ছে।');
+      // step 8: ask for Drive (voice clips, backup) separately, right after sign-in
+      void enableDrive();
     } else {
       setFailed(FAIL_BN[r.reason]);
       void speak(FAIL_BN[r.reason]);

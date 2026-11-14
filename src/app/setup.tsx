@@ -359,6 +359,32 @@ export default function SetupScreen() {
         </Section>
         )}
 
+        {/* settings only (step 8): backup and the voice clips on Drive */}
+        {editing && (
+          <View style={styles.linkRow}>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => nav.push('/backup')}
+              style={({ pressed }) => [styles.linkButton, pressed && styles.pressed]}
+            >
+              <Icon name="up" size={26} color={colors.sale} />
+              <Txt size={fontSize.label} weight="bold" color={colors.saleDark}>
+                ব্যাকআপ
+              </Txt>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => nav.push('/drive')}
+              style={({ pressed }) => [styles.linkButton, pressed && styles.pressed]}
+            >
+              <Icon name="play" size={22} color={colors.sale} />
+              <Txt size={fontSize.label} weight="bold" color={colors.saleDark}>
+                Drive
+              </Txt>
+            </Pressable>
+          </View>
+        )}
+
         {/* settings only: bring in an existing customer list (.txt) */}
         {editing && (
           <Pressable
@@ -442,6 +468,17 @@ function Chip({ label, on, color, tint, onPress }: { label: string; on: boolean;
 }
 
 const styles = StyleSheet.create({
+  linkRow: { flexDirection: 'row', gap: spacing.sm },
+  linkButton: {
+    flex: 1,
+    minHeight: 64,
+    borderRadius: radius.card,
+    backgroundColor: colors.saleTint,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+  },
   importButton: {
     minHeight: 64,
     borderRadius: radius.card,

@@ -257,6 +257,21 @@ export class SyncEngine {
   }
 
   /**
+   * Every document of every table, from the start (cursor ignored), then apply. After a
+   * backup restore: rows the cloud already has (same version) get marked as pushed, so the
+   * next push sends only what the cloud is missing.
+   */
+  pullAll(): Promise<number> {
+    return this.exclusive(async () => {
+      for (const t of SYNC_TABLES) {
+        const docs = await this.need().fetchSince(t.name, 0);
+        await this.store(t.name, docs);
+      }
+      return this.applyNow();
+    });
+  }
+
+  /**
    * First sync with an account (before anything is pushed): pull everything; if the cloud
    * already has the shop, its row wins over this phone's whatever the clocks say, and
    * `adopt` replaces what this phone set up on its own (opening cash).

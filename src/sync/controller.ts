@@ -117,6 +117,17 @@ export class SyncController {
     else void this.syncNow();
   }
 
+  private fullPull = false;
+
+  /**
+   * A backup was restored into this phone: before the next push, pull everything once so
+   * restored rows the cloud already has are not sent again (only what's missing goes up).
+   */
+  restored(): Promise<void> {
+    this.fullPull = true;
+    return this.syncNow();
+  }
+
   /** Something was saved on this phone: push it in a few seconds. */
   localChange(): void {
     if (!this.remote) return;
@@ -165,6 +176,11 @@ export class SyncController {
       // first sync: pull (and take the cloud's shop) before pushing anything of this phone's
       const first = !(await this.engine.hasPulled()) ? await this.engine.firstSync(this.hooks.adoptShop) : null;
       if (first?.applied) await this.applied();
+      if (this.fullPull && !first) {
+        const n = await this.engine.pullAll();
+        if (n) await this.applied();
+      }
+      this.fullPull = false;
       if (first?.adopted) await this.publish({ notice: 'shop_adopted' });
       const pushed = await this.engine.push();
       if (!this.unlisten.length) {

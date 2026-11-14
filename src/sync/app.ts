@@ -31,6 +31,8 @@ const bumpData = () => {
   dataVersion++;
   for (const fn of dataSubs) fn(dataVersion);
 };
+/** Rows changed outside the screens (backup restore): screens reload. */
+export const dataChanged = bumpData;
 
 const firstSyncSubs = new Set<() => void>();
 

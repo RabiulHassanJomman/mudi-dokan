@@ -16,6 +16,7 @@ import type { RecentEntry } from '../domain/recent';
 import type { StockRow } from '../domain/stock';
 import type { Role, SetupDraft } from '../domain/setup';
 import { ENTRY_TABLES, noDeleteTrigger } from './migrations';
+import { enqueueClip } from '../drive/queue';
 import type { ParsedCommand, Unit } from '../parser/types';
 
 type Bind = string | number | null;
@@ -267,6 +268,7 @@ export type Engine = 'android' | 'gemini' | 'both';
 
 export async function createVoiceLog(db: Db, w: Writer, v: NewVoiceLog): Promise<string> {
   const id = w.newId();
+  const cols = rowCols(w);
   await insert(db, 'voice_logs', {
     id,
     transcript: v.transcript,
@@ -281,8 +283,10 @@ export async function createVoiceLog(db: Db, w: Writer, v: NewVoiceLog): Promise
     via: v.via ?? null,
     engine: v.engine ?? null,
     device_name: w.deviceName,
-    ...rowCols(w),
+    ...cols,
   });
+  // step 8: this phone's clip goes to Drive (src/drive/queue.ts)
+  if (v.audioPath) await enqueueClip(db, id, cols.created_at);
   return id;
 }
 
@@ -655,6 +659,14 @@ export async function setCustomerPhone(db: Db, w: Writer, id: string, phone: str
   await db.runAsync('UPDATE customers SET phone = ?, updated_at = ? WHERE id = ?', phone, w.now(), id);
 }
 
+/**
+ * ▶️ for a voice log `v`: the clip on this phone (audio_path), else 'drive:<voice log id>'
+ * (downloaded on tap, src/drive/app.ts resolveClip), else null (no clip: ▶️ hidden).
+ * An expired clip (90-day retention) is gone everywhere.
+ */
+export const CLIP_SQL = `CASE WHEN v.audio_status = 'expired' THEN NULL WHEN v.audio_path IS NOT NULL THEN v.audio_path
+  WHEN v.drive_file_id IS NOT NULL THEN 'drive:' || v.id END`;
+
 export interface LedgerLine {
   id: string;
   kind: 'baki' | 'joma';
@@ -673,7 +685,7 @@ export const customerHistory = (db: Db, customerId: string) =>
        (SELECT GROUP_CONCAT(name, ', ') FROM (
           SELECT p.name FROM v_sales s JOIN products p ON p.id = s.product_id
           WHERE l.basket_id IS NOT NULL AND s.basket_id = l.basket_id ORDER BY s.line_no)) AS products,
-       v.transcript, v.audio_path
+       v.transcript, ${CLIP_SQL} AS audio_path
      FROM v_ledger l LEFT JOIN voice_logs v ON v.id = l.voice_log_id
      WHERE l.party_id = ?
      ORDER BY l.at DESC`,
@@ -695,7 +707,7 @@ export const recentEntries = (db: Db, limit = 3) =>
               SUM(s.amount_poisha) AS amount_poisha,
               MAX(s.credit) AS credit,
               MAX(c.name) AS customer,
-              MAX(v.audio_path) AS audio_path,
+              MAX(${CLIP_SQL}) AS audio_path,
               MAX(s.at) AS created_at
        FROM (SELECT * FROM v_sales ORDER BY at, line_no) s
        JOIN products p ON p.id = s.product_id
@@ -703,18 +715,18 @@ export const recentEntries = (db: Db, limit = 3) =>
        LEFT JOIN voice_logs v ON v.id = s.voice_log_id
        GROUP BY COALESCE(s.basket_id, s.id)
      UNION ALL
-       SELECT l.kind, l.id, c.name, 0, NULL, NULL, l.amount_poisha, 0, NULL, v.audio_path, l.at
+       SELECT l.kind, l.id, c.name, 0, NULL, NULL, l.amount_poisha, 0, NULL, ${CLIP_SQL}, l.at
        FROM v_ledger l JOIN customers c ON c.id = l.party_id
        LEFT JOIN voice_logs v ON v.id = l.voice_log_id
        WHERE l.basket_id IS NULL AND l.sale_id IS NULL
      UNION ALL
-       SELECT 'expense', e.id, e.item, 0, NULL, NULL, e.amount_poisha, 0, NULL, v.audio_path, e.at
+       SELECT 'expense', e.id, e.item, 0, NULL, NULL, e.amount_poisha, 0, NULL, ${CLIP_SQL}, e.at
        FROM v_expenses e LEFT JOIN voice_logs v ON v.id = e.voice_log_id
      UNION ALL
-       SELECT 'owner_withdrawal', o.id, COALESCE(o.person, 'মালিক'), 0, NULL, NULL, o.amount_poisha, 0, NULL, v.audio_path, o.at
+       SELECT 'owner_withdrawal', o.id, COALESCE(o.person, 'মালিক'), 0, NULL, NULL, o.amount_poisha, 0, NULL, ${CLIP_SQL}, o.at
        FROM v_owner_withdrawals o LEFT JOIN voice_logs v ON v.id = o.voice_log_id
      UNION ALL
-       SELECT 'purchase', pu.id, p.name, 0, pu.quantity, COALESCE(pu.spoken_unit, p.unit), pu.total_poisha, 0, NULL, v.audio_path, pu.at
+       SELECT 'purchase', pu.id, p.name, 0, pu.quantity, COALESCE(pu.spoken_unit, p.unit), pu.total_poisha, 0, NULL, ${CLIP_SQL}, pu.at
        FROM v_purchases pu JOIN products p ON p.id = pu.product_id
        LEFT JOIN voice_logs v ON v.id = pu.voice_log_id
      )
@@ -880,25 +892,25 @@ export const historyRows = (db: Db, start: number, end: number) =>
     `SELECT * FROM (
        SELECT 'sales' AS "table", s.id, s.corrects_id, s.voided, COALESCE(s.entry_at, s.created_at) AS at, s.created_at,
               NULL AS kind, s.basket_id, s.line_no, NULL AS sale_id, p.name AS title, s.quantity, p.unit AS unit,
-              s.amount_poisha, s.credit, c.name AS customer, v.audio_path
+              s.amount_poisha, s.credit, c.name AS customer, ${CLIP_SQL} AS audio_path
        FROM sales s JOIN products p ON p.id = s.product_id
        LEFT JOIN customers c ON c.id = s.customer_id LEFT JOIN voice_logs v ON v.id = s.voice_log_id
      UNION ALL
        SELECT 'ledger', l.id, l.corrects_id, l.voided, COALESCE(l.entry_at, l.created_at), l.created_at,
-              l.kind, l.basket_id, NULL, l.sale_id, c.name, NULL, NULL, l.amount_poisha, 0, NULL, v.audio_path
+              l.kind, l.basket_id, NULL, l.sale_id, c.name, NULL, NULL, l.amount_poisha, 0, NULL, ${CLIP_SQL}
        FROM ledger l JOIN customers c ON c.id = l.party_id LEFT JOIN voice_logs v ON v.id = l.voice_log_id
        WHERE l.party_type = 'customer'
      UNION ALL
        SELECT 'expenses', e.id, e.corrects_id, e.voided, COALESCE(e.entry_at, e.created_at), e.created_at,
-              NULL, NULL, NULL, NULL, e.item, NULL, NULL, e.amount_poisha, 0, NULL, v.audio_path
+              NULL, NULL, NULL, NULL, e.item, NULL, NULL, e.amount_poisha, 0, NULL, ${CLIP_SQL}
        FROM expenses e LEFT JOIN voice_logs v ON v.id = e.voice_log_id
      UNION ALL
        SELECT 'owner_withdrawals', o.id, o.corrects_id, o.voided, COALESCE(o.entry_at, o.created_at), o.created_at,
-              NULL, NULL, NULL, NULL, COALESCE(o.person, 'মালিক'), NULL, NULL, o.amount_poisha, 0, NULL, v.audio_path
+              NULL, NULL, NULL, NULL, COALESCE(o.person, 'মালিক'), NULL, NULL, o.amount_poisha, 0, NULL, ${CLIP_SQL}
        FROM owner_withdrawals o LEFT JOIN voice_logs v ON v.id = o.voice_log_id
      UNION ALL
        SELECT 'purchases', pu.id, pu.corrects_id, pu.voided, COALESCE(pu.entry_at, pu.created_at), pu.created_at,
-              NULL, NULL, NULL, NULL, p.name, pu.quantity, COALESCE(pu.spoken_unit, p.unit), pu.total_poisha, 0, NULL, v.audio_path
+              NULL, NULL, NULL, NULL, p.name, pu.quantity, COALESCE(pu.spoken_unit, p.unit), pu.total_poisha, 0, NULL, ${CLIP_SQL}
        FROM purchases pu JOIN products p ON p.id = pu.product_id LEFT JOIN voice_logs v ON v.id = pu.voice_log_id
      ) WHERE at >= ? AND at < ?`,
     start,
@@ -1230,6 +1242,7 @@ export async function wipePilotData(db: Db): Promise<string[]> {
     for (const t of ENTRY_TABLES) await db.runAsync(noDeleteTrigger(t));
     await db.runAsync('DELETE FROM sync_state');
     await db.runAsync('DELETE FROM sync_inbox');
+    await db.runAsync('DELETE FROM audio_queue');
   });
   return audio.map((a) => a.audio_path);
 }

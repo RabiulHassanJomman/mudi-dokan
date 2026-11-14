@@ -193,15 +193,19 @@ export default function SaleScreen() {
                   </Txt>
                 )}
               </View>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={`${line.title}, রেকর্ড শুনুন`}
-                accessibilityState={{ disabled: !r.audio_path }}
-                onPress={() => play(r.audio_path)}
-                style={[styles.play, !r.audio_path && styles.disabled]}
-              >
-                <Icon name="play" size={22} color={colors.sale} />
-              </Pressable>
+              {r.audio_path ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`${line.title}, রেকর্ড শুনুন`}
+                  onPress={() => play(r.audio_path)}
+                  style={styles.play}
+                >
+                  <Icon name="play" size={22} color={colors.sale} />
+                </Pressable>
+              ) : (
+                // no clip (typed, Android < 13, or past 90 days): ▶️ hidden, the row keeps its shape
+                <View style={[styles.play, styles.noClip]} />
+              )}
             </Pressable>
           );
         })}
@@ -306,6 +310,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   disabled: { opacity: 0.35 },
+  noClip: { opacity: 0 },
   build: { textAlign: 'center' },
   logLink: {
     flexDirection: 'row',

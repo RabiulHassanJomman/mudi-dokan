@@ -9,6 +9,7 @@ import { Icon } from '../components/Icon';
 import { NumberPadSheet } from '../components/NumberPadSheet';
 import { Txt } from '../components/Txt';
 import { cashDay, saveDayClose, type CashDay } from '../db/repo';
+import { backupAfterDayClose } from '../drive/app';
 import { NOTES, closeReadback, countedPoisha, gapOf, stepNote, today, type Note, type NoteCounts } from '../domain/cash';
 import { writer } from '../device';
 import { formatNumber, formatTaka, toBnDigits } from '../lib/bn';
@@ -71,6 +72,8 @@ export default function CashCountScreen() {
     setSaving(true);
     try {
       await saveDayClose(db, writer(), day, counts, counted);
+      // step 8: back the whole shop up to Drive now (or as soon as it can be reached)
+      void backupAfterDayClose();
       setAsking(false);
       await speak(`দিন শেষ হয়েছে। কাল শুরুর ক্যাশ ${say(counted)} টাকা।`);
       nav.back();

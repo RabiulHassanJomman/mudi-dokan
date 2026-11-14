@@ -160,15 +160,19 @@ export default function HistoryScreen() {
               onPress={() => void speak(line.words)}
               style={({ pressed }) => [styles.row, i.fixed && styles.rowFixed, i.voided && styles.rowVoided, pressed && styles.pressed]}
             >
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={`${line.title}, রেকর্ড শুনুন`}
-                accessibilityState={{ disabled: !i.audio_path }}
-                onPress={() => play(i.audio_path)}
-                style={[styles.play, !i.audio_path && styles.disabled]}
-              >
-                <Icon name="play" size={22} color={colors.sale} />
-              </Pressable>
+              {i.audio_path ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`${line.title}, রেকর্ড শুনুন`}
+                  onPress={() => play(i.audio_path)}
+                  style={styles.play}
+                >
+                  <Icon name="play" size={22} color={colors.sale} />
+                </Pressable>
+              ) : (
+                // no clip (typed, Android < 13, or past 90 days): ▶️ hidden, the row keeps its shape
+                <View style={[styles.play, styles.noClip]} />
+              )}
               <View style={[styles.tile, { backgroundColor: lk.tile }]}>
                 <Icon name={lk.icon} size={26} color={i.kind === 'sale' || i.kind === 'purchase' ? colors.ink : lk.ink} strokeWidth={1.6} />
               </View>
@@ -249,5 +253,6 @@ const styles = StyleSheet.create({
   legend: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingHorizontal: 4 },
   legendBox: { width: 18, height: 18, borderRadius: 6, borderWidth: 3, borderColor: colors.stock },
   disabled: { opacity: 0.35 },
+  noClip: { opacity: 0 },
   pressed: { opacity: 0.85 },
 });

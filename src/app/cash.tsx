@@ -168,15 +168,19 @@ export default function CashScreen() {
                 <Txt size={fontSize.body} weight="bold">
                   {formatTaka(i.amount_poisha)}
                 </Txt>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={`${what}, রেকর্ড শুনুন`}
-                  accessibilityState={{ disabled: !i.audio_path }}
-                  onPress={() => play(i.audio_path)}
-                  style={[styles.play, !i.audio_path && styles.disabled]}
-                >
-                  <Icon name="play" size={20} color={colors.sale} />
-                </Pressable>
+                {i.audio_path ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`${what}, রেকর্ড শুনুন`}
+                    onPress={() => play(i.audio_path)}
+                    style={styles.play}
+                  >
+                    <Icon name="play" size={20} color={colors.sale} />
+                  </Pressable>
+                ) : (
+                  // no clip (typed, Android < 13, or past 90 days): ▶️ hidden, the row keeps its shape
+                  <View style={[styles.play, styles.noClip]} />
+                )}
               </Pressable>
             );
           })}
@@ -259,5 +263,6 @@ const styles = StyleSheet.create({
   actions: { flexDirection: 'row', gap: spacing.sm },
   action: { flex: 1, height: size.bigAction, borderRadius: radius.button, alignItems: 'center', justifyContent: 'center', gap: 2 },
   disabled: { opacity: 0.35 },
+  noClip: { opacity: 0 },
   pressed: { opacity: 0.85 },
 });

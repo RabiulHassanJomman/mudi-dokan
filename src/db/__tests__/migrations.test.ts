@@ -83,7 +83,8 @@ describe('migrate', () => {
   it('gives every table id, device_id, created_at, updated_at', () => {
     const tables = raw.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as { name: string }[];
     for (const { name } of tables) {
-      if (name.startsWith('sync_')) continue; // local sync bookkeeping, never synced
+      // local bookkeeping, never synced: sync state, the Drive upload queue
+      if (name.startsWith('sync_') || name === 'audio_queue') continue;
       const cols = (raw.prepare(`PRAGMA table_info(${name})`).all() as { name: string }[]).map((c) => c.name);
       expect({ name, cols }).toEqual({ name, cols: expect.arrayContaining(['id', 'device_id', 'created_at', 'updated_at']) });
     }
@@ -310,8 +311,8 @@ describe('v7–v9 (shared by main and exp/gemini-audio)', () => {
     expect(() => db.exec("UPDATE sales SET quantity = 1 WHERE id = 's1'")).toThrow(/append-only/);
   }
 
-  it('v7–v9 are shared by every branch (the latest is now 11)', () => {
-    expect(SCHEMA_VERSION).toBe(11);
+  it('v7–v9 are shared by every branch (the latest is now 12)', () => {
+    expect(SCHEMA_VERSION).toBe(12);
   });
 
   it('v6 shop phone (main) → v9: data kept, new columns null', async () => {
@@ -486,7 +487,7 @@ describe('v10: voided + entry_at (corrections and undo)', () => {
     });
     const viewsBefore = views();
     await expect(migrate(adapter(old))).resolves.toBe(10);
-    expect(old.prepare('PRAGMA user_version').get()).toEqual({ user_version: 11 });
+    expect(old.prepare('PRAGMA user_version').get()).toEqual({ user_version: SCHEMA_VERSION });
     const after = dumpAll(old);
     for (const t of TABLES) {
       expect(after[t]!.map((r, k) => Object.fromEntries(Object.keys(before[t]![k]!).map((c) => [c, r[c]])))).toEqual(before[t]);
@@ -527,5 +528,37 @@ describe('v10: voided + entry_at (corrections and undo)', () => {
     insert(raw, 'expenses', { ...entry('e1'), item: 'বিল', amount_poisha: 50000 });
     expect(raw.prepare("SELECT root_id, rev FROM expenses WHERE id = 'e1'").get()).toEqual({ root_id: 'e1', rev: 0 });
     expect(() => raw.exec("UPDATE expenses SET root_id = 'x' WHERE id = 'e1'")).toThrow(/append-only/);
+  });
+
+  it('v11 shop phone (step 7, synced) → v12: rows and sync state kept, its own unsent clips queued', async () => {
+    const old = v9Shop();
+    old.exec(`${MIGRATIONS[9]}\nPRAGMA user_version = 10;`);
+    old.exec(`${MIGRATIONS[10]}\nPRAGMA user_version = 11;`);
+    // another phone's log came in by sync (no audio here), one typed log, one stt error
+    insert(old, 'voice_logs', { ...row('v2'), device_id: 'd2', transcript: 'ডাল ১ কেজি', device_name: 'কর্মচারী', audio_status: 'local' });
+    insert(old, 'voice_logs', { ...row('v3'), transcript: 'চিনি ২ কেজি', device_name: 'আব্বু', source: 'typed' });
+    insert(old, 'voice_logs', {
+      ...row('v4'), transcript: '', device_name: 'আব্বু', outcome: 'stt_error', stt_error: 'no-speech',
+      audio_path: 'file:///x/voice_4.wav', audio_status: 'local', created_at: now + 5,
+    });
+    old.exec("INSERT INTO sync_state VALUES ('voice_logs', 'v1', 1763000000000), ('sales', 's1', 1763000000000)");
+    old.exec("INSERT INTO sync_meta VALUES ('uid', 'shop-uid'), ('pull:sales', '1763000000500')");
+    const before = dumpAll(old);
+    const state = old.prepare('SELECT * FROM sync_state ORDER BY tbl, row_id').all();
+    await expect(migrate(adapter(old))).resolves.toBe(11);
+    expect(old.prepare('PRAGMA user_version').get()).toEqual({ user_version: SCHEMA_VERSION });
+    expect(dumpAll(old)).toEqual(before);
+    expect(old.prepare('SELECT * FROM sync_state ORDER BY tbl, row_id').all()).toEqual(state);
+    expect(old.prepare("SELECT value FROM sync_meta WHERE key = 'uid'").get()).toEqual({ value: 'shop-uid' });
+    // only this phone's clips (audio_path) that aren't on Drive yet
+    expect(old.prepare('SELECT voice_log_id, attempts, next_at, last_error, queued_at FROM audio_queue ORDER BY voice_log_id').all()).toEqual([
+      { voice_log_id: 'v1', attempts: 0, next_at: 0, last_error: null, queued_at: now },
+      { voice_log_id: 'v4', attempts: 0, next_at: 0, last_error: null, queued_at: now + 5 },
+    ]);
+    // drive_file_id / audio_status (v1 columns) still take the new values
+    old.exec("UPDATE voice_logs SET drive_file_id = 'drv1', audio_status = 'uploaded' WHERE id = 'v1'");
+    old.exec("UPDATE voice_logs SET audio_status = 'expired' WHERE id = 'v4'");
+    expect(() => old.exec("UPDATE voice_logs SET audio_status = 'gone' WHERE id = 'v1'")).toThrow();
+    old.close();
   });
 });

@@ -6,6 +6,8 @@ import { StatusBar } from 'expo-status-bar';
 import { DATABASE_NAME, initDatabase } from '../db/client';
 import { nav } from '../lib/nav';
 import { mergePairs, onFirstSync, startSync } from '../sync/app';
+import { startDrive } from '../drive/app';
+import { registerDriveTask } from '../drive/background';
 import { colors } from '../theme/tokens';
 
 /**
@@ -36,6 +38,8 @@ export default function RootLayout() {
         <Stack.Screen name="cash-count" />
         <Stack.Screen name="history" />
         <Stack.Screen name="sync" />
+        <Stack.Screen name="drive" />
+        <Stack.Screen name="backup" />
         <Stack.Screen name="merge" options={{ animation: 'slide_from_bottom' }} />
       </Stack>
     </SQLiteProvider>
@@ -58,6 +62,9 @@ function SyncBoot() {
   const db = useSQLiteContext();
   useEffect(() => {
     void startSync().catch((e) => console.warn('sync start failed', e));
+    // step 8: voice clips to Drive, nightly backup, 90-day audio retention
+    startDrive();
+    void registerDriveTask();
     return onFirstSync(() => {
       void mergePairs(db).then((p) => {
         if (p.length) nav.push('/merge');
