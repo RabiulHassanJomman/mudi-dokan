@@ -21,11 +21,24 @@ Input = Bangla voice, output = big icons + TTS. Full plan: @docs/PLAN.md
   and tell me what changed.
 - Only edit CLAUDE.md when I ask.
 
+## Ground rules for every remaining build step
+- One step at a time. Do only the step asked for; when it is done, stop and wait.
+- Tests first for logic (pure TS in src/parser, src/domain, src/db; Jest). Follow
+  docs/PLAN.md › Screens and the design link there.
+- Every DB change is a NEW migration (append to MIGRATIONS; never edit a shipped one).
+  Never break existing pilot data on the shop phone: add an upgrade test from the
+  previous version with real-looking rows.
+- Release APKs only via `npm run apk` (release key, see Commands). Install as an update
+  (`adb install -r`); never uninstall the app on the phone (= data loss) without asking.
+- Bangla UI, big touch targets (≥ 52 px), 🔊 read-aloud on every screen, confirm before
+  every save (হ্যাঁ/না by voice or button).
+- After each step, in this order: `npm test` + `npx tsc --noEmit` clean → build the
+  release APK and run it on my phone (Pixel 7) → update docs/PLAN.md Status (done,
+  unfinished, known bugs, next) → commit → push → stop.
+
 ## Status
-- Phase: 1 (parser)
-- Done: —
-- Next: number words, units
-- Decisions log:
+Lives in docs/PLAN.md › Status (done / unfinished / known bugs / next) and its
+Decisions log. Read it first.
 
 ## Commands
 - test: npm test
