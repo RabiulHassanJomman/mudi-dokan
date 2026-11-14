@@ -12,30 +12,36 @@ export interface SetupDraft {
 
 export type SetupProblem = 'shop_name' | 'device_name' | 'role' | 'opening_cash';
 
-/** "এই ফোন কার?" chips; "+ নতুন নাম" types any other. */
-export const DEVICE_PRESETS = ['আব্বু', 'আম্মু', 'কর্মচারী ১'] as const;
-
 export const ROLE_BN: Record<Role, string> = { owner: 'মালিক', staff: 'কর্মচারী' };
 
-/** আব্বু/আম্মু → মালিক, কর্মচারী … → কর্মচারী; any other name: chosen by hand. */
-export function defaultRole(name: string): Role | null {
-  const n = name.trim();
-  if (n === 'আব্বু' || n === 'আম্মু') return 'owner';
-  if (n.startsWith('কর্মচারী')) return 'staff';
-  return null;
+/** "আপনার নাম" (= device_name): at most this many characters. */
+export const DEVICE_NAME_MAX = 30;
+
+/** Trimmed, one space between words, cut at DEVICE_NAME_MAX code points. */
+export const cleanDeviceName = (s: string) => [...s.normalize('NFC').replace(/\s+/g, ' ').trim()].slice(0, DEVICE_NAME_MAX).join('').trim();
+
+/** A new phone: nothing filled, role কর্মচারী until someone picks মালিক. */
+export const newSetupDraft = (): SetupDraft => ({ shopName: '', deviceName: '', role: 'staff', openingCashPoisha: null });
+
+/** "আমার নাম (হলো) রফিক।" / "আমি রফিক বলছি" → "রফিক". */
+export function nameFromSpeech(text: string): string {
+  let t = text.normalize('NFC').replace(/[।.!?,]+/g, ' ').replace(/\s+/g, ' ').trim();
+  t = t.replace(/^আমার নাম( হলো| হল| হচ্ছে)? /, '').replace(/^আমি /, '').replace(/ বলছি$/, '');
+  return cleanDeviceName(t);
 }
 
 export function setupProblems(s: SetupDraft): SetupProblem[] {
   const p: SetupProblem[] = [];
   if (!s.shopName.trim()) p.push('shop_name');
-  if (!s.deviceName.trim()) p.push('device_name');
+  const name = s.deviceName.normalize('NFC').replace(/\s+/g, ' ').trim();
+  if (!name || [...name].length > DEVICE_NAME_MAX) p.push('device_name');
   if (!s.role) p.push('role');
   if (s.openingCashPoisha === null || s.openingCashPoisha < 0) p.push('opening_cash');
   return p;
 }
 
 export const setupReadback = (s: SetupDraft) =>
-  `দোকান: ${s.shopName.trim()}। এই ফোন: ${s.deviceName.trim()}, ${s.role ? ROLE_BN[s.role] : '—'}। ` +
+  `দোকান: ${s.shopName.trim()}। আপনার নাম: ${s.deviceName.trim()}, ${s.role ? ROLE_BN[s.role] : '—'}। ` +
   `ক্যাশে ${formatNumber((s.openingCashPoisha ?? 0) / 100)} টাকা। ঠিক আছে?`;
 
 /** Shop-local calendar day, YYYY-MM-DD. */

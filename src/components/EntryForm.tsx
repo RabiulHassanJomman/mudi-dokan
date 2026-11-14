@@ -81,7 +81,7 @@ export function EntryForm({ entry, known, onChange }: Props) {
         <Field label="কিসের খরচ?" value={entry.item} warn={bad('no_item')} placeholder="যেমন: বিদ্যুৎ বিল" onChange={(t) => onChange(setEntryItem(entry, t))} />
       )}
       {entry.kind === 'owner_withdrawal' && (
-        <Field label="কে নিল?" value={entry.person} warn={false} placeholder="যেমন: আব্বু" onChange={(t) => onChange(setEntryPerson(entry, t))} />
+        <Field label="কে নিল?" value={entry.person} warn={false} placeholder="যেমন: মালিক" onChange={(t) => onChange(setEntryPerson(entry, t))} />
       )}
 
       {l && (

@@ -42,7 +42,7 @@ export const EXPENSE_HINT_SUFFIXES = ['ভাড়া', 'বিল'].map((s) =>
  * Owner/family taking cash out — not an expense, excluded from profit.
  * NOT in ALL_KEYWORDS — the name stays as `person`.
  */
-export const OWNER = wordSet(['মালিক', 'আব্বু', 'আব্বা', 'আম্মু', 'আম্মা']);
+export const OWNER = wordSet(['মালিক']);
 /** "I took" — with money, an owner withdrawal by whoever holds this phone. */
 export const SELF_TAKE = wordSet(['নিলাম', 'নিয়েছি', 'নিছি', 'তুললাম', 'তুলেছি']);
 /** "from the cash box" — context words, dropped from the note. */

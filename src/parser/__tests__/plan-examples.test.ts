@@ -71,7 +71,9 @@ const cases: Case[] = [
   // owner withdrawal, MVP feature 10
   { text: 'মালিক ৫০০ নিল', expected: { intent: 'owner_withdrawal', person: 'মালিক', amount: 500 } },
   {
+    // আব্বু = the device_name of a phone with role মালিক
     text: 'আব্বু ১০০০ নিল বাসার জন্য',
+    ctx: { ownerNames: ['আব্বু'] },
     expected: { intent: 'owner_withdrawal', person: 'আব্বু', amount: 1000, note: 'বাসার জন্য' },
   },
 ];

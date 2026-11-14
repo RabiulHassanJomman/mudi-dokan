@@ -5,7 +5,7 @@
  */
 import { File } from 'expo-file-system';
 
-import { customerAliasMap, customerBalances, knownNames, pickProducts, productAliasMap, setGeminiResult, type Db } from '../db/repo';
+import { customerAliasMap, customerBalances, knownNames, ownerNames, pickProducts, productAliasMap, setGeminiResult, type Db } from '../db/repo';
 import { getDevice, writer } from '../device';
 import { audioInput, geminiParse, type GeminiResult } from '../gemini';
 import { audioMime, fitAudio } from '../gemini/audio';
@@ -35,12 +35,13 @@ export async function runGemini(
     const mime = audioMime(clipUri);
     if (!mime) throw new Error(`clip type not supported: ${clipUri.split('/').pop()}`);
     const audio = fitAudio(await new File(clipUri).bytes(), mime);
-    const [catalog, owed, names, aliases, custAliases] = await Promise.all([
+    const [catalog, owed, names, aliases, custAliases, owners] = await Promise.all([
       pickProducts(db),
       customerBalances(db),
       knownNames(db),
       productAliasMap(db),
       customerAliasMap(db),
+      ownerNames(db),
     ]);
     const aliasesByCustomer: Record<string, string[]> = {};
     for (const [alias, name] of Object.entries(custAliases)) (aliasesByCustomer[name] ??= []).push(alias);
@@ -52,6 +53,7 @@ export async function runGemini(
       customerAliases: aliasesByCustomer,
       hint: opts.hint,
       device: { name: device.name, role: device.role },
+      owners,
     });
     const deps: ClientDeps = { apiKey, model, fetch: fetch as unknown as ClientDeps['fetch'], deadlineMs: opts.deadlineMs };
     result = await geminiParse(deps, audioInput(audio), prompt, { knownProducts: names.products, productAliases: aliases, customerAliases: custAliases });

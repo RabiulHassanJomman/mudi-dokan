@@ -130,3 +130,15 @@ describe('geminiParse', () => {
     expect(r).toMatchObject({ ok: false, parsed: null, error: 'api: HTTP 400: status 400' });
   });
 });
+
+describe('owner names in the prompt', () => {
+  it('owners = মালিক phones’ names; family words are not built in', async () => {
+    const { buildRequest, contextText, SYSTEM, EXAMPLES } = await import('../prompt');
+    expect(contextText({ ...ctx, owners: ['রফিক'] })).toContain('owners: রফিক');
+    expect(contextText(ctx)).not.toContain('owners:');
+    expect(SYSTEM).not.toMatch(/আব্বু|আম্মু|আব্বা|আম্মা/);
+    expect(JSON.stringify(EXAMPLES)).not.toMatch(/আব্বু|আম্মু/);
+    const req = buildRequest('gemini-3.5-flash-lite', audio, { ...ctx, owners: ['রফিক'] });
+    expect(JSON.stringify(req.contents.at(-1))).toContain('owners: রফিক');
+  });
+});

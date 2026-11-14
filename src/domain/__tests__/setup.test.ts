@@ -1,18 +1,38 @@
-import { DEVICE_PRESETS, businessDate, defaultRole, setupProblems, setupReadback, type SetupDraft } from '../setup';
+import {
+  DEVICE_NAME_MAX,
+  businessDate,
+  cleanDeviceName,
+  nameFromSpeech,
+  newSetupDraft,
+  setupProblems,
+  setupReadback,
+  type SetupDraft,
+} from '../setup';
 
 const ok: SetupDraft = { shopName: 'রহমান স্টোর', deviceName: 'আব্বু', role: 'owner', openingCashPoisha: 500000 };
 
 describe('setup', () => {
-  it('device name chips from the design', () => {
-    expect(DEVICE_PRESETS).toEqual(['আব্বু', 'আম্মু', 'কর্মচারী ১']);
+  it('a new phone: no name yet, role কর্মচারী (no guess from the name)', () => {
+    expect(newSetupDraft()).toEqual({ shopName: '', deviceName: '', role: 'staff', openingCashPoisha: null });
   });
 
-  it('role defaults from the name chip; a new name has none until chosen', () => {
-    expect(defaultRole('আব্বু')).toBe('owner');
-    expect(defaultRole('আম্মু')).toBe('owner');
-    expect(defaultRole('কর্মচারী ১')).toBe('staff');
-    expect(defaultRole('কর্মচারী ২')).toBe('staff');
-    expect(defaultRole('রনি')).toBeNull();
+  it('"আপনার নাম": trimmed, one space, at most 30 characters', () => {
+    expect(DEVICE_NAME_MAX).toBe(30);
+    expect(cleanDeviceName('  রফিক   উদ্দিন ')).toBe('রফিক উদ্দিন');
+    expect([...cleanDeviceName('ক'.repeat(40))]).toHaveLength(30);
+  });
+
+  it('a name over 30 characters is a problem (the box also stops at 30)', () => {
+    expect(setupProblems({ ...ok, deviceName: 'ক'.repeat(31) })).toEqual(['device_name']);
+    expect(setupProblems({ ...ok, deviceName: 'ক'.repeat(30) })).toEqual([]);
+  });
+
+  it('a spoken name: "আমার নাম …" and the full stop come off', () => {
+    expect(nameFromSpeech('আমার নাম রফিক')).toBe('রফিক');
+    expect(nameFromSpeech('আমার নাম হলো রফিক উদ্দিন।')).toBe('রফিক উদ্দিন');
+    expect(nameFromSpeech('আমি রফিক বলছি')).toBe('রফিক');
+    expect(nameFromSpeech('রফিক')).toBe('রফিক');
+    expect(nameFromSpeech('   ')).toBe('');
   });
 
   it('everything filled → no problems; ৳ ০ opening cash is fine', () => {
@@ -30,9 +50,9 @@ describe('setup', () => {
   });
 
   it('readback before saving (TTS + the confirm sheet)', () => {
-    expect(setupReadback(ok)).toBe('দোকান: রহমান স্টোর। এই ফোন: আব্বু, মালিক। ক্যাশে ৫,০০০ টাকা। ঠিক আছে?');
+    expect(setupReadback(ok)).toBe('দোকান: রহমান স্টোর। আপনার নাম: আব্বু, মালিক। ক্যাশে ৫,০০০ টাকা। ঠিক আছে?');
     expect(setupReadback({ ...ok, deviceName: 'কর্মচারী ১', role: 'staff', openingCashPoisha: 0 })).toBe(
-      'দোকান: রহমান স্টোর। এই ফোন: কর্মচারী ১, কর্মচারী। ক্যাশে ০ টাকা। ঠিক আছে?',
+      'দোকান: রহমান স্টোর। আপনার নাম: কর্মচারী ১, কর্মচারী। ক্যাশে ০ টাকা। ঠিক আছে?',
     );
   });
 

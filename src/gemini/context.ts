@@ -65,6 +65,7 @@ export function promptContext(args: {
   customerAliases?: Readonly<Record<string, readonly string[]>>;
   hint: string | null;
   device?: PromptContext['device'];
+  owners?: readonly string[];
 }): PromptContext {
   const customers = args.customers.slice(0, MAX_CUSTOMERS);
   const aliases = Object.fromEntries(
@@ -76,5 +77,6 @@ export function promptContext(args: {
     customers,
     ...(Object.keys(aliases).length ? { customerAliases: aliases } : {}),
     ...(args.device ? { device: args.device } : {}),
+    ...(args.owners?.length ? { owners: [...args.owners] } : {}),
   };
 }

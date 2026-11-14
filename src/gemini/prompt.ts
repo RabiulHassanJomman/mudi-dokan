@@ -60,7 +60,7 @@ export function responseSchema(withTranscript: boolean) {
 }
 
 export const SYSTEM = `You parse one Bangla voice command from a grocery shop (Bangladesh) into JSON.
-intent: sale (selling goods), purchase (shop buys stock: কিনলাম/কেনা), baki (customer owes money, no goods), joma (customer pays back: জমা/দিল/শোধ), expense (shop cost: বিল/ভাড়া/বেতন/নাস্তা/খরচ), owner_withdrawal (owner or family takes cash: মালিক/আব্বু/আম্মু নিল), stock_query (চাল কত আছে?), balance_query (করিমের বাকি কত?), profit_query (লাভ কত?), unknown.
+intent: sale (selling goods), purchase (shop buys stock: কিনলাম/কেনা), baki (customer owes money, no goods), joma (customer pays back: জমা/দিল/শোধ), expense (shop cost: বিল/ভাড়া/বেতন/নাস্তা/খরচ), owner_withdrawal (the owner takes cash: "মালিক" or a name in "owners" + নিল/নিয়েছে), stock_query (চাল কত আছে?), balance_query (করিমের বাকি কত?), profit_query (লাভ কত?), unknown.
 Rules:
 - items only for sale; one entry per line in spoken order; the same product twice stays two lines.
 - product: use ONLY a name from the given product list (map spelling variants and brand words to it, e.g. চাউল → চাল). If none fits, use the spoken word.
@@ -100,7 +100,7 @@ export const EXAMPLES: [string, Record<string, unknown>][] = [
   ['রশিদের নামে আটশো টাকা বাকি লেখেন', { intent: 'baki', ...NULLS, customer: 'রশিদ', amount: 800 }],
   ['মিজান সাতশো টাকা জমা দিল', { intent: 'joma', ...NULLS, customer: 'মিজান', amount: 700 }],
   ['গ্যাস বিল আটশো টাকা খরচ', { intent: 'expense', ...NULLS, amount: 800, item: 'গ্যাস বিল' }],
-  ['আব্বু তিনশো টাকা নিল ওষুধের জন্য', { intent: 'owner_withdrawal', ...NULLS, amount: 300, person: 'আব্বু', note: 'ওষুধের জন্য' }],
+  ['মালিক তিনশো টাকা নিল ওষুধের জন্য', { intent: 'owner_withdrawal', ...NULLS, amount: 300, person: 'মালিক', note: 'ওষুধের জন্য' }],
   [
     'নতুন মসুর ডাল বিশ কেজি কেনা একশো দশ বেচা একশো বিশ',
     { intent: 'purchase', ...NULLS, product: 'মসুর ডাল', quantity: 20, unit: 'kg', buyPrice: 110, sellPrice: 120, isNewProduct: true },
@@ -119,6 +119,8 @@ export interface PromptContext {
   /** Customer name → learned spellings (customer_aliases). */
   customerAliases?: Record<string, string[]>;
   device?: { name: string; role: 'owner' | 'staff' | null };
+  /** device_name of the shop's মালিক phones (besides the word "মালিক"). */
+  owners?: string[];
 }
 
 export function contextText(c: PromptContext): string {
@@ -129,6 +131,7 @@ export function contextText(c: PromptContext): string {
     .map((n) => (c.customerAliases?.[n]?.length ? `${n} (also said ${c.customerAliases[n]!.join('/')})` : n))
     .join(', ');
   const lines = [`tab: ${c.tab}`, `products: ${products}`, `customers: ${customers}`];
+  if (c.owners?.length) lines.push(`owners: ${c.owners.join(', ')}`);
   if (c.device) lines.push(`this phone: ${c.device.name}, role ${c.device.role ?? 'unset'}`);
   return lines.join('\n');
 }

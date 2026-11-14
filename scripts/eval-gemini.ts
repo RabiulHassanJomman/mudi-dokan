@@ -62,6 +62,7 @@ const ruleCtx = (tab: Tab): ParseContext => ({
   knownProducts: seed.products.map((p) => p.name),
   knownCustomers: seed.customers,
   productAliases: seed.aliases,
+  ownerNames: seed.owners ?? [],
 });
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const deps: ClientDeps = {
@@ -70,7 +71,7 @@ const deps: ClientDeps = {
   fetch: fetch as unknown as ClientDeps['fetch'],
   onRetry: (status, wait, attempt) => process.stdout.write(`\n  ${status}, waiting ${(wait / 1000).toFixed(1)} s (retry ${attempt}/3)`),
 };
-const prompt = (tab: Tab, hint: string | null) => promptContext({ tab, catalog, customers: seed.customers, hint });
+const prompt = (tab: Tab, hint: string | null) => promptContext({ tab, catalog, customers: seed.customers, hint, owners: seed.owners ?? [] });
 
 // ── scoring helpers ────────────────────────────────────────────
 
