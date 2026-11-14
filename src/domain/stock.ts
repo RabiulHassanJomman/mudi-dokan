@@ -85,3 +85,16 @@ export function stockScreenWords(list: readonly StockView[]): string {
     end
   );
 }
+
+/** "সব মাল কত আছে" list: low-stock first, otherwise the stock list's order. */
+export const allStockList = (list: readonly StockView[]): StockView[] => [
+  ...list.filter((v) => v.low),
+  ...list.filter((v) => !v.low),
+];
+
+/** "মোট ৭ রকম মাল। কম আছে: চাল, ডাল।" — at most 5 low-stock names. */
+export function allStockWords(list: readonly StockView[]): string {
+  if (!list.length) return 'এখনো কোনো মাল নেই।';
+  const low = list.filter((v) => v.low).slice(0, 5).map((v) => v.name);
+  return `মোট ${toBnDigits(list.length)} রকম মাল।` + (low.length ? ` কম আছে: ${low.join(', ')}।` : '');
+}

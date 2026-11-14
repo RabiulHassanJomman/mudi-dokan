@@ -8,6 +8,7 @@ import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-spe
 import { CustomerPicker } from '../components/CustomerPicker';
 import { ProductSuggest } from '../components/ProductSuggest';
 import { EntryForm } from '../components/EntryForm';
+import { Avatar } from '../components/Avatar';
 import { Icon, productIcon, type IconName } from '../components/Icon';
 import { Txt } from '../components/Txt';
 import {
@@ -29,7 +30,7 @@ import {
   type ItemDraft,
 } from '../domain/basket';
 import { classifyAnswer, heardPrefix } from '../domain/confirmWords';
-import { balanceWords, customerAliasToLearn, resolveCustomerAlias, suggestCustomers, totalBakiWords } from '../domain/customers';
+import { balanceWords, customerAliasToLearn, owedList, resolveCustomerAlias, suggestCustomers, totalBakiWords } from '../domain/customers';
 import {
   canSaveEntry,
   choosePurchaseProduct,
@@ -41,7 +42,7 @@ import {
 } from '../domain/entry';
 import type { PickProduct } from '../domain/pick';
 import { suggestProducts } from '../domain/products';
-import { stockView, stockWords } from '../domain/stock';
+import { allStockList, allStockWords, stockView, stockWords, type StockView } from '../domain/stock';
 import {
   addCustomerAlias,
   addProductAlias,
@@ -75,12 +76,15 @@ type How = 'voice' | 'typed' | 'pick';
 
 /** "চাল কত আছে?" / "করিমের বাকি কত?": the answer, or (name not known) the closest names to choose from. */
 interface Answer {
-  question: 'stock' | 'balance' | 'total_baki';
+  question: 'stock' | 'balance' | 'total_baki' | 'all_stock';
   /** The name as heard. */
   spoken: string | null;
   /** What TTS said; null until a name is chosen. */
   text: string | null;
   choices: string[];
+  /** Summary questions: every customer who owes (largest first) / every product (low first). */
+  owed?: { id: string; name: string; balance_poisha: number }[];
+  stock?: StockView[];
 }
 
 type State =
@@ -102,6 +106,7 @@ const INTENT_BN: Record<Intent, string> = {
   stock_query: 'স্টক জানা',
   balance_query: 'বাকি জানা',
   total_baki_query: 'মোট বাকি জানা',
+  all_stock_query: 'সব মাল জানা',
   profit_query: 'লাভ জানা',
   unknown: 'বুঝিনি',
 };
@@ -264,13 +269,21 @@ export default function ConfirmScreen() {
         void speak(answer.text ?? answerPrompt(answer));
         return;
       }
-      if (parsed.intent === 'total_baki_query') {
+      if (parsed.intent === 'total_baki_query' || parsed.intent === 'all_stock_query') {
+        // summary question: a list to tap, TTS says only the totals; nothing to save
         await setOutcome(db, w, logId.current, 'unsupported');
         decided.current = true;
-        const text = totalBakiWords(await customerBalances(db));
+        let answer: Answer;
+        if (parsed.intent === 'total_baki_query') {
+          const rows = await customerBalances(db);
+          answer = { question: 'total_baki', spoken: null, text: totalBakiWords(rows), choices: [], owed: owedList(rows) };
+        } else {
+          const list = (await stockList(db)).map(stockView);
+          answer = { question: 'all_stock', spoken: null, text: allStockWords(list), choices: [], stock: allStockList(list) };
+        }
         if (!alive) return;
-        setState({ kind: 'answer', transcript, answer: { question: 'total_baki', spoken: null, text, choices: [] } });
-        void speak(text);
+        setState({ kind: 'answer', transcript, answer });
+        void speak(answer.text!);
         return;
       }
 
@@ -574,6 +587,56 @@ export default function ConfirmScreen() {
                 ))}
               </View>
             ))}
+          {state.answer.owed?.map((c) => (
+            <Pressable
+              key={c.id}
+              accessibilityRole="button"
+              accessibilityLabel={`${c.name}, ${formatTaka(c.balance_poisha)}, হিসাব দেখুন`}
+              onPress={() => {
+                stopSpeaking();
+                router.push({ pathname: '/customer/[id]', params: { id: c.id } });
+              }}
+              style={({ pressed }) => [styles.listRow, pressed && styles.pressed]}
+            >
+              <Avatar name={c.name} size={44} />
+              <Txt size={fontSize.label} weight="bold" style={styles.listName}>
+                {c.name}
+              </Txt>
+              <Txt size={fontSize.label} weight="bold" color={colors.bakiInk}>
+                {formatTaka(c.balance_poisha)}
+              </Txt>
+            </Pressable>
+          ))}
+          {state.answer.stock?.map((v) => (
+            <Pressable
+              key={v.id}
+              accessibilityRole="button"
+              accessibilityLabel={`${stockWords(v)} শুনুন`}
+              onPress={() => void speak(stockWords(v))}
+              style={({ pressed }) => [styles.listRow, v.low && styles.listRowLow, pressed && styles.pressed]}
+            >
+              {v.low ? (
+                <View style={styles.lowBadge}>
+                  <Icon name="alert" size={18} color={colors.onColor} strokeWidth={2.4} />
+                </View>
+              ) : (
+                <Icon name={productIcon(v.name)} size={30} color={colors.ink} strokeWidth={1.5} />
+              )}
+              <View style={styles.listName}>
+                <Txt size={fontSize.label} weight="bold">
+                  {v.name}
+                </Txt>
+                {v.sellPricePoisha !== null && (
+                  <Txt size={fontSize.caption} weight="medium" color={colors.muted}>
+                    {`${formatTaka(v.sellPricePoisha)} / ${UNIT_BN[v.unit]}`}
+                  </Txt>
+                )}
+              </View>
+              <Txt size={fontSize.label} weight="bold" color={v.low ? colors.lowStockQty : v.stock === null ? colors.muted : colors.ink}>
+                {v.stock === null ? 'কেনা লেখা নেই' : v.stock <= 0 ? 'শেষ' : formatQty(v.stock, v.unit)}
+              </Txt>
+            </Pressable>
+          ))}
           <BigButton label="আবার বলুন" icon="mic" bg={colors.sale} ink={colors.onColor} onPress={again} />
           <BigButton label="বন্ধ" icon="close" bg={colors.surface} ink={colors.ink} onPress={leave} />
         </ScrollView>
@@ -1037,4 +1100,27 @@ const styles = StyleSheet.create({
   },
   disabled: { opacity: 0.4 },
   pressed: { opacity: 0.85 },
+  // summary lists (মোট বাকি / সব মাল): one tappable row each, ≥ 52 px
+  listRow: {
+    minHeight: 64,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    backgroundColor: colors.surface,
+    borderRadius: radius.button,
+    borderWidth: 3,
+    borderColor: 'transparent',
+  },
+  listRowLow: { borderColor: colors.baki },
+  listName: { flex: 1 },
+  lowBadge: {
+    width: 32,
+    height: 32,
+    borderRadius: radius.pill,
+    backgroundColor: colors.baki,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });

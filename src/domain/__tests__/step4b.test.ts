@@ -16,13 +16,13 @@ import {
   type ProductInfo,
 } from '../basket';
 import { heardPrefix } from '../confirmWords';
-import { balanceWords, totalBakiWords } from '../customers';
+import { balanceWords, owedList, totalBakiWords } from '../customers';
 import { choosePurchaseProduct, entryFromParse, entryReadback } from '../entry';
 import { padDisplay } from '../numpad';
 import { pickText, pickWords } from '../pick';
 import { suggestProducts } from '../products';
 import { recentLine, type RecentEntry } from '../recent';
-import { LOW_STOCK, stockScreenWords, stockView, stockWords, type StockRow } from '../stock';
+import { allStockList, allStockWords, LOW_STOCK, stockScreenWords, stockView, stockWords, type StockRow, type StockView } from '../stock';
 
 const P = (name: string, unit: ProductInfo['unit'], sell: number | null, id = `id-${name}`): ProductInfo => ({
   id,
@@ -199,19 +199,41 @@ describe('balance words (বাকি খাতা, "করিমের বা�
   ])('%d', (p, s) => expect(balanceWords('করিম', p)).toBe(s));
 });
 
-describe('মোট বাকি: total, how many, top 3', () => {
-  const r = (name: string, taka: number) => ({ name, balance_poisha: taka * 100 });
-  it('sums only what is owed, top 3 by amount', () => {
-    expect(
-      totalBakiWords([r('সুমি', 500), r('করিম', 2300), r('হাসান', -50), r('রহিম', 1200), r('জামাল', 0), r('মিনা', 150)]),
-    ).toBe('মোট বাকি ৪,১৫০ টাকা, ৪ জনের কাছে। সবচেয়ে বেশি: করিম ২,৩০০ টাকা, রহিম ১,২০০ টাকা, সুমি ৫০০ টাকা।');
+describe('মোট বাকি: list + total, no names read aloud', () => {
+  const r = (id: string, taka: number) => ({ id, name: id, balance_poisha: taka * 100 });
+  const rows = [r('সুমি', 500), r('করিম', 2300), r('হাসান', -50), r('রহিম', 1200), r('জামাল', 0), r('মিনা', 150)];
+
+  it('lists only who owes, largest first', () => {
+    expect(owedList(rows).map((c) => c.name)).toEqual(['করিম', 'রহিম', 'সুমি', 'মিনা']);
   });
-  it('one customer', () => {
-    expect(totalBakiWords([r('করিম', 250.5)])).toBe('মোট বাকি ২৫০.৫ টাকা, ১ জনের কাছে। সবচেয়ে বেশি: করিম ২৫০.৫ টাকা।');
+  it('says total and how many', () => {
+    expect(totalBakiWords(rows)).toBe('মোট বাকি ৪,১৫০ টাকা, ৪ জনের কাছে।');
+    expect(totalBakiWords([r('করিম', 250.5)])).toBe('মোট বাকি ২৫০.৫ টাকা, ১ জনের কাছে।');
   });
   it('nobody owes', () => {
+    expect(owedList([r('করিম', 0), r('রহিম', -100)])).toEqual([]);
     expect(totalBakiWords([])).toBe('কারো কাছে কোনো বাকি নেই।');
     expect(totalBakiWords([r('করিম', 0), r('রহিম', -100)])).toBe('কারো কাছে কোনো বাকি নেই।');
+  });
+});
+
+describe('সব মাল: low first, short TTS', () => {
+  const v = (name: string, stock: number | null, low = false): StockView => ({
+    id: name, name, unit: 'kg', sellPricePoisha: 6000, stock, known: stock !== null, low,
+  });
+
+  it('low-stock first, otherwise order kept', () => {
+    const list = [v('আটা', 20), v('চাল', 2, true), v('ডিম', null), v('ডাল', 0, true), v('তেল', 30)];
+    expect(allStockList(list).map((x) => x.name)).toEqual(['চাল', 'ডাল', 'আটা', 'ডিম', 'তেল']);
+  });
+  it('count + low names, at most 5', () => {
+    const list = ['ক', 'খ', 'গ', 'ঘ', 'ঙ', 'চ'].map((n) => v(n, 1, true)).concat([v('আটা', 20)]);
+    expect(allStockWords(list)).toBe('মোট ৭ রকম মাল। কম আছে: ক, খ, গ, ঘ, ঙ।');
+    expect(allStockWords([v('আটা', 20), v('চাল', 2, true)])).toBe('মোট ২ রকম মাল। কম আছে: চাল।');
+  });
+  it('nothing low / nothing at all', () => {
+    expect(allStockWords([v('আটা', 20)])).toBe('মোট ১ রকম মাল।');
+    expect(allStockWords([])).toBe('এখনো কোনো মাল নেই।');
   });
 });
 

@@ -8,8 +8,19 @@ export const STOCK = wordSet(['আছে', 'স্টক', 'মজুদ']);
 export const HOW_MUCH = wordSet(['কত', 'কতো']);
 /** "(I) will get" — what a customer owes the shop. */
 export const OWED = wordSet(['পাবো', 'পাব', 'পাওনা']);
-/** "everyone's / in total" — a বাকি question with no name left = all customers. NOT in ALL_KEYWORDS. */
-export const ALL_PEOPLE = wordSet(['মোট', 'সবার', 'সব', 'সবাই', 'সবাইকে', 'সকলের', 'সকল', 'টোটাল', 'সবমিলিয়ে', 'মিলিয়ে']);
+/**
+ * Summary-question words, NOT in ALL_KEYWORDS (dropped only inside the query rules):
+ * a বাকি / স্টক question with nothing else left = all customers / all products.
+ */
+export const EVERY = wordSet(['মোট', 'সবার', 'সব', 'সবাই', 'সবাইকে', 'সকলের', 'সকল', 'টোটাল', 'সবমিলিয়ে', 'মিলিয়ে']);
+export const LIST = wordSet(['লিস্ট', 'লিষ্ট', 'লিস্টটা', 'তালিকা', 'তালিকাটা']);
+/** "কে কে বাকি আছে", "কারা বাকি". */
+export const WHO = wordSet(['কে', 'কারা', 'কাদের', 'কার']);
+/** "বাকির লিস্ট": বাকি in the genitive (not a ledger keyword). */
+export const BAKI_OF = wordSet(['বাকির', 'বাকিদের', 'ধারের', 'বকেয়ার']);
+/** "goods" — "সব মাল", "মালের লিস্ট", "কি কি মাল আছে". */
+export const GOODS = wordSet(['মাল', 'মালের', 'মালামাল', 'মালগুলো', 'পণ্য', 'পণ্যের', 'জিনিস', 'জিনিসের', 'স্টকের', 'মজুদের']);
+export const SHOW = wordSet(['দেখাও', 'দেখান', 'দেখি', 'দেখাও', 'দেখাবেন', 'বলো', 'বলেন', 'শোনাও', 'শোনান']);
 export const QUESTION = wordSet(['কত', 'কতো', 'কি', 'কী', 'কতটুকু', 'কয়টা', 'কয়', 'কতগুলো', 'এখন', 'দোকানে']);
 
 export const PURCHASE = wordSet(['কেনা', 'কিনলাম', 'কিনেছি', 'কিনছি', 'এনেছি', 'আনলাম', 'আনছি', 'ক্রয়']);

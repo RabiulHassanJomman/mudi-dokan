@@ -74,19 +74,17 @@ export const balanceWords = (name: string, balancePoisha: number): string =>
       ? `${name}, অগ্রিম দিয়েছে ${formatNumber(-balancePoisha / 100)} টাকা।`
       : `${name}, কোনো বাকি নেই।`;
 
-/**
- * "মোট কত বাকি?": total owed, how many customers owe, top 3 by amount.
- * Customers at zero or paid ahead are left out.
- */
-export function totalBakiWords(rows: readonly { name: string; balance_poisha: number }[]): string {
-  const owed = rows.filter((r) => r.balance_poisha > 0).sort((a, b) => b.balance_poisha - a.balance_poisha);
+/** "মোট কত বাকি?" list: customers who owe (> 0), largest first. */
+export function owedList<T extends { balance_poisha: number }>(rows: readonly T[]): T[] {
+  return rows.filter((r) => r.balance_poisha > 0).sort((a, b) => b.balance_poisha - a.balance_poisha);
+}
+
+/** "মোট বাকি ৪,১৫০ টাকা, ৪ জনের কাছে।" — no names; the list is on screen. */
+export function totalBakiWords(rows: readonly { balance_poisha: number }[]): string {
+  const owed = owedList(rows);
   if (!owed.length) return 'কারো কাছে কোনো বাকি নেই।';
   const total = owed.reduce((s, r) => s + r.balance_poisha, 0);
-  const top = owed
-    .slice(0, 3)
-    .map((r) => `${r.name} ${formatNumber(r.balance_poisha / 100)} টাকা`)
-    .join(', ');
-  return `মোট বাকি ${formatNumber(total / 100)} টাকা, ${formatNumber(owed.length)} জনের কাছে। সবচেয়ে বেশি: ${top}।`;
+  return `মোট বাকি ${formatNumber(total / 100)} টাকা, ${formatNumber(owed.length)} জনের কাছে।`;
 }
 
 const key = (s: string) => norm(s).toLowerCase();

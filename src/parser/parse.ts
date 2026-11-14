@@ -215,10 +215,15 @@ export function parseCommand(text: string, ctx: ParseContext = {}): ParsedComman
     return compact({ intent: 'profit_query', period, missing: [], confidence: 'high', ...base });
   }
   // "করিমের বাকি কত?", "করিমের কাছে কত পাবো": a question, no amount said.
-  // No name left ("মোট কত বাকি", "সবার বাকি কত") = all customers together.
+  // No name left ("মোট কত বাকি", "সবার বাকি কত", "কে কে বাকি আছে", "বাকির লিস্ট") = all customers.
   const anyNumberAt = tokens.some((_, k) => parseNumber(tokens, k) !== null);
-  if ((has(K.BAKI) || has(K.OWED)) && has(K.HOW_MUCH) && !anyNumberAt && !has(K.CREDIT) && !has(K.TAKE)) {
-    const names = tokens.filter((t) => !isNoise(t) && !K.ALL_PEOPLE.has(t)).map(stripGenitive);
+  const summaryWord = (t: string) => K.EVERY.has(t) || K.LIST.has(t) || K.SHOW.has(t);
+  const bakiAsked = has(K.BAKI) || has(K.OWED) || has(K.BAKI_OF);
+  const bakiQuestion = has(K.HOW_MUCH) || has(K.LIST) || has(K.WHO);
+  if (bakiAsked && bakiQuestion && !anyNumberAt && !has(K.CREDIT) && !has(K.TAKE)) {
+    const names = tokens
+      .filter((t) => !isNoise(t) && !summaryWord(t) && !K.WHO.has(t) && !K.BAKI_OF.has(t))
+      .map(stripGenitive);
     if (!names.length) return compact({ intent: 'total_baki_query', missing: [], confidence: 'high', ...base });
     const hit = matchKnown(names, ctx.knownCustomers);
     const customer = hit?.match ?? customerName(names);
@@ -230,8 +235,14 @@ export function parseCommand(text: string, ctx: ParseContext = {}): ParsedComman
       ...base,
     });
   }
+  // "সব মাল কত আছে", "মালের লিস্ট", "কি কি মাল আছে", "স্টক দেখাও": no product left = every product
+  const stockAsked = has(K.GOODS) || has(K.LIST) || tokens.some((t) => t === 'স্টক' || t === 'মজুদ');
+  if (stockAsked && !anyNumberAt && !bakiAsked && !has(K.CREDIT) && !has(K.JOMA) && !has(K.PURCHASE) && !has(K.SALE)) {
+    const rest = tokens.filter((t) => !isNoise(t) && !summaryWord(t) && !K.GOODS.has(t));
+    if (!rest.length) return compact({ intent: 'all_stock_query', missing: [], confidence: 'high', ...base });
+  }
   if (has(K.STOCK) && !has(K.BAKI) && !has(K.CREDIT) && !has(K.JOMA)) {
-    const spoken = joinOrUndef(tokens.filter((t) => !isNoise(t)).map(stripGenitive));
+    const spoken = joinOrUndef(tokens.filter((t) => !isNoise(t) && !K.SHOW.has(t)).map(stripGenitive));
     const product = spoken === undefined ? undefined : canon(spoken);
     const unmatched = checkProducts && product !== undefined && !knownProductKeys.has(spoken!);
     return compact({

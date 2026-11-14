@@ -108,6 +108,11 @@ describe('total বাকি question: no name = all customers', () => {
     'বাকি কত টাকা পাওনা',
     'সব মিলিয়ে বাকি কত',
     'বাকি কত',
+    'কে কে বাকি আছে',
+    'কারা বাকি আছে',
+    'বাকির লিস্ট',
+    'বাকির লিস্ট দেখাও',
+    'বাকির তালিকা',
   ])('%s', (text) => {
     for (const c of [{}, ctx, { tab: 'ledger' as const }]) {
       expect(parseCommand(text, c)).toMatchObject({ intent: 'total_baki_query', missing: [], confidence: 'high' });
@@ -117,5 +122,27 @@ describe('total বাকি question: no name = all customers', () => {
 
   it('with an amount it is an entry, not a question', () => {
     expect(parseCommand('সবার ২০০ টাকা বাকি', ctx).intent).not.toBe('total_baki_query');
+  });
+});
+
+describe('all stock question: every product', () => {
+  it.each(['সব মাল কত আছে', 'মালের লিস্ট', 'কি কি মাল আছে', 'স্টক দেখাও', 'সব মালের স্টক', 'মালের তালিকা দেখাও'])('%s', (text) => {
+    for (const c of [{}, ctx, { tab: 'stock' as const }, { tab: 'ledger' as const }]) {
+      expect(parseCommand(text, c)).toMatchObject({ intent: 'all_stock_query', missing: [], confidence: 'high' });
+      expect(parseCommand(text, c).product).toBeUndefined();
+    }
+  });
+
+  it('one product stays a single question', () => {
+    expect(parseCommand('চাল কত আছে', ctx)).toMatchObject({ intent: 'stock_query', product: 'চাল' });
+    expect(parseCommand('চালের স্টক দেখাও', ctx)).toMatchObject({ intent: 'stock_query', product: 'চাল' });
+  });
+
+  it('a purchase with "মাল" and numbers is not a question', () => {
+    expect(parseCommand('নতুন মাল চাল ৫০ কেজি কেনা ৫৫', ctx).intent).toBe('purchase');
+  });
+
+  it('বাকি lists are not stock lists', () => {
+    expect(parseCommand('কে কে বাকি আছে', ctx).intent).toBe('total_baki_query');
   });
 });
