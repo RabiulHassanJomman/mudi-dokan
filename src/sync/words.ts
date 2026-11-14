@@ -12,6 +12,9 @@ export const PHASE_BN: Record<SyncPhase, string> = {
   budget: 'আজকের ফ্রি সীমা শেষ — কাল আবার পাঠাবে',
 };
 
+/** After a first sync took the shop name and opening cash from the cloud (Setup was done offline). */
+export const SHOP_ADOPTED_BN = 'দোকানের নাম ও ক্যাশ আগের ফোন থেকে নেওয়া হয়েছে';
+
 /** "এইমাত্র", "৫ মিনিট আগে", "৩ ঘণ্টা আগে", "২ দিন আগে", "কখনো না". */
 export function agoBn(ms: number | null, now = Date.now()): string {
   if (ms === null) return 'কখনো না';

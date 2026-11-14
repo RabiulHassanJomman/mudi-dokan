@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
 import { signIn, signOut } from '../sync/auth';
 import { useSyncStatus } from '../sync/app';
-import { PHASE_BN, agoBn } from '../sync/words';
+import { PHASE_BN, SHOP_ADOPTED_BN, agoBn } from '../sync/words';
 import { formatNumber } from '../lib/bn';
 import { speak } from '../lib/speak';
 import { nav } from '../lib/nav';
@@ -30,6 +30,11 @@ export function AccountCard({ showSync = false }: { showSync?: boolean }) {
   const [askOut, setAskOut] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
   const email = status?.email ?? null;
+  const adopted = status?.notice === 'shop_adopted';
+
+  useEffect(() => {
+    if (adopted) void speak(`${SHOP_ADOPTED_BN}।`);
+  }, [adopted]);
 
   const doSignIn = async () => {
     setBusy(true);
@@ -89,6 +94,14 @@ export function AccountCard({ showSync = false }: { showSync?: boolean }) {
           {email}
         </Txt>
       </View>
+      {adopted && (
+        <View style={styles.notice}>
+          <Icon name="check" size={22} color={colors.saleDark} strokeWidth={2.6} />
+          <Txt wrap size={fontSize.body} weight="bold" color={colors.saleDark} style={styles.flex}>
+            {SHOP_ADOPTED_BN}
+          </Txt>
+        </View>
+      )}
       {status && (
         <Txt wrap size={fontSize.captionLg} weight="medium" color={status.phase === 'error' ? colors.bakiInk : colors.muted}>
           {`${PHASE_BN[status.phase]} · শেষ সিঙ্ক ${agoBn(stats?.lastSyncAt ?? null)}${stats?.pending ? ` · বাকি ${formatNumber(stats.pending)}` : ''}`}
@@ -147,5 +160,6 @@ const styles = StyleSheet.create({
   button: { flex: 1, minHeight: 56, borderRadius: radius.icon, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.xs },
   syncButton: { backgroundColor: colors.stockTint },
   outButton: { backgroundColor: colors.bakiTint },
+  notice: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, backgroundColor: colors.saleTint, borderRadius: radius.icon, padding: spacing.md },
   pressed: { opacity: 0.85 },
 });

@@ -12,7 +12,7 @@ import NetInfo from '@react-native-community/netinfo';
 import { addDatabaseChangeListener, openDatabaseAsync } from 'expo-sqlite';
 
 import { DATABASE_NAME } from '../db/client';
-import { dismissedMerges, mergeItems, repointMerged } from '../db/repo';
+import { adoptCloudShop, dismissedMerges, mergeItems, repointMerged } from '../db/repo';
 import { writer } from '../device';
 import { duplicatePairs, type MergePair } from '../domain/merge';
 import type { Db } from '../db/repo';
@@ -49,6 +49,7 @@ async function boot(): Promise<SyncController> {
   const engine = new SyncEngine(syncDb as unknown as Db);
   const ctl = new SyncController(engine, {
     afterApply: () => repointMerged(syncDb as unknown as Db, writer()),
+    adoptShop: (shop) => adoptCloudShop(syncDb as unknown as Db, writer(), shop),
     onData: bumpData,
     onFirstSync: () => {
       for (const fn of firstSyncSubs) fn();

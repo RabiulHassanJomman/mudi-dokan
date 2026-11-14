@@ -9,7 +9,7 @@ import { ConfirmSheet } from '../components/ConfirmSheet';
 import { Icon } from '../components/Icon';
 import { NumberPadSheet } from '../components/NumberPadSheet';
 import { Txt } from '../components/Txt';
-import { getSetup, saveSetup } from '../db/repo';
+import { getSetup, saveDeviceSetup, saveSetup } from '../db/repo';
 import { getDevice, markSetupDone, setDevice, writer } from '../device';
 import {
   DEVICE_NAME_MAX,
@@ -52,7 +52,17 @@ export default function SetupScreen() {
   const editing = useLocalSearchParams<{ edit?: string }>().edit === '1';
   const voice = useVoiceOnce();
   const synced = useDataVersion();
-  const email = useSyncStatus()?.email ?? null;
+  const status = useSyncStatus();
+  const email = status?.email ?? null;
+  /** First run: sign-in comes first; "পরে ঢুকব" = set up offline, sign in later from ⚙. */
+  const [later, setLater] = useState(false);
+  const waitingSignIn = !editing && !email && !later;
+  /** Signed in, first sync still running: we don't know yet whether the shop exists. */
+  const fetching = !editing && !!email && status?.stats?.lastSyncAt == null && status?.phase !== 'error';
+  /** The shop came from the cloud: only this phone's name and role are asked. */
+  const joined = !editing && !!email && !!status?.stats?.cloudShop;
+  const mode = { joinedShop: joined };
+  const showForm = !waitingSignIn && !fetching;
 
   const [draft, setDraft] = useState<SetupDraft>(newSetupDraft());
   /** Which 🎤 is listening: the name or the cash. */
@@ -81,18 +91,20 @@ export default function SetupScreen() {
     };
   }, [db]);
 
-  // another phone's shop came in by sync: fill what is still empty (shop name, opening cash)
+  // another phone's shop came in by sync: fill what is still empty (shop name, opening cash);
+  // if the cloud's shop replaced this phone's (shop_adopted), show the cloud's values
+  const adopted = status?.notice === 'shop_adopted';
   useEffect(() => {
-    if (!synced) return;
+    if (!synced && !adopted) return;
     void (async () => {
       const s = await getSetup(db, getDevice().id);
       setDraft((d) => ({
         ...d,
-        shopName: d.shopName.trim() ? d.shopName : (s.shopName ?? ''),
-        openingCashPoisha: d.openingCashPoisha ?? s.openingCashPoisha,
+        shopName: adopted || !d.shopName.trim() ? (s.shopName ?? '') : d.shopName,
+        openingCashPoisha: adopted ? s.openingCashPoisha : (d.openingCashPoisha ?? s.openingCashPoisha),
       }));
     })();
-  }, [db, synced]);
+  }, [db, synced, adopted]);
 
   const set = (patch: Partial<SetupDraft>) => {
     setDraft((d) => ({ ...d, ...patch }));
@@ -146,19 +158,25 @@ export default function SetupScreen() {
   };
 
   const readScreen = () => {
+    if (!showForm) {
+      void speak(fetching ? 'দোকানের হিসাব আনা হচ্ছে, একটু অপেক্ষা করুন।' : 'দোকান চালু করুন। প্রথমে দোকানের Google অ্যাকাউন্টে ঢুকুন। ইন্টারনেট না থাকলে পরে ঢুকব চাপুন।');
+      return;
+    }
     const parts = [
       editing ? 'দোকানের তথ্য।' : 'দোকান চালু করুন।',
-      `এক, দোকানের Google অ্যাকাউন্ট। ${email ? `${email}, ঢোকা আছে।` : 'ঢুকুন চাপুন। দোকানের সব ফোনে একই অ্যাকাউন্ট।'}`,
-      `দুই, দোকানের নাম। ${draft.shopName.trim() || 'লেখা হয়নি।'}`,
-      `তিন, আপনার নাম। ${draft.deviceName.trim() ? `${draft.deviceName.trim()}, ${draft.role ? ROLE_BN[draft.role] : 'মালিক না কর্মচারী বেছে নিন'}।` : 'লিখুন, না হলে মাইক চেপে বলুন। তারপর মালিক না কর্মচারী।'}`,
-      `চার, এখন ক্যাশে কত টাকা? ${draft.openingCashPoisha === null ? 'মাইক চেপে বলুন।' : `${formatNumber(draft.openingCashPoisha / 100)} টাকা।`}`,
+      `এক, দোকানের Google অ্যাকাউন্ট। ${email ? `${email}, ঢোকা আছে।` : 'ঢুকুন চাপুন। দোকানের সব ফোনে একই অ্যাকাউন্ট। ইন্টারনেট না থাকলে পরে ঢুকব চাপুন।'}`,
+      ...(joined
+        ? [`দোকান ${draft.shopName.trim()}, আগের ফোন থেকে আনা। দুই, আপনার নাম।`]
+        : [`দুই, দোকানের নাম। ${draft.shopName.trim() || 'লেখা হয়নি।'}`, 'তিন, আপনার নাম।']),
+      ` ${draft.deviceName.trim() ? `${draft.deviceName.trim()}, ${draft.role ? ROLE_BN[draft.role] : 'মালিক না কর্মচারী বেছে নিন'}।` : 'লিখুন, না হলে মাইক চেপে বলুন। তারপর মালিক না কর্মচারী।'}`,
+      ...(joined ? [] : [`চার, এখন ক্যাশে কত টাকা? ${draft.openingCashPoisha === null ? 'মাইক চেপে বলুন।' : `${formatNumber(draft.openingCashPoisha / 100)} টাকা।`}`]),
       editing ? 'শেষে রাখুন চাপুন।' : 'শেষে শুরু করুন চাপুন।',
     ];
     void speak(parts.join(' '));
   };
 
   const submit = () => {
-    const problems = setupProblems(draft);
+    const problems = setupProblems(draft, mode);
     if (problems.length) {
       setShown(problems);
       void speak(problems.map((p) => PROBLEM_TEXT[p]).join(' '));
@@ -174,7 +192,9 @@ export default function SetupScreen() {
       const name = draft.deviceName.trim();
       // the kv copy first: writer() stamps device_name on the opening-cash entry
       setDevice(name, draft.role);
-      await saveSetup(db, writer(), { ...draft, deviceName: name }, businessDate(new Date()));
+      // a shop from the cloud keeps its name and opening cash: only this phone's row
+      if (joined) await saveDeviceSetup(db, writer(), name, draft.role);
+      else await saveSetup(db, writer(), { ...draft, deviceName: name }, businessDate(new Date()));
       markSetupDone();
       setConfirming(false);
       void speak(editing ? 'রাখা হয়েছে।' : 'দোকান চালু হয়েছে।');
@@ -209,8 +229,33 @@ export default function SetupScreen() {
       <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
         <Section n={1} title="দোকানের Google অ্যাকাউন্ট" bad={false}>
           <AccountCard showSync={editing} />
+          {waitingSignIn && (
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => {
+                setLater(true);
+                void speak('ঠিক আছে, পরে ঢুকবেন। ⚙ থেকে ঢোকা যাবে।');
+              }}
+              style={({ pressed }) => [styles.later, pressed && styles.pressed]}
+            >
+              <Txt size={fontSize.label} weight="bold" color={colors.ink2}>
+                পরে ঢুকব
+              </Txt>
+            </Pressable>
+          )}
+          {fetching && (
+            <Txt size={fontSize.captionLg} weight="semibold" color={colors.stock}>
+              দোকানের হিসাব আনা হচ্ছে…
+            </Txt>
+          )}
+          {joined && draft.shopName.trim() !== '' && (
+            <Txt wrap size={fontSize.body} weight="bold" color={colors.saleDark}>
+              {`দোকান: ${draft.shopName.trim()} (আগের ফোন থেকে)`}
+            </Txt>
+          )}
         </Section>
 
+        {showForm && !joined && (
         <Section n={2} title="দোকানের নাম" bad={bad('shop_name')}>
           <TextInput
             value={draft.shopName}
@@ -222,8 +267,10 @@ export default function SetupScreen() {
             style={styles.input}
           />
         </Section>
+        )}
 
-        <Section n={3} title="আপনার নাম" bad={bad('device_name') || bad('role')}>
+        {showForm && (
+        <Section n={joined ? 2 : 3} title="আপনার নাম" bad={bad('device_name') || bad('role')}>
           <View style={styles.cashRow}>
             <TextInput
               value={draft.deviceName}
@@ -273,7 +320,9 @@ export default function SetupScreen() {
             ))}
           </View>
         </Section>
+        )}
 
+        {showForm && !joined && (
         <Section n={4} title="এখন ক্যাশে কত টাকা?" bad={bad('opening_cash')}>
           <View style={styles.cashRow}>
             <Pressable
@@ -308,6 +357,7 @@ export default function SetupScreen() {
             </Txt>
           ) : null}
         </Section>
+        )}
 
         {/* settings only: bring in an existing customer list (.txt) */}
         {editing && (
@@ -325,12 +375,14 @@ export default function SetupScreen() {
         )}
       </ScrollView>
 
+      {showForm && (
       <Pressable accessibilityRole="button" onPress={submit} style={({ pressed }) => [styles.start, pressed && styles.pressed]}>
         <Txt size={fontSize.listAmount} weight="bold" color={colors.onColor}>
           {editing ? 'রাখুন' : 'শুরু করুন'}
         </Txt>
         <Icon name={editing ? 'check' : 'arrow'} size={30} color={colors.onColor} strokeWidth={2.4} />
       </Pressable>
+      )}
 
       <NumberPadSheet
         visible={padOpen}
@@ -347,7 +399,7 @@ export default function SetupScreen() {
       />
       <ConfirmSheet
         visible={confirming}
-        text={setupReadback(draft)}
+        text={setupReadback(draft, mode)}
         busy={saving}
         onYes={() => void save()}
         onNo={() => setConfirming(false)}
@@ -463,4 +515,5 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   pressed: { opacity: 0.85 },
+  later: { minHeight: 56, borderRadius: radius.icon, backgroundColor: colors.neutralTint, alignItems: 'center', justifyContent: 'center' },
 });

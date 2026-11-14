@@ -38,6 +38,15 @@ export interface SyncStats {
   waiting: number;
   writesToday: number;
   readsToday: number;
+  /** The account already had a shop when this phone first synced (it joined that shop). */
+  cloudShop: boolean;
+}
+
+export interface FirstSyncResult {
+  applied: number;
+  cloudShop: boolean;
+  /** Something of this phone's (shop name, opening cash) was replaced by the cloud's. */
+  adopted: boolean;
 }
 
 export type PushResult = { pushed: number; budgetHit: boolean };
@@ -47,6 +56,7 @@ const META_LAST = 'last_sync_at';
 const META_DAY = 'count_day';
 const META_WRITES = 'writes_n';
 const META_READS = 'reads_n';
+const META_CLOUD_SHOP = 'cloud_shop';
 const cursorKey = (t: string) => `pull:${t}`;
 
 export class SyncEngine {
@@ -100,7 +110,7 @@ export class SyncEngine {
     await this.db.withTransactionAsync(async () => {
       await this.db.runAsync('DELETE FROM sync_state');
       await this.db.runAsync('DELETE FROM sync_inbox');
-      await this.db.runAsync("DELETE FROM sync_meta WHERE key LIKE 'pull:%' OR key = ?", META_LAST);
+      await this.db.runAsync("DELETE FROM sync_meta WHERE key LIKE 'pull:%' OR key IN (?, ?)", META_LAST, META_CLOUD_SHOP);
       await this.setMeta(META_UID, uid);
     });
     return true;
@@ -137,6 +147,7 @@ export class SyncEngine {
       waiting: waiting?.n ?? 0,
       writesToday: await this.today(META_WRITES),
       readsToday: await this.today(META_READS),
+      cloudShop: (await this.getMeta(META_CLOUD_SHOP)) === '1',
     };
   }
 
@@ -242,6 +253,32 @@ export class SyncEngine {
         await this.store(t.name, docs);
       }
       return this.applyNow();
+    });
+  }
+
+  /**
+   * First sync with an account (before anything is pushed): pull everything; if the cloud
+   * already has the shop, its row wins over this phone's whatever the clocks say, and
+   * `adopt` replaces what this phone set up on its own (opening cash).
+   */
+  firstSync(adopt?: (shop: DocData) => Promise<boolean>): Promise<FirstSyncResult> {
+    return this.exclusive(async () => {
+      let shop: RemoteDoc | undefined;
+      for (const t of SYNC_TABLES) {
+        const docs = await this.need().fetchSince(t.name, await this.since(t.name));
+        if (t.name === 'shop') shop = docs.find((d) => d.serverAt !== null);
+        await this.store(t.name, docs);
+      }
+      if (shop) await this.db.runAsync("DELETE FROM sync_inbox WHERE tbl = 'shop'");
+      const applied = await this.applyNow();
+      let adopted = false;
+      if (shop) {
+        const doc: DocData = { ...shop.data, id: shop.id };
+        adopted = adopt ? await adopt(doc) : false;
+        await this.markPushed('shop', shop.id, Number(doc.updated_at));
+      }
+      await this.setMeta(META_CLOUD_SHOP, shop ? 1 : 0);
+      return { applied, cloudShop: !!shop, adopted };
     });
   }
 

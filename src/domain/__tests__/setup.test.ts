@@ -61,3 +61,18 @@ describe('setup', () => {
     expect(businessDate(new Date(2026, 0, 5, 0, 1))).toBe('2026-01-05');
   });
 });
+
+describe('setup on a phone joining a shop that is already in the cloud', () => {
+  it('only this phone’s name and role are asked; shop name and cash are not', () => {
+    const joined = { shopName: '', deviceName: 'রফিক', role: 'staff' as const, openingCashPoisha: null };
+    expect(setupProblems(joined, { joinedShop: true })).toEqual([]);
+    expect(setupProblems({ ...joined, deviceName: '' }, { joinedShop: true })).toEqual(['device_name']);
+    expect(setupProblems(joined)).toEqual(['shop_name', 'opening_cash']);
+  });
+
+  it('the readback leaves out shop and cash', () => {
+    expect(setupReadback({ shopName: 'রহিম স্টোর', deviceName: 'রফিক', role: 'staff', openingCashPoisha: null }, { joinedShop: true })).toBe(
+      'দোকান: রহিম স্টোর। আপনার নাম: রফিক, কর্মচারী। ঠিক আছে?',
+    );
+  });
+});

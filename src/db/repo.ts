@@ -1351,3 +1351,53 @@ async function repointInTx(db: Db, w: Writer): Promise<number> {
   }
   return n;
 }
+
+// ── joining a shop that is already in the cloud (step 7) ────────
+
+/**
+ * First sync of this phone to an account whose cloud already has the shop: the cloud's shop
+ * row wins over this phone's (whatever the clocks say), and this phone's own opening cash
+ * entries (a Setup done offline before sign-in) are cancelled by voided corrections — kept in
+ * history, not counted. Returns true if something of this phone's was replaced (for the
+ * "দোকানের নাম ও ক্যাশ আগের ফোন থেকে নেওয়া হয়েছে" notice).
+ */
+export async function adoptCloudShop(db: Db, w: Writer, cloud: Record<string, unknown>): Promise<boolean> {
+  let replaced = false;
+  await db.withTransactionAsync(async () => {
+    const local = await db.getFirstAsync<{ name: string }>('SELECT name FROM shop WHERE id = ?', SHOP_ID);
+    const name = String(cloud.name ?? '');
+    replaced = !!local && local.name !== name;
+    await db.runAsync(
+      `INSERT INTO shop (id, name, device_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET name = excluded.name, device_id = excluded.device_id,
+         created_at = excluded.created_at, updated_at = excluded.updated_at`,
+      SHOP_ID,
+      name,
+      String(cloud.device_id ?? ''),
+      Number(cloud.created_at ?? 0),
+      Number(cloud.updated_at ?? 0),
+    );
+    const mine = await db.getAllAsync<{ id: string }>(
+      "SELECT id FROM v_day_close WHERE kind = 'opening' AND device_id = ?",
+      w.deviceId,
+    );
+    for (const o of mine) await correct(db, w, 'day_close', o.id, {}, true);
+    if (mine.length) replaced = true;
+  });
+  return replaced;
+}
+
+/** Setup on a phone that joined a shop: only this phone's name and role (devices row). */
+export async function saveDeviceSetup(db: Db, w: Writer, deviceName: string, role: Role): Promise<void> {
+  const t = w.now();
+  await db.runAsync(
+    `INSERT INTO devices (id, device_name, role, device_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET device_name = excluded.device_name, role = excluded.role, updated_at = excluded.updated_at`,
+    w.deviceId,
+    deviceName.trim(),
+    role,
+    w.deviceId,
+    t,
+    t,
+  );
+}

@@ -30,19 +30,28 @@ export function nameFromSpeech(text: string): string {
   return cleanDeviceName(t);
 }
 
-export function setupProblems(s: SetupDraft): SetupProblem[] {
+/**
+ * joinedShop: this phone signed in to a shop that is already in the cloud — its name and
+ * opening cash come from there, so Setup asks only for this phone's name and role.
+ */
+export interface SetupMode {
+  joinedShop?: boolean;
+}
+
+export function setupProblems(s: SetupDraft, mode: SetupMode = {}): SetupProblem[] {
   const p: SetupProblem[] = [];
-  if (!s.shopName.trim()) p.push('shop_name');
+  if (!mode.joinedShop && !s.shopName.trim()) p.push('shop_name');
   const name = s.deviceName.normalize('NFC').replace(/\s+/g, ' ').trim();
   if (!name || [...name].length > DEVICE_NAME_MAX) p.push('device_name');
   if (!s.role) p.push('role');
-  if (s.openingCashPoisha === null || s.openingCashPoisha < 0) p.push('opening_cash');
+  if (!mode.joinedShop && (s.openingCashPoisha === null || s.openingCashPoisha < 0)) p.push('opening_cash');
   return p;
 }
 
-export const setupReadback = (s: SetupDraft) =>
+export const setupReadback = (s: SetupDraft, mode: SetupMode = {}) =>
   `দোকান: ${s.shopName.trim()}। আপনার নাম: ${s.deviceName.trim()}, ${s.role ? ROLE_BN[s.role] : '—'}। ` +
-  `ক্যাশে ${formatNumber((s.openingCashPoisha ?? 0) / 100)} টাকা। ঠিক আছে?`;
+  (mode.joinedShop ? '' : `ক্যাশে ${formatNumber((s.openingCashPoisha ?? 0) / 100)} টাকা। `) +
+  'ঠিক আছে?';
 
 /** Shop-local calendar day, YYYY-MM-DD. */
 export const businessDate = (d: Date) =>

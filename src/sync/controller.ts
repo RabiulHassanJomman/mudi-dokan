@@ -8,7 +8,7 @@
  *   through realtime listeners (changed-since queries) while the app is in the foreground
  * - without sign-in or network it just waits; the app works the same offline
  */
-import type { Remote, RemoteDoc, SyncEngine, SyncStats } from './engine';
+import type { DocData, FirstSyncResult, Remote, RemoteDoc, SyncEngine, SyncStats } from './engine';
 import { SYNC_TABLES } from './tables';
 
 export type SyncPhase = 'signed_out' | 'offline' | 'idle' | 'syncing' | 'error' | 'budget';
@@ -18,13 +18,17 @@ export interface SyncStatus {
   email: string | null;
   lastError: string | null;
   stats: SyncStats | null;
+  /** shop_adopted: "দোকানের নাম ও ক্যাশ আগের ফোন থেকে নেওয়া হয়েছে" (until the next sign-in). */
+  notice: 'shop_adopted' | null;
 }
 
 export interface ControllerHooks {
   /** After rows from other phones went in (re-point merged ones). Returns new local rows. */
   afterApply?: () => Promise<number>;
-  /** After the first pull from an account: duplicates to ask about (merge screen). */
-  onFirstSync?: () => void;
+  /** First sync and the cloud already has the shop: take it over this phone's own setup. */
+  adoptShop?: (shop: DocData) => Promise<boolean>;
+  /** After the first pull from an account (merge screen, notice). */
+  onFirstSync?: (r: FirstSyncResult) => void;
   /** Rows from other phones changed the data: screens reload. */
   onData?: () => void;
 }
@@ -43,7 +47,7 @@ export class SyncController {
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
   private unlisten: (() => void)[] = [];
-  private status: SyncStatus = { phase: 'signed_out', email: null, lastError: null, stats: null };
+  private status: SyncStatus = { phase: 'signed_out', email: null, lastError: null, stats: null, notice: null };
   private subs = new Set<(s: SyncStatus) => void>();
 
   constructor(
@@ -92,7 +96,7 @@ export class SyncController {
     this.engine.setRemote(this.remote);
     this.failures = 0;
     if (account) await this.engine.useAccount(account.uid);
-    await this.publish({ phase: this.idlePhase(), lastError: null });
+    await this.publish({ phase: this.idlePhase(), lastError: null, notice: null });
     if (account) void this.syncNow();
   }
 
@@ -158,10 +162,13 @@ export class SyncController {
     }
     await this.publish({ phase: 'syncing' });
     try {
-      const first = !(await this.engine.hasPulled());
+      // first sync: pull (and take the cloud's shop) before pushing anything of this phone's
+      const first = !(await this.engine.hasPulled()) ? await this.engine.firstSync(this.hooks.adoptShop) : null;
+      if (first?.applied) await this.applied();
+      if (first?.adopted) await this.publish({ notice: 'shop_adopted' });
       const pushed = await this.engine.push();
       if (!this.unlisten.length) {
-        const applied = await this.engine.pull();
+        const applied = first ? 0 : await this.engine.pull();
         if (applied) await this.applied();
         if (this.active && this.remote === remote) await this.listen();
         if (this.listenError) {
@@ -169,7 +176,7 @@ export class SyncController {
           this.listenError = null;
           throw e;
         }
-        if (first) this.hooks.onFirstSync?.();
+        if (first) this.hooks.onFirstSync?.(first);
       }
       const more = await this.engine.push();
       await this.engine.markSynced();
