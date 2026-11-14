@@ -79,13 +79,18 @@ export function usageOf(body: Body | null): Usage | null {
 
 const realSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-export async function generate(deps: ClientDeps, input: Input, ctx: PromptContext): Promise<CallResult> {
+/** One voice command (audio or text) → the ParseResult JSON. */
+export const generate = (deps: ClientDeps, input: Input, ctx: PromptContext): Promise<CallResult> =>
+  generateBody(deps, (model) => buildRequest(model, input, ctx));
+
+/** Any generateContent request (e.g. the customer-list tidy-up); same timeout and retries. */
+export async function generateBody(deps: ClientDeps, request: (model: string) => object): Promise<CallResult> {
   const model = deps.model || DEFAULT_MODEL;
   const now = deps.now ?? Date.now;
   const sleep = deps.sleep ?? realSleep;
   const timeoutMs = deps.timeoutMs ?? TIMEOUT_MS;
   const maxRetries = deps.maxRetries ?? MAX_RETRIES;
-  const body = JSON.stringify(buildRequest(model, input, ctx));
+  const body = JSON.stringify(request(model));
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
   const t0 = now();
 

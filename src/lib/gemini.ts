@@ -12,6 +12,7 @@ import { audioMime, fitAudio } from '../gemini/audio';
 import type { ClientDeps } from '../gemini/client';
 import { promptContext } from '../gemini/context';
 import type { Tab } from '../gemini/prompt';
+import { tidyCustomers, type TidyResult } from '../gemini/tidy';
 import { geminiKey, getGeminiModel } from './engine';
 
 /** The shopkeeper is waiting (gemini mode): stop retrying past this. */
@@ -54,4 +55,12 @@ export async function runGemini(
     console.warn('setGeminiResult failed', e);
   }
   return result;
+}
+
+/** "Gemini দিয়ে গুছিয়ে নিন": the import's raw lines + the shop's customer names → tidy rows. */
+export async function tidyCustomerLines(lines: readonly string[], existingNames: readonly string[]): Promise<TidyResult> {
+  const apiKey = geminiKey();
+  const zero = { promptTokens: 0, audioTokens: 0, outputTokens: 0, thoughtTokens: 0 };
+  if (!apiKey) return { ok: false, rows: [], error: 'no EXPO_PUBLIC_GEMINI_KEY in this build', ms: 0, usage: zero };
+  return tidyCustomers({ apiKey, model: getGeminiModel(), fetch: fetch as unknown as ClientDeps['fetch'] }, lines, existingNames);
 }
