@@ -203,8 +203,17 @@ CREATE TABLE shop (
 ALTER TABLE voice_logs ADD COLUMN via TEXT CHECK (via IS NULL OR via IN ('pick'));
 `;
 
+/**
+ * v6 (build step 4a): every intent is saved now, so each log records its intent (the
+ * parsed one, then the confirmed one) for the eval. Old pilot logs get it from parsed_json.
+ */
+const V6 = `
+ALTER TABLE voice_logs ADD COLUMN intent TEXT;
+UPDATE voice_logs SET intent = json_extract(parsed_json, '$.intent') WHERE parsed_json IS NOT NULL;
+`;
+
 /** Index i holds the SQL that takes the DB from user_version i to i + 1. */
-export const MIGRATIONS: readonly string[] = [V1, V2, V3, V4, V5];
+export const MIGRATIONS: readonly string[] = [V1, V2, V3, V4, V5, V6];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;
 

@@ -10,7 +10,7 @@
  * Non-sale commands (not saved by the app yet) and unsure sales come in as status
  * "review": expected is a draft and the eval does not score them until labelled.
  */
-import type { ParsedCommand, Unit } from '../src/parser/types';
+import type { Intent, ParsedCommand, Unit } from '../src/parser/types';
 import type { Expected, ExpectedItem, Fixture, Seed, Tab } from './eval-types';
 
 /** One saved line, as basketSummary() writes it to voice_logs.final_json. */
@@ -29,6 +29,17 @@ export interface SavedBasket {
   total_poisha: number;
   items: SavedItem[];
 }
+/** A saved non-sale, as entrySummary() writes it (step 4a): বাকি, জমা, খরচ, মালিক নিল, মাল কেনা. */
+export interface SavedEntry {
+  intent: Intent;
+  customer: string | null;
+  amount: number | null;
+  item: string | null;
+  person: string | null;
+  note?: string | null;
+  purchase?: unknown;
+}
+
 /** One entry of the export's `logs` array (src/app/pilot-log.tsx). */
 export interface PilotLog {
   id?: string;
@@ -39,7 +50,7 @@ export interface PilotLog {
   parsed?: Partial<ParsedCommand>;
   outcome?: string;
   edits?: string[];
-  saved?: SavedBasket;
+  saved?: SavedBasket | SavedEntry;
   stt_ok?: boolean;
   /** 'pick' = chosen on ছবি দেখে: no speech, no parse, nothing to evaluate. */
   via?: 'pick';
@@ -102,7 +113,8 @@ export function fixtureFromLog(log: PilotLog): Converted {
   // STT wrote something else than was said: the confirmed result is not what this text means
   if (log.stt_ok === false) return { skip: 'stt_wrong' };
   if (unsupported) return reviewFromUnsupported(log, text);
-  const saved = log.saved;
+  if (log.saved && 'intent' in log.saved) return entryFixture(log, text, log.saved);
+  const saved = log.saved as SavedBasket | undefined;
   if (!saved || !Array.isArray(saved.items)) return { skip: 'no_result' };
 
   const edits = new Set(log.edits ?? []);
@@ -159,6 +171,44 @@ export function fixtureFromLog(log: PilotLog): Converted {
   return { fixture };
 }
 
+/**
+ * A saved non-sale. Like a sale: an untouched field keeps the parser's value, an edited one
+ * takes the saved value. A field the user filled where the parse had nothing (a name or an
+ * amount typed in, a kind chosen for an unclear command) is ambiguous — the parser may have
+ * missed it, or it was never said (customer screen defaults, number pad) — so: review.
+ */
+function entryFixture(log: PilotLog, text: string, saved: SavedEntry): Converted {
+  const p = log.parsed ?? {};
+  const edits = new Set(log.edits ?? []);
+  const review: string[] = [];
+  const parsedIntent = p.intent ?? 'unknown';
+  const expected: Expected = { intent: parsedIntent };
+  if (saved.intent !== parsedIntent) {
+    if (parsedIntent === 'unknown') review.push('intent');
+    expected.intent = saved.intent;
+  }
+  const field = <K extends 'customer' | 'amount' | 'item' | 'person'>(name: K, parsed: Expected[K] | undefined, now: Expected[K] | null, keys: string[]) => {
+    let v = parsed;
+    if (keys.some((k) => edits.has(k))) {
+      if (parsed === undefined || parsed === null) review.push(name);
+      v = now ?? undefined;
+    }
+    if (v !== undefined && v !== null) expected[name] = v;
+  };
+  field('customer', p.customer, saved.customer, ['customerName']);
+  field('amount', p.amount, saved.amount, ['amountPoisha']);
+  field('item', p.item, saved.item, ['item']);
+  field('person', p.person, saved.person, ['person']);
+
+  const fixture: Fixture = { text, tab: tabOf(log), source: 'pilot', expected, edited: log.outcome === 'saved_edited' };
+  if (log.id) fixture.pilot_id = log.id;
+  if (review.length) {
+    fixture.status = 'review';
+    fixture.review_notes = review;
+  }
+  return { fixture };
+}
+
 /** The export is one JSON object ({ logs: [...] }); also take a JSON array or JSONL of logs/exports. */
 export function readPilotLogs(content: string): PilotLog[] {
   const flatten = (v: unknown): PilotLog[] =>
@@ -189,7 +239,7 @@ export function seedAdditions(seed: Seed, fixtures: readonly Fixture[], logs: re
   const ids = new Set(fixtures.map((f) => f.pilot_id).filter(Boolean));
   for (const l of logs) {
     if (!l.saved || (l.id && !ids.has(l.id))) continue;
-    for (const s of l.saved.items) {
+    for (const s of 'items' in l.saved ? l.saved.items : []) {
       if (!known.has(s.product) && !products.has(s.product) && s.price_poisha > 0)
         products.set(s.product, { name: s.product, unit: s.unit, price: taka(s.price_poisha) });
     }

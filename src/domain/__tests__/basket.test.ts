@@ -292,3 +292,23 @@ describe('classifyAnswer', () => {
     ['', null],
   ] as const)('%s → %s', (t, r) => expect(classifyAnswer(t)).toBe(r));
 });
+
+describe('credit sale to an unknown customer (step 4a)', () => {
+  const known = ['করিম', 'রহিম'];
+  const credit = (text: string) =>
+    basketFromParse(parseCommand(text, { tab: 'sale', knownCustomers: known }), new Map(), known);
+
+  it('a known customer is fine', () => {
+    expect(credit('করিম চাল ২ কেজি ১২০ টাকা বাকিতে নিল').problems).toEqual([]);
+  });
+  it('an unknown name blocks the save and says so', () => {
+    const b = credit('কোরিম চাল ২ কেজি ১২০ টাকা বাকিতে নিল');
+    expect(b).toMatchObject({ customerName: 'কোরিম', customerOk: false, problems: ['customer_unknown'] });
+    expect(readback(b)).toBe('কোরিম, বাকি। চাল ২ কেজি, ১২০ টাকা। কোরিম নামে কাউকে চিনি না। নিচে বেছে নিন।');
+    expect(withCustomer(b, 'করিম', true).problems).toEqual([]);
+    expect(withCustomer(b, 'কোরিম', true).problems).toEqual([]); // নতুন ক্রেতা
+  });
+  it('without a customer list (old callers) the name is taken as is', () => {
+    expect(basketFromParse(parseCommand('কোরিম চাল ২ কেজি ১২০ টাকা বাকিতে নিল', { tab: 'sale' }), new Map()).problems).toEqual([]);
+  });
+});

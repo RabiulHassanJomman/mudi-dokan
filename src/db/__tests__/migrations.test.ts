@@ -237,11 +237,27 @@ describe('upgrade keeps pilot data', () => {
     expect(old.prepare('PRAGMA user_version').get()).toEqual({ user_version: SCHEMA_VERSION });
     for (const [t, rows] of Object.entries(before)) {
       // same rows; new columns may only be added (null)
-      expect(dump(t).map((r) => ({ ...(r as object), via: undefined }))).toEqual(
-        (rows as object[]).map((r) => ({ ...r, via: undefined })),
+      expect(dump(t).map((r) => ({ ...(r as object), via: undefined, intent: undefined }))).toEqual(
+        (rows as object[]).map((r) => ({ ...r, via: undefined, intent: undefined })),
       );
     }
     expect(old.prepare('SELECT via FROM voice_logs').get()).toEqual({ via: null });
+    old.close();
+  });
+});
+
+describe('v6', () => {
+  it('voice_logs.intent, back-filled from parsed_json for existing pilot logs', async () => {
+    const old = new DatabaseSync(':memory:');
+    for (const sql of MIGRATIONS.slice(0, 5)) old.exec(sql);
+    old.exec('PRAGMA user_version = 5');
+    insert(old, 'voice_logs', { ...row('v1'), transcript: 'করিম ২০০ বাকি', device_name: 'আব্বু', parsed_json: JSON.stringify({ intent: 'baki' }), outcome: 'unsupported' });
+    insert(old, 'voice_logs', { ...row('v2'), transcript: '', device_name: 'আব্বু', stt_error: 'no-speech', outcome: 'stt_error' });
+    await migrate(adapter(old));
+    expect(old.prepare('SELECT id, intent, outcome FROM voice_logs ORDER BY id').all()).toEqual([
+      { id: 'v1', intent: 'baki', outcome: 'unsupported' },
+      { id: 'v2', intent: null, outcome: 'stt_error' },
+    ]);
     old.close();
   });
 });

@@ -132,6 +132,46 @@ describe('pilot log → fixture', () => {
     expect(fixtureFromLog({ ...base, ...more })).toEqual({ skip: reason });
   });
 
+  const entryLog = (text: string, saved: Record<string, unknown>, more: Partial<PilotLog> = {}): PilotLog => ({
+    id: 'e1', source: 'voice', tab: 'sale', transcript: text, parsed: parseCommand(text, { tab: 'sale' }), outcome: 'saved',
+    saved: { item: null, person: null, note: null, purchase: null, customer: null, ...saved } as never, ...more,
+  });
+
+  it('saved non-sale (step 4a): scored fixture, expected = the parse with the edits applied', () => {
+    const f = fixture(entryLog('করিম ৫০০ টাকা বাকি', { intent: 'baki', customer: 'করিম', amount: 500 }));
+    expect(f).toMatchObject({ source: 'pilot', edited: false, expected: { intent: 'baki', customer: 'করিম', amount: 500 } });
+    expect(f.status).toBeUndefined();
+  });
+
+  it('saved non-sale, user corrected the name and the kind: those come from what was saved', () => {
+    const f = fixture(
+      entryLog('কোরিম ৫০০ টাকা বাকি', { intent: 'joma', customer: 'করিম', amount: 500 }, { outcome: 'saved_edited', edits: ['kind', 'customerName'] }),
+    );
+    expect(f).toMatchObject({ edited: true, expected: { intent: 'joma', customer: 'করিম', amount: 500 } });
+    expect(f.status).toBeUndefined();
+  });
+
+  it('saved expense / withdrawal / purchase keep their own fields', () => {
+    expect(fixture(entryLog('বিদ্যুৎ বিল ৫০০ টাকা খরচ', { intent: 'expense', item: 'বিদ্যুৎ বিল', amount: 500 })).expected).toEqual({
+      intent: 'expense', item: 'বিদ্যুৎ বিল', amount: 500,
+    });
+    expect(fixture(entryLog('মালিক ৫০০ নিল', { intent: 'owner_withdrawal', person: 'মালিক', amount: 500 })).expected).toEqual({
+      intent: 'owner_withdrawal', person: 'মালিক', amount: 500,
+    });
+    // purchase: only what was said (no total was said here)
+    expect(fixture(entryLog('নতুন চাল ৫০ কেজি কেনা ৫৫ বেচা ৬০', { intent: 'purchase', amount: 2750 })).expected).toEqual({ intent: 'purchase' });
+  });
+
+  it('a field the user filled where nothing was parsed is ambiguous → review', () => {
+    const noName = fixture(entryLog('৫০০ টাকা জমা', { intent: 'joma', customer: 'করিম', amount: 500 }, { outcome: 'saved_edited', edits: ['customerName'] }));
+    expect(noName).toMatchObject({ status: 'review', review_notes: ['customer'], expected: { intent: 'joma', amount: 500, customer: 'করিম' } });
+    const pad = fixture(
+      entryLog('করিমের নামে', { intent: 'baki', customer: 'করিম', amount: 300 }, { tab: 'ledger', parsed: parseCommand('করিমের নামে', { tab: 'ledger' }), outcome: 'saved_edited', edits: ['kind', 'amountPoisha'] }),
+    );
+    expect(pad.status).toBe('review');
+    expect(pad.review_notes).toEqual(['intent', 'amount']);
+  });
+
   it.each([
     ['করিম ৫০০ টাকা বাকি', 'baki', { customer: 'করিম', amount: 500 }],
     ['রহিম ২০০ টাকা জমা দিল', 'joma', { customer: 'রহিম', amount: 200 }],

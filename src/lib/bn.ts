@@ -52,3 +52,19 @@ export function parseTakaInput(text: string): number | null {
   if (!/^\d+(\.\d{1,2})?$/.test(ascii)) return null;
   return Math.round(parseFloat(ascii) * 100);
 }
+
+const MONTHS = ['জানু', 'ফেব্রু', 'মার্চ', 'এপ্রি', 'মে', 'জুন', 'জুলা', 'আগ', 'সেপ্টে', 'অক্টো', 'নভে', 'ডিসে'];
+
+/** "আজ", "গতকাল", else "১১ নভে" (shop-local calendar days). */
+export function dayLabel(ms: number, now = Date.now()): string {
+  const day = (t: number) => {
+    const d = new Date(t);
+    d.setHours(0, 0, 0, 0);
+    return d.getTime();
+  };
+  const diff = Math.round((day(now) - day(ms)) / 86_400_000);
+  if (diff === 0) return 'আজ';
+  if (diff === 1) return 'গতকাল';
+  const d = new Date(ms);
+  return `${toBnDigits(d.getDate())} ${MONTHS[d.getMonth()]}`;
+}

@@ -4,6 +4,7 @@
  * tested on node:sqlite.
  */
 import { basketSummary, storedLine, type BasketDraft, type ProductInfo } from '../domain/basket';
+import { entrySummary, type EntryDraft } from '../domain/entry';
 import type { PickProduct } from '../domain/pick';
 import type { Role, SetupDraft } from '../domain/setup';
 import { ENTRY_TABLES, noDeleteTrigger } from './migrations';
@@ -242,6 +243,8 @@ export interface VoiceLogRow {
   stt_ok: number | null;
   /** 'pick' = ছবি দেখে বেছে নেওয়া; null = voice or typed. */
   via: 'pick' | null;
+  /** Parsed intent, replaced by the confirmed one on save. */
+  intent: string | null;
   created_at: number;
 }
 
@@ -249,7 +252,13 @@ export const getVoiceLog = (db: Db, id: string) =>
   db.getFirstAsync<VoiceLogRow>('SELECT * FROM voice_logs WHERE id = ?', id);
 
 export async function setParsed(db: Db, w: Writer, id: string, parsed: ParsedCommand): Promise<void> {
-  await db.runAsync('UPDATE voice_logs SET parsed_json = ?, updated_at = ? WHERE id = ?', JSON.stringify(parsed), w.now(), id);
+  await db.runAsync(
+    'UPDATE voice_logs SET parsed_json = ?, intent = ?, updated_at = ? WHERE id = ?',
+    JSON.stringify(parsed),
+    parsed.intent,
+    w.now(),
+    id,
+  );
 }
 
 export async function setSttOk(db: Db, w: Writer, id: string, ok: boolean | null): Promise<void> {
@@ -262,20 +271,29 @@ export async function setOutcome(
   w: Writer,
   id: string,
   outcome: Exclude<Outcome, 'pending'>,
-  extra: { edits?: string[]; final?: unknown; entryTable?: string; entryId?: string } = {},
+  extra: { edits?: string[]; final?: unknown; entryTable?: string; entryId?: string; intent?: string } = {},
 ): Promise<void> {
   await db.runAsync(
-    `UPDATE voice_logs SET outcome = ?, edits_json = ?, final_json = ?, entry_table = ?, entry_id = ?, updated_at = ?
+    `UPDATE voice_logs SET outcome = ?, edits_json = ?, final_json = ?, entry_table = ?, entry_id = ?,
+       intent = COALESCE(?, intent), updated_at = ?
      WHERE id = ? AND outcome = 'pending'`,
     outcome,
     extra.edits?.length ? JSON.stringify(extra.edits) : null,
     extra.final !== undefined ? JSON.stringify(extra.final) : null,
     extra.entryTable ?? null,
     extra.entryId ?? null,
+    extra.intent ?? null,
     w.now(),
     id,
   );
 }
+
+/**
+ * "saved_edited" only when the user corrected what was understood. Confirming that a
+ * name is a new customer ("customerNew") is a decision, not a correction: the parser was right.
+ */
+const savedOutcome = (edits: readonly string[]): 'saved' | 'saved_edited' =>
+  edits.some((e) => e !== 'customerNew') ? 'saved_edited' : 'saved';
 
 // ── sale ───────────────────────────────────────────────────────
 
@@ -350,15 +368,128 @@ export async function saveBasket(
         ...entry(),
       });
     }
-    await setOutcome(db, w, voiceLogId, edits.length ? 'saved_edited' : 'saved', {
+    await setOutcome(db, w, voiceLogId, savedOutcome(edits), {
       edits,
       final: basketSummary(b),
       entryTable: 'sales',
       entryId: basketId,
+      intent: 'sale',
     });
   });
   return basketId;
 }
+
+// ── other entries (বাকি, জমা, খরচ, মালিক নিল, মাল কেনা) ─────────────
+
+const ENTRY_TABLE = { baki: 'ledger', joma: 'ledger', expense: 'expenses', owner_withdrawal: 'owner_withdrawals', purchase: 'purchases' } as const;
+
+/**
+ * Saves a confirmed non-sale entry in one transaction with its voice log outcome
+ * (final summary, edits, confirmed intent). A purchase creates a new product, and
+ * a said/typed sell price becomes the product's selling price; the average cost is
+ * always worked out from purchases (findProduct). Returns the entry row id.
+ */
+export async function saveEntry(db: Db, w: Writer, d: EntryDraft, voiceLogId: string, edits: string[]): Promise<string> {
+  if (d.problems.length || !d.kind || d.amountPoisha === null) {
+    throw new Error(`entry is not complete: ${d.problems.join(', ') || 'no amount'}`);
+  }
+  const kind = d.kind;
+  const amount = d.amountPoisha;
+  const id = w.newId();
+  const entry = () => ({ id, voice_log_id: voiceLogId, device_name: w.deviceName, ...rowCols(w) });
+  await db.withTransactionAsync(async () => {
+    if (kind === 'baki' || kind === 'joma') {
+      const partyId = await findOrCreateCustomer(db, w, d.customerName!);
+      await insert(db, 'ledger', { party_id: partyId, party_type: 'customer', kind, amount_poisha: amount, ...entry() });
+    } else if (kind === 'expense') {
+      await insert(db, 'expenses', { item: d.item!, amount_poisha: amount, person: d.person, note: d.note, ...entry() });
+    } else if (kind === 'owner_withdrawal') {
+      await insert(db, 'owner_withdrawals', { person: d.person, amount_poisha: amount, note: d.note, ...entry() });
+    } else {
+      const l = d.purchase!;
+      if (!l.productName || !l.quantity || l.buyPricePoisha === null) throw new Error('purchase line is not complete');
+      let productId = l.product?.id ?? (await findProduct(db, l.productName))?.id ?? null;
+      if (!productId) {
+        productId = w.newId();
+        await insert(db, 'products', { id: productId, name: l.productName, unit: l.unit, sell_price_poisha: l.sellPricePoisha, ...rowCols(w) });
+      } else if (l.sellPricePoisha !== null && !l.unitWarning) {
+        await db.runAsync('UPDATE products SET sell_price_poisha = ?, updated_at = ? WHERE id = ?', l.sellPricePoisha, w.now(), productId);
+      }
+      await insert(db, 'purchases', {
+        product_id: productId,
+        quantity: l.quantity,
+        spoken_unit: l.unitWarning ? l.unit : null,
+        buy_price_poisha: l.buyPricePoisha,
+        sell_price_poisha: l.sellPricePoisha,
+        total_poisha: amount,
+        paid_cash: 1, // supplier credit (মহাজন) is Phase 3
+        ...entry(),
+      });
+    }
+    await setOutcome(db, w, voiceLogId, savedOutcome(edits), {
+      edits,
+      final: entrySummary(d),
+      entryTable: ENTRY_TABLE[kind],
+      entryId: id,
+      intent: kind,
+    });
+  });
+  return id;
+}
+
+// ── customers (বাকি খাতা) ──────────────────────────────────────
+
+export interface CustomerBalance {
+  id: string;
+  name: string;
+  phone: string | null;
+  /** baki − joma; positive = the shop is owed (পাবো). */
+  balance_poisha: number;
+  last_at: number | null;
+}
+
+const BALANCE_SQL = `
+  SELECT c.id, c.name, c.phone,
+    COALESCE(SUM(CASE l.kind WHEN 'baki' THEN l.amount_poisha ELSE -l.amount_poisha END), 0) AS balance_poisha,
+    MAX(l.created_at) AS last_at
+  FROM customers c LEFT JOIN v_ledger l ON l.party_id = c.id
+  WHERE c.archived = 0 AND c.party_type = 'customer'`;
+
+/** Every customer with what they owe, most owed first. */
+export const customerBalances = (db: Db) =>
+  db.getAllAsync<CustomerBalance>(`${BALANCE_SQL} GROUP BY c.id ORDER BY balance_poisha DESC, last_at DESC, c.name`);
+
+export const getCustomer = (db: Db, id: string) =>
+  db.getFirstAsync<CustomerBalance>(`${BALANCE_SQL} AND c.id = ? GROUP BY c.id`, id);
+
+export async function setCustomerPhone(db: Db, w: Writer, id: string, phone: string | null): Promise<void> {
+  await db.runAsync('UPDATE customers SET phone = ?, updated_at = ? WHERE id = ?', phone, w.now(), id);
+}
+
+export interface LedgerLine {
+  id: string;
+  kind: 'baki' | 'joma';
+  amount_poisha: number;
+  created_at: number;
+  /** "চাল, ডাল" for the baki row of a credit sale. */
+  products: string | null;
+  transcript: string | null;
+  audio_path: string | null;
+}
+
+/** A customer's ledger, newest first, with the clip that made each line. */
+export const customerHistory = (db: Db, customerId: string) =>
+  db.getAllAsync<LedgerLine>(
+    `SELECT l.id, l.kind, l.amount_poisha, l.created_at,
+       (SELECT GROUP_CONCAT(name, ', ') FROM (
+          SELECT p.name FROM v_sales s JOIN products p ON p.id = s.product_id
+          WHERE l.basket_id IS NOT NULL AND s.basket_id = l.basket_id ORDER BY s.line_no)) AS products,
+       v.transcript, v.audio_path
+     FROM v_ledger l LEFT JOIN voice_logs v ON v.id = l.voice_log_id
+     WHERE l.party_id = ?
+     ORDER BY l.created_at DESC`,
+    customerId,
+  );
 
 export interface RecentBasket {
   id: string;
@@ -397,11 +528,12 @@ export const recentBaskets = (db: Db, limit = 3) =>
     limit,
   );
 
-/** Today's total sales and credit (shop-local day starts at `dayStart`). */
+/** Today's sales and new baki (credit sales + plain বাকি entries); the shop-local day starts at `dayStart`. */
 export async function todayTotals(db: Db, dayStart: number): Promise<{ sales: number; baki: number }> {
   const r = await db.getFirstAsync<{ sales: number | null; baki: number | null }>(
-    `SELECT SUM(amount_poisha) AS sales, SUM(CASE WHEN credit = 1 THEN amount_poisha END) AS baki
-     FROM v_sales WHERE created_at >= ?`,
+    `SELECT (SELECT SUM(amount_poisha) FROM v_sales WHERE created_at >= ?) AS sales,
+            (SELECT SUM(amount_poisha) FROM v_ledger WHERE kind = 'baki' AND party_type = 'customer' AND created_at >= ?) AS baki`,
+    dayStart,
     dayStart,
   );
   return { sales: r?.sales ?? 0, baki: r?.baki ?? 0 };

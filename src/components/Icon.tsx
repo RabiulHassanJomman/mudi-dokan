@@ -4,7 +4,7 @@ import Svg, { Circle, Path, Rect } from 'react-native-svg';
 export type IconName =
   | 'cart' | 'box' | 'book' | 'speaker' | 'mic' | 'keyboard'
   | 'back' | 'plus' | 'minus' | 'check' | 'close' | 'cash' | 'play' | 'list'
-  | 'settings' | 'keypad' | 'arrow' | 'search' | 'image'
+  | 'settings' | 'keypad' | 'arrow' | 'search' | 'image' | 'phone' | 'person'
   // product pictures (Pick.dc.html)
   | 'rice' | 'dal' | 'oil' | 'sugar' | 'egg' | 'soap';
 
@@ -94,6 +94,13 @@ export function Icon({ name, size = 24, color, strokeWidth = 1.8 }: Props) {
         <Path {...p} d="M5 4h.01M12 4h.01M19 4h.01M5 10h.01M12 10h.01M19 10h.01M5 16h.01M12 16h.01M19 16h.01M12 21h.01" strokeWidth={strokeWidth + 2} />
       )}
       {name === 'arrow' && <Path {...p} d="M5 12h14M13 6l6 6-6 6" />}
+      {name === 'phone' && <Path {...p} d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z" />}
+      {name === 'person' && (
+        <>
+          <Circle {...p} cx={12} cy={8} r={4} />
+          <Path {...p} d="M4 21a8 8 0 0 1 16 0" />
+        </>
+      )}
       {name === 'search' && (
         <>
           <Circle {...p} cx={11} cy={11} r={7} />

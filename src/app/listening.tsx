@@ -27,7 +27,10 @@ const ERROR_TEXT: Record<string, string> = {
 /** শুনছি: speech → text. On a final result: log it, then the confirm card. */
 export default function ListeningScreen() {
   const db = useSQLiteContext();
-  const { tab = 'sale' } = useLocalSearchParams<{ tab?: string }>();
+  /** customer / kind: from the customer screen (জমা নিন / বাকি দিন), passed on to the confirm card. */
+  const { tab = 'sale', customer, kind } = useLocalSearchParams<{ tab?: string; customer?: string; kind?: string }>();
+  const carry = { ...(customer ? { customer } : {}), ...(kind ? { kind } : {}) };
+  const ledger = tab === 'ledger';
   const [phase, setPhase] = useState<Phase>('starting');
   const [heard, setHeard] = useState('');
   const [errorText, setErrorText] = useState('');
@@ -99,7 +102,7 @@ export default function ListeningScreen() {
         alternatives: final.current?.alternatives,
         audioPath: audio.current,
       });
-      router.replace({ pathname: '/confirm', params: { logId, tab } });
+      router.replace({ pathname: '/confirm', params: { logId, tab, ...carry } });
       return;
     }
     const code = sttError.current ?? 'no-speech';
@@ -155,18 +158,19 @@ export default function ListeningScreen() {
               আবার বলুন
             </Txt>
           </Pressable>
-          {/* voice failed: choose by picture (Pick) instead */}
+          {/* voice failed: products by picture (Pick); বাকি/জমা on the number pad (empty confirm card) */}
           <Pressable
             accessibilityRole="button"
             onPress={() => {
               closing.current = true;
-              router.replace('/pick');
+              if (ledger) router.replace({ pathname: '/confirm', params: { text: '', tab, ...carry } });
+              else router.replace('/pick');
             }}
             style={[styles.action, styles.actionAlt]}
           >
-            <Icon name="image" size={30} color={colors.onColor} />
+            <Icon name={ledger ? 'keypad' : 'image'} size={30} color={colors.onColor} />
             <Txt size={fontSize.listAmount} weight="bold" color={colors.onColor}>
-              ছবি দেখে বেছে নিন
+              {ledger ? 'টাকা চেপে দিন' : 'ছবি দেখে বেছে নিন'}
             </Txt>
           </Pressable>
         </>

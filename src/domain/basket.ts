@@ -5,6 +5,7 @@
  */
 import { UNIT_BN, UNIT_BN_LOC, formatQty, formatTaka, toBnDigits } from '../lib/bn';
 import type { ParsedCommand, SaleItem, Unit } from '../parser/types';
+import { customerStatus } from './customers';
 import { convertQuantity, looseQuantity, quantityStep } from './units';
 
 export interface ProductInfo {
@@ -18,7 +19,7 @@ export interface ProductInfo {
 }
 
 export type ItemProblem = 'no_product' | 'no_quantity' | 'no_price';
-export type BasketProblem = 'no_items' | 'no_customer' | 'item';
+export type BasketProblem = 'no_items' | 'no_customer' | 'customer_unknown' | 'item';
 
 export interface ItemDraft {
   /** Stable row key (its index in the parsed basket). */
@@ -48,6 +49,8 @@ export interface BasketDraft {
   items: ItemDraft[];
   credit: boolean;
   customerName: string | null;
+  /** The customer is in the list, or the user chose "নতুন ক্রেতা" (only matters on credit). */
+  customerOk: boolean;
   /** Sum of line amounts; null while any line has no amount. */
   totalPoisha: number | null;
   problems: BasketProblem[];
@@ -142,16 +145,26 @@ function finalize(b: Omit<BasketDraft, 'totalPoisha' | 'problems'>): BasketDraft
   const problems: BasketProblem[] = [];
   if (!b.items.length) problems.push('no_items');
   if (b.credit && !b.customerName) problems.push('no_customer');
+  else if (b.credit && !b.customerOk) problems.push('customer_unknown');
   if (b.items.some((i) => i.problems.length)) problems.push('item');
   return { ...b, totalPoisha, problems };
 }
 
-/** `products` maps each spoken product name to what the DB knows (missing = new product). */
-export function basketFromParse(parsed: ParsedCommand, products: ReadonlyMap<string, ProductInfo>): BasketDraft {
+/**
+ * `products` maps each spoken product name to what the DB knows (missing = new product).
+ * With `knownCustomers`, a credit customer not in the list must be confirmed (withCustomer).
+ */
+export function basketFromParse(
+  parsed: ParsedCommand,
+  products: ReadonlyMap<string, ProductInfo>,
+  knownCustomers?: readonly string[],
+): BasketDraft {
   const items = (parsed.items ?? []).map((si, n) =>
     itemFrom(si, si.product ? (products.get(si.product) ?? null) : null, String(n)),
   );
-  return finalize({ items, credit: parsed.credit === true, customerName: parsed.customer ?? null });
+  const customerName = parsed.customer ?? null;
+  const customerOk = !knownCustomers || customerStatus(customerName, knownCustomers) === 'known';
+  return finalize({ items, credit: parsed.credit === true, customerName, customerOk });
 }
 
 // ── edits ──────────────────────────────────────────────────────
@@ -201,8 +214,9 @@ export const removeItem = (b: BasketDraft, key: string): BasketDraft =>
 
 export const withCredit = (b: BasketDraft, credit: boolean): BasketDraft => finalize({ ...b, credit });
 
-export const withCustomer = (b: BasketDraft, name: string): BasketDraft =>
-  finalize({ ...b, customerName: name.trim() || null });
+/** `ok`: in the customer list, or confirmed as a new customer. */
+export const withCustomer = (b: BasketDraft, name: string, ok = true): BasketDraft =>
+  finalize({ ...b, customerName: name.trim() || null, customerOk: ok });
 
 export const canSave = (b: BasketDraft): boolean => b.problems.length === 0;
 
@@ -252,6 +266,7 @@ export function readback(b: BasketDraft): string {
     if (bad.problems.includes('no_price')) return `${prefix}${body} ${who}দাম কত?`;
   }
   if (b.problems.includes('no_customer')) return `${prefix}${body} কার বাকি?`;
+  if (b.problems.includes('customer_unknown')) return `${prefix}${body} ${b.customerName} নামে কাউকে চিনি না। নিচে বেছে নিন।`;
   return `${prefix}${body} ঠিক আছে?`;
 }
 
@@ -303,6 +318,7 @@ export function diffBaskets(a: BasketDraft, b: BasketDraft): string[] {
   });
   if (a.credit !== b.credit) out.push('credit');
   if (a.customerName !== b.customerName) out.push('customerName');
+  else if (a.customerOk !== b.customerOk) out.push('customerNew');
   return out;
 }
 

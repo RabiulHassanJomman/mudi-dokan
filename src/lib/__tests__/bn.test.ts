@@ -1,4 +1,4 @@
-import { formatNumber, formatTaka, parseTakaInput, toBnDigits } from '../bn';
+import { dayLabel, formatNumber, formatTaka, parseTakaInput, toBnDigits } from '../bn';
 
 describe('formatNumber', () => {
   it('Bangla digits, thousands comma, trailing zeros of the fraction dropped', () => {
@@ -18,5 +18,15 @@ describe('formatNumber', () => {
     expect(formatTaka(500000)).toBe('৳ ৫,০০০');
     expect(parseTakaInput('৫,০০০')).toBe(500000);
     expect(toBnDigits('2.5')).toBe('২.৫');
+  });
+});
+
+describe('dayLabel (customer history)', () => {
+  const now = new Date(2026, 10, 14, 10, 0).getTime();
+  it('today, yesterday, then day + short month', () => {
+    expect(dayLabel(new Date(2026, 10, 14, 0, 5).getTime(), now)).toBe('আজ');
+    expect(dayLabel(new Date(2026, 10, 13, 23, 59).getTime(), now)).toBe('গতকাল');
+    expect(dayLabel(new Date(2026, 10, 11, 9, 0).getTime(), now)).toBe('১১ নভে');
+    expect(dayLabel(new Date(2026, 0, 2, 9, 0).getTime(), now)).toBe('২ জানু');
   });
 });

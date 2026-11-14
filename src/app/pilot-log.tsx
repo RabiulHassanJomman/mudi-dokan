@@ -95,6 +95,7 @@ export default function PilotLogScreen() {
         at: new Date(r.created_at).toISOString(),
         source: r.source,
         tab: r.context_tab ?? undefined,
+        intent: r.intent ?? undefined,
         transcript: r.transcript,
         alternatives: r.alternatives_json ? (JSON.parse(r.alternatives_json) as string[]) : undefined,
         parsed: r.parsed_json ? (JSON.parse(r.parsed_json) as unknown) : undefined,
@@ -211,7 +212,7 @@ export default function PilotLogScreen() {
                 </Txt>
                 <Txt wrap size={fontSize.caption} weight="medium" color={colors.muted}>
                   {time(item.created_at)} · {item.via === 'pick' ? 'ছবি দেখে' : item.source === 'typed' ? 'লেখা' : 'বলা'}
-                  {parsed?.intent ? ` · ${parsed.intent}` : ''}
+                  {item.intent ?? parsed?.intent ? ` · ${item.intent ?? parsed?.intent}` : ''}
                   {item.edits_json ? ` · বদল: ${(JSON.parse(item.edits_json) as string[]).join(', ')}` : ''}
                 </Txt>
                 {item.source === 'voice' && !!item.transcript && (

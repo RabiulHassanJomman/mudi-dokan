@@ -5,6 +5,8 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-speech-recognition';
 
+import { CustomerPicker } from '../components/CustomerPicker';
+import { EntryForm } from '../components/EntryForm';
 import { Icon, productIcon, type IconName } from '../components/Icon';
 import { Txt } from '../components/Txt';
 import {
@@ -25,19 +27,33 @@ import {
   type ItemDraft,
 } from '../domain/basket';
 import { classifyAnswer } from '../domain/confirmWords';
-import { createVoiceLog, findProducts, getVoiceLog, knownNames, saveBasket, setOutcome, setParsed } from '../db/repo';
+import { canSaveEntry, diffEntries, entryFromParse, entryReadback, type EntryDraft, type LedgerKind } from '../domain/entry';
+import {
+  createVoiceLog,
+  customerBalances,
+  findProducts,
+  getVoiceLog,
+  knownNames,
+  saveBasket,
+  saveEntry,
+  setOutcome,
+  setParsed,
+} from '../db/repo';
 import { getDevice, writer } from '../device';
 import { UNIT_BN, formatNumber, formatQty, formatTaka, parseTakaInput, toBnDigits } from '../lib/bn';
 import { speak, stopSpeaking } from '../lib/speak';
 import { pickedCommand, pickText, type PickedItem } from '../domain/pick';
 import { parseCommand } from '../parser';
-import type { Intent } from '../parser/types';
+import type { Intent, ParseContext } from '../parser/types';
 import { colors, fonts, fontSize, productTiles, radius, size, spacing } from '../theme/tokens';
 
 type State =
   | { kind: 'loading' }
   | { kind: 'unsupported'; transcript: string; intent: Intent }
-  | { kind: 'ready'; transcript: string };
+  | { kind: 'ready'; transcript: string }
+  | { kind: 'entry'; transcript: string };
+
+const PARSE_TABS: readonly NonNullable<ParseContext['tab']>[] = ['sale', 'purchase', 'ledger', 'stock', 'expense'];
 
 const INTENT_BN: Record<Intent, string> = {
   sale: 'বিক্রি',
@@ -51,23 +67,36 @@ const INTENT_BN: Record<Intent, string> = {
   unknown: 'বুঝিনি',
 };
 
-/** নিশ্চিত করুন: one row per item; nothing is saved until হ্যাঁ (button or voice). */
+/**
+ * নিশ্চিত করুন: a sale basket (one row per item) or any other entry (বাকি, জমা, খরচ,
+ * মালিক নিল, মাল কেনা); nothing is saved until হ্যাঁ (button or voice).
+ */
 export default function ConfirmScreen() {
   const db = useSQLiteContext();
-  /** logId = voice (from Listening); text = typed; pick = chosen on ছবি দেখে (JSON PickedItem). */
-  const params = useLocalSearchParams<{ logId?: string; text?: string; tab?: string; pick?: string }>();
+  /**
+   * logId = voice (from Listening); text = typed; pick = chosen on ছবি দেখে (JSON PickedItem).
+   * customer / kind: from the customer screen (জমা নিন / বাকি দিন), used when not said.
+   */
+  const params = useLocalSearchParams<{ logId?: string; text?: string; tab?: string; pick?: string; customer?: string; kind?: string }>();
   const tab = params.tab ?? 'sale';
+  const defaultKind: LedgerKind | undefined = params.kind === 'baki' || params.kind === 'joma' ? params.kind : undefined;
 
   const [state, setState] = useState<State>({ kind: 'loading' });
   const [basket, setBasket] = useState<BasketDraft | null>(null);
+  const [entry, setEntry] = useState<EntryDraft | null>(null);
+  /** Customer names, most owed first (for the picker). */
+  const [known, setKnown] = useState<string[]>([]);
   const [answering, setAnswering] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const logId = useRef<string | null>(null);
   const first = useRef<BasketDraft | null>(null);
   const latest = useRef<BasketDraft | null>(null);
+  const firstEntry = useRef<EntryDraft | null>(null);
+  const latestEntry = useRef<EntryDraft | null>(null);
   const decided = useRef(false);
   latest.current = basket;
+  latestEntry.current = entry;
 
   // ── voice হ্যাঁ / না ───────────────────────────────────────────
   const listenForAnswer = useCallback(async () => {
@@ -82,14 +111,19 @@ export default function ConfirmScreen() {
     ExpoSpeechRecognitionModule.abort();
   }, []);
 
+  /** Read the card aloud; when it can be saved, listen for হ্যাঁ / না. */
   const sayAndListen = useCallback(
-    async (b: BasketDraft) => {
+    async (text: string, ready: boolean) => {
       stopListening();
-      await speak(readback(b));
-      if (canSave(b) && !decided.current) void listenForAnswer();
+      await speak(text);
+      if (ready && !decided.current) void listenForAnswer();
     },
     [listenForAnswer, stopListening],
   );
+  const readAloud = () => {
+    if (entry) void sayAndListen(entryReadback(entry), canSaveEntry(entry));
+    else if (basket) void sayAndListen(readback(basket), canSave(basket));
+  };
 
   useSpeechRecognitionEvent('result', (e) => {
     if (!e.isFinal) return;
@@ -107,6 +141,9 @@ export default function ConfirmScreen() {
       const device = getDevice();
       let transcript = '';
       let parsed;
+      const names = await knownNames(db);
+      const owed = (await customerBalances(db)).map((c) => c.name);
+      setKnown(owed);
       if (params.pick) {
         // no speech, no parser: the picked product + number is the command
         const pick = JSON.parse(params.pick) as PickedItem;
@@ -119,11 +156,11 @@ export default function ConfirmScreen() {
           transcript = (await getVoiceLog(db, params.logId))?.transcript ?? '';
         } else {
           transcript = params.text ?? '';
-          logId.current = await createVoiceLog(db, w, { transcript, source: 'typed', contextTab: tab });
+          // empty = the number-pad fallback (voice failed): nothing to parse, keep it out of the accuracy
+          logId.current = await createVoiceLog(db, w, { transcript, source: 'typed', contextTab: tab, ...(transcript ? {} : { via: 'pick' as const }) });
         }
-        const names = await knownNames(db);
         parsed = parseCommand(transcript, {
-          tab: tab === 'sale' ? 'sale' : undefined,
+          tab: PARSE_TABS.find((t) => t === tab),
           knownProducts: names.products,
           knownCustomers: names.customers,
           deviceRole: device.role ?? undefined,
@@ -134,18 +171,35 @@ export default function ConfirmScreen() {
       if (!alive) return;
 
       if (parsed.intent !== 'sale') {
+        const products = await findProducts(db, parsed.product ? [parsed.product] : []);
+        const e = entryFromParse(parsed, {
+          products,
+          knownCustomers: names.customers,
+          tab: PARSE_TABS.find((t) => t === tab),
+          defaultCustomer: params.customer,
+          defaultKind,
+        });
+        if (!alive) return;
+        if (e) {
+          firstEntry.current = e;
+          setEntry(e);
+          setState({ kind: 'entry', transcript });
+          void sayAndListen(entryReadback(e), canSaveEntry(e));
+          return;
+        }
+        // questions (স্টক, লাভ) and commands nobody understood
         await setOutcome(db, w, logId.current, 'unsupported');
         decided.current = true;
         setState({ kind: 'unsupported', transcript, intent: parsed.intent });
-        void speak('এখন শুধু বিক্রি রাখা যায়।');
+        void speak(parsed.intent === 'unknown' ? 'কিছু বুঝিনি। আবার বলুন।' : 'এই প্রশ্নের উত্তর পরের ধাপে আসবে।');
         return;
       }
       const products = await findProducts(db, (parsed.items ?? []).map((i) => i.product ?? ''));
-      const b = basketFromParse(parsed, products);
+      const b = basketFromParse(parsed, products, names.customers);
       first.current = b;
       setBasket(b);
       setState({ kind: 'ready', transcript });
-      void sayAndListen(b);
+      void sayAndListen(readback(b), canSave(b));
     })();
     return () => {
       alive = false;
@@ -168,6 +222,8 @@ export default function ConfirmScreen() {
   const leave = () => (router.canGoBack() ? router.back() : router.replace('/'));
 
   async function onYes() {
+    const e = latestEntry.current;
+    if (e) return saveTheEntry(e);
     const b = latest.current;
     if (!b || !logId.current || decided.current || saving) return;
     stopListening();
@@ -189,6 +245,27 @@ export default function ConfirmScreen() {
     }
   }
 
+  async function saveTheEntry(e: EntryDraft) {
+    if (!logId.current || decided.current || saving) return;
+    stopListening();
+    if (!canSaveEntry(e)) {
+      void speak(entryReadback(e));
+      return;
+    }
+    setSaving(true);
+    decided.current = true;
+    try {
+      await saveEntry(db, writer(), e, logId.current, firstEntry.current ? diffEntries(firstEntry.current, e) : []);
+      void speak('রাখা হয়েছে।');
+      leave();
+    } catch (err) {
+      decided.current = false;
+      setSaving(false);
+      void speak('রাখা গেল না।');
+      console.warn('saveEntry failed', err);
+    }
+  }
+
   async function onNo() {
     if (decided.current || !logId.current) return;
     stopListening();
@@ -202,11 +279,19 @@ export default function ConfirmScreen() {
     stopListening();
     setBasket(next);
   };
+  const editEntry = (next: EntryDraft) => {
+    stopListening();
+    setEntry(next);
+  };
+  const ready = entry ? canSaveEntry(entry) : basket ? canSave(basket) : false;
 
   const again = () => {
     decided.current = true;
     if (logId.current) void setOutcome(db, writer(), logId.current, 'cancelled');
-    router.replace({ pathname: '/listening', params: { tab } });
+    router.replace({
+      pathname: '/listening',
+      params: { tab, ...(params.customer ? { customer: params.customer } : {}), ...(defaultKind ? { kind: defaultKind } : {}) },
+    });
   };
 
   /** Voice did not work out: choose by picture instead. */
@@ -217,16 +302,51 @@ export default function ConfirmScreen() {
   };
 
   // ── render ─────────────────────────────────────────────────────
+  const decideBar = (
+    <>
+      {answering && (
+        <Txt size={fontSize.body} weight="bold" color={colors.saleDark} style={styles.center}>
+          বলুন: হ্যাঁ / না
+        </Txt>
+      )}
+      <View style={styles.decide}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="না"
+          onPress={() => void onNo()}
+          style={({ pressed }) => [styles.no, pressed && styles.pressed]}
+        >
+          <Icon name="close" size={36} color={colors.ink} strokeWidth={2.6} />
+          <Txt size={fontSize.button} weight="bold">
+            না
+          </Txt>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="হ্যাঁ"
+          accessibilityState={{ disabled: !ready || saving }}
+          onPress={() => void onYes()}
+          style={({ pressed }) => [styles.yes, (!ready || saving) && styles.disabled, pressed && styles.pressed]}
+        >
+          <Icon name="check" size={40} color={colors.onColor} strokeWidth={2.8} />
+          <Txt size={fontSize.button} weight="bold" color={colors.onColor}>
+            {saving ? 'রাখছি…' : 'হ্যাঁ'}
+          </Txt>
+        </Pressable>
+      </View>
+    </>
+  );
+
   return (
     <SafeAreaView style={styles.screen}>
       <View style={styles.top}>
         <Pressable accessibilityRole="button" accessibilityLabel="ফিরে যান" onPress={() => void onNo()} style={styles.back}>
           <Icon name="back" size={26} color={colors.ink} strokeWidth={2.2} />
         </Pressable>
-        {basket && (
+        {(basket || entry) && (
           <Pressable
             accessibilityRole="button"
-            onPress={() => void sayAndListen(basket)}
+            onPress={readAloud}
             style={({ pressed }) => [styles.listen, pressed && styles.pressed]}
           >
             <Icon name="speaker" size={26} color={colors.onColor} strokeWidth={2} />
@@ -294,7 +414,13 @@ export default function ConfirmScreen() {
               />
             </View>
             {basket.credit && (
-              <CustomerInput initial={basket.customerName ?? ''} onChange={(t) => edit(withCustomer(basket, t))} />
+              <CustomerPicker
+                label="কার বাকি?"
+                name={basket.customerName}
+                ok={basket.customerOk}
+                known={known}
+                onChange={(n, ok) => edit(withCustomer(basket, n, ok))}
+              />
             )}
           </ScrollView>
 
@@ -307,36 +433,17 @@ export default function ConfirmScreen() {
             </Txt>
           </View>
 
-          {answering && (
-            <Txt size={fontSize.body} weight="bold" color={colors.saleDark} style={styles.center}>
-              বলুন: হ্যাঁ / না
-            </Txt>
-          )}
-          <View style={styles.decide}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="না"
-              onPress={() => void onNo()}
-              style={({ pressed }) => [styles.no, pressed && styles.pressed]}
-            >
-              <Icon name="close" size={36} color={colors.ink} strokeWidth={2.6} />
-              <Txt size={fontSize.button} weight="bold">
-                না
-              </Txt>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="হ্যাঁ"
-              accessibilityState={{ disabled: !canSave(basket) || saving }}
-              onPress={() => void onYes()}
-              style={({ pressed }) => [styles.yes, (!canSave(basket) || saving) && styles.disabled, pressed && styles.pressed]}
-            >
-              <Icon name="check" size={40} color={colors.onColor} strokeWidth={2.8} />
-              <Txt size={fontSize.button} weight="bold" color={colors.onColor}>
-                {saving ? 'রাখছি…' : 'হ্যাঁ'}
-              </Txt>
-            </Pressable>
-          </View>
+          {decideBar}
+        </>
+      )}
+
+      {state.kind === 'entry' && entry && (
+        <>
+          <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
+            {!!state.transcript && <Heard text={state.transcript} />}
+            <EntryForm entry={entry} known={known} onChange={editEntry} />
+          </ScrollView>
+          {decideBar}
         </>
       )}
     </SafeAreaView>
@@ -467,28 +574,6 @@ function ItemRow(props: {
 /** 6000 poisha → "৬০", 13333 → "১৩৩.৩৩" (typed ASCII digits are turned Bangla as they come). */
 const formatPriceInput = (p: number) => toBnDigits(Math.round(p) / 100);
 
-function CustomerInput({ initial, onChange }: { initial: string; onChange: (t: string) => void }) {
-  const [text, setText] = useState(initial);
-  return (
-    <View style={styles.inputRow}>
-      <Txt size={fontSize.label} weight="bold" color={colors.bakiInk}>
-        কার বাকি?
-      </Txt>
-      <TextInput
-        value={text}
-        onChangeText={(t) => {
-          setText(t);
-          onChange(t);
-        }}
-        accessibilityLabel="ক্রেতার নাম"
-        placeholder="নাম"
-        placeholderTextColor={colors.muted}
-        style={[styles.input, styles.flex]}
-      />
-    </View>
-  );
-}
-
 function StepButton({ icon, label, onPress }: { icon: 'plus' | 'minus'; label: string; onPress: () => void }) {
   return (
     <Pressable
@@ -552,10 +637,12 @@ function Unsupported(props: { transcript: string; intent: Intent; onAgain: () =>
       <Heard text={props.transcript} />
       <View style={styles.card}>
         <Txt wrap size={fontSize.headingLg} weight="bold" style={styles.center}>
-          এখন শুধু বিক্রি রাখা যায়
+          {props.intent === 'unknown' ? 'কিছু বুঝিনি' : `${INTENT_BN[props.intent]}: পরের ধাপে আসছে`}
         </Txt>
         <Txt wrap size={fontSize.body} weight="medium" color={colors.muted} style={styles.center}>
-          এটা মনে হলো: {INTENT_BN[props.intent]}। এই কাজ পরের ধাপে আসবে।
+          {props.intent === 'unknown'
+            ? 'বিক্রি, বাকি, জমা, খরচ বা মাল কেনা — আবার বলুন।'
+            : 'স্টক আর লাভের প্রশ্নের উত্তর পরের ধাপে আসবে।'}
         </Txt>
       </View>
       <BigButton label="আবার বলুন" icon="mic" bg={colors.sale} ink={colors.onColor} onPress={props.onAgain} />
