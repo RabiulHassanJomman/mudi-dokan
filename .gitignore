@@ -33,3 +33,4 @@ coverage/
 
 # eval (scripts/eval-gemini.ts) output
 eval/results/
+.env

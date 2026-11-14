@@ -5,6 +5,8 @@
  */
 import { basketSummary, storedLine, type BasketDraft, type ProductInfo } from '../domain/basket';
 import { entrySummary, type EntryDraft } from '../domain/entry';
+import type { CustomerLine } from '../domain/customerImport';
+import type { Candidate } from '../domain/names';
 import type { PickProduct } from '../domain/pick';
 import type { RecentEntry } from '../domain/recent';
 import type { StockRow } from '../domain/stock';
@@ -478,6 +480,26 @@ export async function saveEntry(db: Db, w: Writer, d: EntryDraft, voiceLogId: st
     });
   });
   return id;
+}
+
+// ── list import (ক্রেতার তালিকা আনুন) ────────────────────────────
+
+/** The shop's customers, for the import's duplicate check. */
+export async function customerCandidates(db: Db): Promise<Candidate[]> {
+  const rows = await db.getAllAsync<{ name: string; phone: string | null }>(
+    "SELECT name, phone FROM customers WHERE archived = 0 AND party_type = 'customer' ORDER BY created_at",
+  );
+  return rows.map((r) => ({ name: r.name, aliases: [], phone: r.phone, label: 'আগে থেকে' }));
+}
+
+/** Confirmed import rows → normal customer rows, all or nothing. Returns how many. */
+export async function importCustomers(db: Db, w: Writer, rows: readonly CustomerLine[]): Promise<number> {
+  await db.withTransactionAsync(async () => {
+    for (const r of rows) {
+      await insert(db, 'customers', { id: w.newId(), name: r.name, phone: r.phone, note: r.note, party_type: 'customer', ...rowCols(w) });
+    }
+  });
+  return rows.length;
 }
 
 // ── customers (বাকি খাতা) ──────────────────────────────────────

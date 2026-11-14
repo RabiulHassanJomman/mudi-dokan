@@ -236,10 +236,11 @@ describe('upgrade keeps pilot data', () => {
     await expect(migrate(a)).resolves.toBe(4);
     expect(old.prepare('PRAGMA user_version').get()).toEqual({ user_version: SCHEMA_VERSION });
     for (const [t, rows] of Object.entries(before)) {
-      // same rows; new columns may only be added (null)
-      expect(dump(t).map((r) => ({ ...(r as object), via: undefined, intent: undefined }))).toEqual(
-        (rows as object[]).map((r) => ({ ...r, via: undefined, intent: undefined })),
-      );
+      // same rows and values; later versions may only add columns
+      const oldCols = (r: object) => Object.keys(r);
+      expect(
+        dump(t).map((r, k) => Object.fromEntries(oldCols((rows as object[])[k]!).map((c) => [c, (r as Record<string, unknown>)[c]]))),
+      ).toEqual(rows);
     }
     expect(old.prepare('SELECT via FROM voice_logs').get()).toEqual({ via: null });
     old.close();
@@ -258,6 +259,38 @@ describe('v6', () => {
       { id: 'v1', intent: 'baki', outcome: 'unsupported' },
       { id: 'v2', intent: null, outcome: 'stt_error' },
     ]);
+    old.close();
+  });
+});
+
+describe('v7: customers.note (list import)', () => {
+  it('a v6 shop phone keeps customers, phones and baki; note starts null', async () => {
+    const old = new DatabaseSync(':memory:');
+    const a = adapter(old);
+    await a.execAsync('PRAGMA foreign_keys = ON;');
+    for (const sql of MIGRATIONS.slice(0, 6)) old.exec(sql);
+    old.exec('PRAGMA user_version = 6');
+    insert(old, 'devices', { ...row('d1'), device_name: 'আব্বু', role: 'owner' });
+    insert(old, 'customers', { ...row('c1'), name: 'করিম', phone: '01711123456' });
+    insert(old, 'customers', { ...row('c2'), name: 'মিনা' });
+    insert(old, 'voice_logs', { ...row('v1'), transcript: 'করিম ৩০০ টাকা বাকি', device_name: 'আব্বু', outcome: 'saved', intent: 'baki', source: 'voice' });
+    insert(old, 'ledger', { ...entry('l1'), party_id: 'c1', kind: 'baki', amount_poisha: 30000, voice_log_id: 'v1' });
+    insert(old, 'ledger', { ...entry('l2'), party_id: 'c2', kind: 'joma', amount_poisha: 5000 });
+    const tables = ['devices', 'customers', 'voice_logs', 'ledger'];
+    const dump = (t: string) => old.prepare(`SELECT * FROM ${t} ORDER BY id`).all() as Record<string, unknown>[];
+    const before = Object.fromEntries(tables.map((t) => [t, dump(t)]));
+
+    await expect(migrate(a)).resolves.toBe(6);
+    expect(old.prepare('PRAGMA user_version').get()).toEqual({ user_version: SCHEMA_VERSION });
+    for (const t of tables) {
+      const after = dump(t);
+      expect(after.map((r, k) => Object.fromEntries(Object.keys(before[t]![k]!).map((c) => [c, r[c]])))).toEqual(before[t]);
+    }
+    expect(old.prepare('SELECT id, phone, note FROM customers ORDER BY id').all()).toEqual([
+      { id: 'c1', phone: '01711123456', note: null },
+      { id: 'c2', phone: null, note: null },
+    ]);
+    expect(() => old.exec("UPDATE ledger SET amount_poisha = 1 WHERE id = 'l1'")).toThrow(/append-only/);
     old.close();
   });
 });

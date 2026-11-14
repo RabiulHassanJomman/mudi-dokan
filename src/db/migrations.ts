@@ -212,8 +212,16 @@ ALTER TABLE voice_logs ADD COLUMN intent TEXT;
 UPDATE voice_logs SET intent = json_extract(parsed_json, '$.intent') WHERE parsed_json IS NOT NULL;
 `;
 
+/**
+ * v7: customers.note — what the list import (ক্রেতার তালিকা আনুন) takes off a name
+ * ("ভাই", "মসজিদের পাশে"), so the name stays clean for matching.
+ */
+const V7 = `
+ALTER TABLE customers ADD COLUMN note TEXT;
+`;
+
 /** Index i holds the SQL that takes the DB from user_version i to i + 1. */
-export const MIGRATIONS: readonly string[] = [V1, V2, V3, V4, V5, V6];
+export const MIGRATIONS: readonly string[] = [V1, V2, V3, V4, V5, V6, V7];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;
 
