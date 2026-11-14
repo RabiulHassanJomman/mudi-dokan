@@ -234,8 +234,18 @@ ALTER TABLE voice_logs ADD COLUMN gemini_output_tokens INTEGER;
 ALTER TABLE voice_logs ADD COLUMN gemini_thought_tokens INTEGER;
 `;
 
+/**
+ * v8 on this branch = main's v7: customers.note — what the list import (ক্রেতার তালিকা আনুন)
+ * takes off a name ("ভাই", "মসজিদের পাশে"), so the name stays clean for matching.
+ * Numbered after the Gemini v7 because that one already shipped to the test Pixel.
+ * Every later main migration lands here one number higher.
+ */
+const V8 = `
+ALTER TABLE customers ADD COLUMN note TEXT;
+`;
+
 /** Index i holds the SQL that takes the DB from user_version i to i + 1. */
-export const MIGRATIONS: readonly string[] = [V1, V2, V3, V4, V5, V6, V7];
+export const MIGRATIONS: readonly string[] = [V1, V2, V3, V4, V5, V6, V7, V8];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;
 

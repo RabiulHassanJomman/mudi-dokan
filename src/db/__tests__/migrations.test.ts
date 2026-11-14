@@ -310,3 +310,37 @@ describe('v7 (Gemini audio experiment)', () => {
     expect(() => insert(raw, 'voice_logs', { ...row('v3'), transcript: 'x', device_name: 'আব্বু', parsed_by: 'both' })).toThrow();
   });
 });
+
+describe('v8 (this branch) = main v7: customers.note', () => {
+  it('a v6 shop phone keeps customers, phones and baki; note starts null', async () => {
+    const old = new DatabaseSync(':memory:');
+    const a = adapter(old);
+    await a.execAsync('PRAGMA foreign_keys = ON;');
+    for (const sql of MIGRATIONS.slice(0, 6)) old.exec(sql);
+    old.exec('PRAGMA user_version = 6');
+    insert(old, 'customers', { ...row('c1'), name: 'করিম', phone: '01711123456' });
+    insert(old, 'ledger', { ...entry('l1'), party_id: 'c1', kind: 'baki', amount_poisha: 30000 });
+    await migrate(a);
+    expect(old.prepare('SELECT id, phone, note FROM customers').all()).toEqual([{ id: 'c1', phone: '01711123456', note: null }]);
+    old.close();
+  });
+
+  it('the test Pixel (v7 with Gemini logs) upgrades to v8 and keeps everything', async () => {
+    const old = new DatabaseSync(':memory:');
+    const a = adapter(old);
+    await a.execAsync('PRAGMA foreign_keys = ON;');
+    for (const sql of MIGRATIONS.slice(0, 7)) old.exec(sql);
+    old.exec('PRAGMA user_version = 7');
+    insert(old, 'customers', { ...row('c1'), name: 'করিম', phone: '01711123456' });
+    insert(old, 'voice_logs', {
+      ...row('v1'), transcript: 'চাল ২ কেজি', device_name: 'আব্বু', outcome: 'saved', source: 'voice', engine: 'both', parsed_by: 'android',
+      gemini_json: '{"intent":"sale"}', gemini_transcript: 'চাল দুই কেজি', gemini_ms: 1800, gemini_audio_tokens: 120,
+    });
+    const before = old.prepare('SELECT * FROM voice_logs').all();
+    await expect(migrate(a)).resolves.toBe(7);
+    expect(old.prepare('PRAGMA user_version').get()).toEqual({ user_version: 8 });
+    expect(old.prepare('SELECT * FROM voice_logs').all()).toEqual(before);
+    expect(old.prepare('SELECT name, phone, note FROM customers').all()).toEqual([{ name: 'করিম', phone: '01711123456', note: null }]);
+    old.close();
+  });
+});

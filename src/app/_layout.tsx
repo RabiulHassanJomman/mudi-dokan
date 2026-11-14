@@ -20,6 +20,7 @@ export default function RootLayout() {
         <Stack.Screen name="setup" options={{ animation: 'fade' }} />
         <Stack.Screen name="pick" options={{ animation: 'slide_from_bottom' }} />
         <Stack.Screen name="customer/[id]" />
+        <Stack.Screen name="import" />
       </Stack>
     </SQLiteProvider>
   );

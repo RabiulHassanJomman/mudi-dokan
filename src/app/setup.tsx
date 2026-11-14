@@ -260,6 +260,21 @@ export default function SetupScreen() {
             </Txt>
           ) : null}
         </Section>
+
+        {/* settings only: bring in an existing customer list (.txt) */}
+        {editing && (
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => router.push({ pathname: '/import', params: { kind: 'customers' } })}
+            style={({ pressed }) => [styles.importButton, pressed && styles.pressed]}
+          >
+            <Icon name="list" size={28} color={colors.baki} />
+            <Txt size={fontSize.label} weight="bold" color={colors.bakiInk} style={styles.flex}>
+              ক্রেতার তালিকা আনুন
+            </Txt>
+            <Icon name="arrow" size={24} color={colors.bakiInk} />
+          </Pressable>
+        )}
       </ScrollView>
 
       <Pressable accessibilityRole="button" onPress={submit} style={({ pressed }) => [styles.start, pressed && styles.pressed]}>
@@ -327,6 +342,17 @@ function Chip({ label, on, color, tint, onPress }: { label: string; on: boolean;
 }
 
 const styles = StyleSheet.create({
+  importButton: {
+    minHeight: 64,
+    borderRadius: radius.card,
+    borderWidth: 2,
+    borderColor: colors.bakiBorder,
+    backgroundColor: colors.bakiTint,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    paddingHorizontal: spacing.lg,
+  },
   screen: { flex: 1, backgroundColor: colors.bg, paddingHorizontal: spacing.screen, paddingBottom: spacing.screen, gap: spacing.md },
   header: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingTop: spacing.xl },
   flex: { flex: 1 },
