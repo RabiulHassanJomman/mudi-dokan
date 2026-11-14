@@ -20,7 +20,7 @@ import { colors, fontSize, radius, size, spacing } from '../../theme/tokens';
 import { nav } from '../../lib/nav';
 import { useDataVersion } from '../../sync/app';
 
-const what = (l: LedgerLine) => (l.kind === 'joma' ? 'জমা দিল' : l.products ?? 'বাকি');
+const what = (l: LedgerLine) => (l.kind === 'joma' ? 'জমা দিল' : l.products ?? l.note ?? 'বাকি');
 
 /**
  * ক্রেতার হিসাব (Customer.dc.html): balance, জমা নিন / বাকি দিন (voice, with this

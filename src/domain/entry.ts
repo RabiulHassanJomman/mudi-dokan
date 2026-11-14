@@ -139,7 +139,7 @@ export function entryFromParse(p: ParsedCommand, ctx: EntryContext): EntryDraft 
   } else return null;
 
   const name = p.customer?.trim() || ctx.defaultCustomer?.trim() || null;
-  return finalize({ ...base, kind, customerName: name, customerOk: customerStatus(name, ctx.knownCustomers) === 'known' });
+  return finalize({ ...base, kind, note: p.note?.trim() || null, customerName: name, customerOk: customerStatus(name, ctx.knownCustomers) === 'known' });
 }
 
 // ── edits ──────────────────────────────────────────────────────
@@ -241,7 +241,7 @@ export function entryReadback(d: EntryDraft): string {
   if (isLedger(d.kind)) {
     const who = d.customerName ? `${d.customerName}, ` : '';
     const parts = [d.amountPoisha !== null ? taka(d.amountPoisha) : '', d.kind ? KIND_BN[d.kind] : ''].filter(Boolean).join(' ');
-    let s = `${who}${parts}`.replace(/, $/, '') + '।';
+    let s = `${who}${parts}`.replace(/, $/, '') + (d.note ? `: ${d.note}` : '') + '।';
     if (has('no_kind')) s += ' বাকি না জমা?';
     else if (has('no_customer')) s += ` কার ${KIND_BN[d.kind!]}?`;
     else if (has('customer_unknown')) s += ` ${d.customerName} নামে কাউকে চিনি না। নিচে বেছে নিন।`;

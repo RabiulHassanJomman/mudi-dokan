@@ -69,6 +69,11 @@ export function EntryForm({ entry, known, onChange, onRenameProduct }: Props) {
             <KindToggle label="জমা" icon="cash" on={entry.kind === 'joma'} ink={colors.saleDark} border={colors.sale} tint={colors.saleTint} onPress={() => onChange(withKind(entry, 'joma'))} />
           </View>
           {bad('no_kind') && <Hint text="বাকি না জমা? উপরে বেছে নিন।" />}
+          {!!entry.note && (
+            <Txt wrap size={fontSize.label} weight="semibold" color={colors.bakiInk}>
+              {entry.note}
+            </Txt>
+          )}
           <CustomerPicker
             label={entry.kind === 'joma' ? 'কার জমা?' : 'কার বাকি?'}
             name={entry.customerName}

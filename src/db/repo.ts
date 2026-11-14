@@ -524,7 +524,7 @@ export async function saveEntry(db: Db, w: Writer, d: EntryDraft, voiceLogId: st
   await db.withTransactionAsync(async () => {
     if (kind === 'baki' || kind === 'joma') {
       const partyId = await findOrCreateCustomer(db, w, d.customerName!);
-      await insert(db, 'ledger', { party_id: partyId, party_type: 'customer', kind, amount_poisha: amount, ...entry() });
+      await insert(db, 'ledger', { party_id: partyId, party_type: 'customer', kind, amount_poisha: amount, note: d.note, ...entry() });
     } else if (kind === 'expense') {
       await insert(db, 'expenses', { item: d.item!, amount_poisha: amount, person: d.person, note: d.note, ...entry() });
     } else if (kind === 'owner_withdrawal') {
@@ -670,6 +670,8 @@ export interface LedgerLine {
   created_at: number;
   /** "চাল, ডাল" for the baki row of a credit sale. */
   products: string | null;
+  /** A plain baki said with goods but no quantities: "তেল, আটা, ময়দা". */
+  note: string | null;
   transcript: string | null;
   audio_path: string | null;
 }
@@ -677,7 +679,7 @@ export interface LedgerLine {
 /** A customer's ledger, newest first, with the clip that made each line. */
 export const customerHistory = (db: Db, customerId: string) =>
   db.getAllAsync<LedgerLine>(
-    `SELECT l.id, l.basket_id, l.kind, l.amount_poisha, l.at AS created_at,
+    `SELECT l.id, l.basket_id, l.kind, l.amount_poisha, l.at AS created_at, l.note,
        (SELECT GROUP_CONCAT(name, ', ') FROM (
           SELECT p.name FROM v_sales s JOIN products p ON p.id = s.product_id
           WHERE l.basket_id IS NOT NULL AND s.basket_id = l.basket_id ORDER BY s.line_no)) AS products,
@@ -1102,7 +1104,7 @@ export async function saveEntryFix(db: Db, w: Writer, s: StoredEntry, d: EntryDr
     if (!old) throw new Error(`${s.table} ${s.id} not found`);
     let changes: Row;
     if (s.table === 'ledger') {
-      changes = { party_id: await findOrCreateCustomer(db, w, d.customerName!), kind: d.kind!, amount_poisha: d.amountPoisha };
+      changes = { party_id: await findOrCreateCustomer(db, w, d.customerName!), kind: d.kind!, amount_poisha: d.amountPoisha, note: d.note };
     } else if (s.table === 'expenses') {
       changes = { item: d.item!, amount_poisha: d.amountPoisha, person: d.person, note: d.note };
     } else if (s.table === 'owner_withdrawals') {

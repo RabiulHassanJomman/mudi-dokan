@@ -125,6 +125,8 @@ export function convertGemini(json: unknown, ctx: ConvertContext): Converted {
   } else if (i === 'baki' || i === 'joma') {
     out.customer = customer;
     out.amount = amount;
+    // goods said without quantities ("সাজুর বাকি তেল, আটা, মোট ৫০০ টাকা"): what the baki was for
+    out.note = str(json, 'note');
     if (!customer) missing.push('customer');
     if (amount === undefined) missing.push('amount');
   } else if (i === 'expense') {

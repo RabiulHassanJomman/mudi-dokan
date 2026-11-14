@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams } from 'expo-router';
 import { File, Paths } from 'expo-file-system';
 import { useSQLiteContext } from 'expo-sqlite';
 import { AudioModule, setAudioModeAsync, useAudioRecorder, useAudioRecorderState, type RecordingOptions } from 'expo-audio';
+import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-speech-recognition';
 import Svg, { Path } from 'react-native-svg';
 
 import { Icon } from '../components/Icon';
@@ -39,6 +40,22 @@ const AAC_16K: RecordingOptions = {
   web: {},
 };
 
+/**
+ * Android 13+: the phone's recognizer runs beside Gemini only to show the words as they are said
+ * and to keep the clip (WAV, 16 kHz). Gemini alone understands the command. Older phones can't keep
+ * the clip that way, so expo-audio records it and there are no live words.
+ */
+const LIVE = Platform.OS === 'android' && Number(Platform.Version) >= 33;
+
+const STT_ERROR_BN: Record<string, string> = {
+  'no-speech': 'কিছু শুনতে পাইনি',
+  'speech-timeout': 'কিছু শুনতে পাইনি',
+  network: 'ইন্টারনেট নেই। নেট চালু করে আবার বলুন',
+  'not-allowed': 'মাইকের অনুমতি দিন',
+  'language-not-supported': 'এই ফোনে বাংলা শোনা যাচ্ছে না',
+  busy: 'মাইক ব্যস্ত, একটু পরে বলুন',
+};
+
 /** শুনছি: the clip → Gemini (≤ ~12 s). Understood → the confirm card; no net / 429 / error → the queue. */
 export default function ListeningScreen() {
   const db = useSQLiteContext();
@@ -55,7 +72,12 @@ export default function ListeningScreen() {
   const stopping = useRef(false);
   /** ✕ pressed: drop a Gemini answer that comes in later. */
   const left = useRef(false);
-  const volume = barLevel(rec.metering);
+  const [heard, setHeard] = useState('');
+  const [liveVolume, setLiveVolume] = useState(0);
+  const heardRef = useRef('');
+  const clipRef = useRef<string | null>(null);
+  const sttError = useRef<string | null>(null);
+  const volume = LIVE ? liveVolume : barLevel(rec.metering);
 
   const start = useCallback(async () => {
     left.current = false;
@@ -68,6 +90,26 @@ export default function ListeningScreen() {
       return;
     }
     setPhase('starting');
+    setHeard('');
+    heardRef.current = '';
+    clipRef.current = null;
+    sttError.current = null;
+    if (LIVE) {
+      const p = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
+      if (!p.granted) {
+        setErrorText(STT_ERROR_BN['not-allowed']!);
+        setPhase('error');
+        return;
+      }
+      ExpoSpeechRecognitionModule.start({
+        lang: 'bn-BD',
+        interimResults: true,
+        continuous: false,
+        recordingOptions: { persist: true, outputDirectory: Paths.document.uri, outputFileName: `voice_${Date.now()}.wav` },
+        volumeChangeEventOptions: { enabled: true, intervalMillis: 120 },
+      });
+      return;
+    }
     const perm = await AudioModule.requestRecordingPermissionsAsync();
     if (!perm.granted) {
       setErrorText('মাইকের অনুমতি দিন');
@@ -91,14 +133,15 @@ export default function ListeningScreen() {
     void start();
     return () => {
       left.current = true;
-      if (!stopping.current) void recorder.stop().catch(() => undefined);
+      if (LIVE) ExpoSpeechRecognitionModule.abort();
+      else if (!stopping.current) void recorder.stop().catch(() => undefined);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [start]);
 
   // end of speech from the level; the button does the same
   useEffect(() => {
-    if (phase !== 'listening' || stopping.current) return;
+    if (LIVE || phase !== 'listening' || stopping.current) return;
     const r = feed(endpoint.current, rec.metering, rec.durationMillis);
     endpoint.current = r.state;
     if (r.verdict === 'stop') void stop();
@@ -106,6 +149,40 @@ export default function ListeningScreen() {
     else if (rec.durationMillis >= MAX_MS) void stop();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rec.metering, rec.durationMillis, phase]);
+
+  useSpeechRecognitionEvent('start', () => setPhase('listening'));
+  useSpeechRecognitionEvent('volumechange', (e) => setLiveVolume(Math.max(0, Math.min(1, (e.value + 2) / 12))));
+  useSpeechRecognitionEvent('result', (e) => {
+    const text = e.results[0]?.transcript ?? '';
+    heardRef.current = text;
+    setHeard(text);
+  });
+  useSpeechRecognitionEvent('audioend', (e) => {
+    if (e.uri) clipRef.current = e.uri;
+  });
+  useSpeechRecognitionEvent('error', (e) => {
+    sttError.current = e.error;
+  });
+  useSpeechRecognitionEvent('end', () => {
+    if (!LIVE || stopping.current) return;
+    void finishLive();
+  });
+
+  /** The recognizer is done: the clip goes to Gemini whether or not the phone heard words. */
+  async function finishLive() {
+    stopping.current = true;
+    const saidAt = Date.now();
+    const clip = clipRef.current;
+    const code = sttError.current;
+    if (code === 'aborted' && !heardRef.current) return;
+    if (!clip) {
+      setErrorText(STT_ERROR_BN[code ?? 'no-speech'] ?? 'কিছু শুনতে পাইনি');
+      stopping.current = false;
+      setPhase('error');
+      return;
+    }
+    await understand(clip, saidAt);
+  }
 
   async function stop(silent = false) {
     if (stopping.current) return;
@@ -150,7 +227,7 @@ export default function ListeningScreen() {
     let logId: string | null = null;
     try {
       stepNow.current = 'log';
-      logId = await withTimeout(createVoiceLog(db, w, { transcript: '', source: 'voice', contextTab: tab, audioPath: clip, engine: 'gemini', keepPending: true }), 15_000, 'log');
+      logId = await withTimeout(createVoiceLog(db, w, { transcript: heardRef.current, source: 'voice', contextTab: tab, audioPath: clip, engine: 'gemini', keepPending: true }), 15_000, 'log');
       gate.mark(Date.now());
       stepNow.current = 'gemini';
       const g = await withTimeout(runGemini(db, logId, clip, { tab, hint: null, deadlineMs: GEMINI_WAIT_MS }), GEMINI_WAIT_MS + 20_000, 'gemini');
@@ -208,7 +285,8 @@ export default function ListeningScreen() {
 
   const close = () => {
     left.current = true;
-    if (!stopping.current) {
+    if (LIVE) ExpoSpeechRecognitionModule.abort();
+    else if (!stopping.current) {
       stopping.current = true;
       void recorder.stop().catch(() => undefined);
     }
@@ -238,6 +316,14 @@ export default function ListeningScreen() {
         </Txt>
         {phase === 'listening' && <Bars volume={volume} />}
       </View>
+
+      {!!heard && phase !== 'error' && phase !== 'nokey' && (
+        <View style={styles.heard}>
+          <Txt wrap size={fontSize.headingLg} weight="bold" style={styles.center}>
+            {`“${heard}”`}
+          </Txt>
+        </View>
+      )}
 
       {(phase === 'error' || phase === 'nokey') && (
         <View style={styles.heard}>
@@ -275,7 +361,7 @@ export default function ListeningScreen() {
           </Pressable>
         </>
       ) : phase === 'thinking' ? null : (
-        <Pressable accessibilityRole="button" accessibilityLabel="থামুন" onPress={() => void stop()} style={styles.action}>
+        <Pressable accessibilityRole="button" accessibilityLabel="থামুন" onPress={() => (LIVE ? ExpoSpeechRecognitionModule.stop() : void stop())} style={styles.action}>
           <View style={styles.stopSquare} />
           <Txt size={fontSize.listAmount} weight="bold" color={colors.listening.bg}>
             থামুন

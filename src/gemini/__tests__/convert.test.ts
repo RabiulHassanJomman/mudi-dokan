@@ -135,3 +135,17 @@ describe('convertGemini: customer aliases', () => {
     expect(convertGemini({ ...NULLS, intent: 'baki', customer: 'রহিম', amount: 300 }, withAliases).parsed.customer).toBe('রহিম');
   });
 });
+
+describe('convertGemini: বাকি with goods but no quantities', () => {
+  it('"সাজুর বাকি তেল, আটা, ময়দা, সুজি, মোট ৫০০ টাকা" = baki 500 for সাজু, the goods as the note', () => {
+    const { parsed } = convertGemini(
+      { transcript: 'সাজুর বাকি তেল, আটা, ময়দা, সুজি, মোট ৫০০ টাকা', intent: 'baki', ...NULLS, customer: 'সাজু', amount: 500, note: 'তেল, আটা, ময়দা, সুজি' },
+      names,
+    );
+    expect(parsed).toMatchObject({ intent: 'baki', customer: 'সাজু', amount: 500, note: 'তেল, আটা, ময়দা, সুজি', missing: [] });
+  });
+  it('a plain "করিমের ৩০০ টাকা বাকি" has no note', () => {
+    const { parsed } = convertGemini({ intent: 'baki', ...NULLS, customer: 'করিম', amount: 300 }, names);
+    expect(parsed.note ?? null).toBeNull();
+  });
+});

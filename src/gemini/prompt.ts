@@ -71,6 +71,7 @@ Rules:
 - product: use ONLY a name from the given product list (map spelling variants and brand words to it, e.g. চাউল → চাল). If none fits, use the spoken word.
 - customer: use the given customer name when it matches (drop ভাই/আপা/সাহেব).
 - "<name> <amount> টাকা বাকি", "<name>-এর নামে <amount> টাকা বাকি লেখেন" (money only, no goods) = intent baki, credit false, items [].
+- "<name>-এর বাকি <goods with no quantity and no price each>, মোট <amount> টাকা" (several goods named, ONE total, no quantities) = intent baki, credit false, items [], amount = that total, note = the goods in spoken order joined with ", " (e.g. "তেল, আটা, ময়দা, সুজি"). If quantities or per-line prices are said, it is a sale with credit instead.
 - credit = true only when goods are taken on বাকি (a sale with items).
 - Keep quantity and unit exactly as spoken (টা/টি/একটা = piece); never convert kg ↔ litre or g ↔ kg. unit "none" if no unit was said.
 - "X টাকা করে", "প্রতি কেজি X", "কেজি X করে", "X টাকা কেজি" = unitPrice; total = quantity × unitPrice.
@@ -102,6 +103,7 @@ export const EXAMPLES: [string, Record<string, unknown>][] = [
     { intent: 'sale', ...NULLS, amount: 140, items: [{ product: 'আলু', quantity: 4, unit: 'kg', unitPrice: 35, total: 140 }] },
   ],
   ['মিনা আপা তিনশো টাকা বাকি', { intent: 'baki', ...NULLS, customer: 'মিনা', amount: 300 }],
+  ['সাজুর বাকি তেল, আটা, ময়দা, সুজি, মোট পাঁচশো টাকা', { intent: 'baki', ...NULLS, customer: 'সাজু', amount: 500, note: 'তেল, আটা, ময়দা, সুজি' }],
   ['রশিদের নামে আটশো টাকা বাকি লেখেন', { intent: 'baki', ...NULLS, customer: 'রশিদ', amount: 800 }],
   ['সবার বাকি কত', { intent: 'total_baki_query', ...NULLS }],
   ['করিমের খাতা দেখাও', { intent: 'customer_history_query', ...NULLS, customer: 'করিম' }],

@@ -311,8 +311,8 @@ describe('v7–v9 (shared by main and exp/gemini-audio)', () => {
     expect(() => db.exec("UPDATE sales SET quantity = 1 WHERE id = 's1'")).toThrow(/append-only/);
   }
 
-  it('v7–v9 are shared by every branch (the latest is now 13)', () => {
-    expect(SCHEMA_VERSION).toBe(13);
+  it('v7–v9 are shared by every branch (the latest is now 14)', () => {
+    expect(SCHEMA_VERSION).toBe(14);
   });
 
   it('v6 shop phone (main) → v9: data kept, new columns null', async () => {
@@ -547,7 +547,10 @@ describe('v10: voided + entry_at (corrections and undo)', () => {
     const state = old.prepare('SELECT * FROM sync_state ORDER BY tbl, row_id').all();
     await expect(migrate(adapter(old))).resolves.toBe(11);
     expect(old.prepare('PRAGMA user_version').get()).toEqual({ user_version: SCHEMA_VERSION });
-    expect(dumpAll(old)).toEqual(before);
+    const after = dumpAll(old);
+    for (const t of TABLES) {
+      expect(after[t]!.map((r, k) => Object.fromEntries(Object.keys(before[t]![k]!).map((c) => [c, r[c]])))).toEqual(before[t]);
+    }
     expect(old.prepare('SELECT * FROM sync_state ORDER BY tbl, row_id').all()).toEqual(state);
     expect(old.prepare("SELECT value FROM sync_meta WHERE key = 'uid'").get()).toEqual({ value: 'shop-uid' });
     // only this phone's clips (audio_path) that aren't on Drive yet
@@ -574,12 +577,37 @@ describe('v10: voided + entry_at (corrections and undo)', () => {
     const before = dumpAll(old);
     await expect(migrate(adapter(old))).resolves.toBe(12);
     expect(old.prepare('PRAGMA user_version').get()).toEqual({ user_version: SCHEMA_VERSION });
-    expect(dumpAll(old)).toEqual(before);
+    const kept = dumpAll(old);
+    for (const t of TABLES) {
+      expect(kept[t]!.map((r, k) => Object.fromEntries(Object.keys(before[t]![k]!).map((c) => [c, r[c]])))).toEqual(before[t]);
+    }
     expect(old.prepare('SELECT voice_log_id FROM audio_queue').all()).toEqual([{ voice_log_id: 'v1' }]);
     expect(old.prepare('SELECT COUNT(*) AS n FROM understand_queue').get()).toEqual({ n: 0 });
     old.exec("INSERT INTO understand_queue (voice_log_id, tab, queued_at) VALUES ('v1', 'sale', 1)");
     expect(old.prepare("SELECT state, attempts, next_at FROM understand_queue").get()).toEqual({ state: 'waiting', attempts: 0, next_at: 0 });
     expect(() => old.exec("UPDATE understand_queue SET state = 'done'")).toThrow();
+    old.close();
+  });
+
+  it('v13 shop phone (Gemini only, queue in use) → v14: every row kept, v_ledger shows the new note', async () => {
+    const old = v9Shop();
+    for (let v = 9; v < 13; v++) old.exec(`${MIGRATIONS[v]}\nPRAGMA user_version = ${v + 1};`);
+    old.exec("INSERT INTO understand_queue (voice_log_id, tab, queued_at) VALUES ('v1', 'sale', 1763000000000)");
+    const before = dumpAll(old);
+    const viewBefore = old.prepare('SELECT id, party_id, amount_poisha, at FROM v_ledger ORDER BY id').all();
+    await expect(migrate(adapter(old))).resolves.toBe(13);
+    expect(old.prepare('PRAGMA user_version').get()).toEqual({ user_version: SCHEMA_VERSION });
+    const after = dumpAll(old);
+    for (const t of TABLES) {
+      expect(after[t]!.map((r, k) => Object.fromEntries(Object.keys(before[t]![k]!).map((c) => [c, r[c]])))).toEqual(before[t]);
+    }
+    expect(old.prepare('SELECT id, party_id, amount_poisha, at FROM v_ledger ORDER BY id').all()).toEqual(viewBefore);
+    expect(old.prepare("SELECT note FROM v_ledger WHERE id = 'l1'").get()).toEqual({ note: null });
+    expect(old.prepare('SELECT COUNT(*) AS n FROM understand_queue').get()).toEqual({ n: 1 });
+    insert(old, 'ledger', { ...entry('l2'), party_id: 'c1', kind: 'baki', amount_poisha: 50000, note: 'তেল, আটা, ময়দা, সুজি', created_at: now + 5 });
+    expect(old.prepare("SELECT note, amount_poisha FROM v_ledger WHERE id = 'l2'").get()).toEqual({ note: 'তেল, আটা, ময়দা, সুজি', amount_poisha: 50000 });
+    // still append-only
+    expect(() => old.exec("UPDATE ledger SET note = 'x' WHERE id = 'l2'")).toThrow(/append-only/);
     old.close();
   });
 });

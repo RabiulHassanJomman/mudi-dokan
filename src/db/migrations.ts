@@ -409,10 +409,23 @@ CREATE TABLE understand_queue (
 `;
 
 /**
+ * v14: ledger.note — what a বাকি was for when goods were said without quantities ("সাজুর বাকি
+ * তেল, আটা, ময়দা, সুজি, মোট ৫০০ টাকা" = ৳ ৫০০ baki, note "তেল, আটা, ময়দা, সুজি"; no stock
+ * changes, there is no quantity). v_ledger is made again: a view's `SELECT t.*` is fixed when
+ * it is created, so it would not show the new column. Synced like every column (a phone on
+ * an older version ignores it).
+ */
+const V14 = `
+ALTER TABLE ledger ADD COLUMN note TEXT;
+DROP VIEW v_ledger;
+${forkSafeView('ledger')}
+`;
+
+/**
  * Index i holds the SQL that takes the DB from user_version i to i + 1.
  * Append only; never edit or renumber a shipped one.
  */
-export const MIGRATIONS: readonly string[] = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13];
+export const MIGRATIONS: readonly string[] = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14];
 
 /**
  * Nov 14 fork: an early main build shipped v7 = customers.note (no Gemini columns) while
