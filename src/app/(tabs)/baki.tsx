@@ -9,17 +9,12 @@ import { Icon } from '../../components/Icon';
 import { ScreenHeader } from '../../components/ScreenHeader';
 import { Txt } from '../../components/Txt';
 import { customerBalances, type CustomerBalance } from '../../db/repo';
+import { balanceWords as words } from '../../domain/customers';
 import { formatNumber, formatTaka } from '../../lib/bn';
 import { speak } from '../../lib/speak';
 import { colors, fontSize, radius, size, spacing } from '../../theme/tokens';
 
-/** "করিম, পাবো ২,৩০০ টাকা" / "অগ্রিম" when the customer paid ahead. */
-const balanceWords = (c: CustomerBalance) =>
-  c.balance_poisha > 0
-    ? `${c.name}, পাবো ${formatNumber(c.balance_poisha / 100)} টাকা।`
-    : c.balance_poisha < 0
-      ? `${c.name}, অগ্রিম দিয়েছে ${formatNumber(-c.balance_poisha / 100)} টাকা।`
-      : `${c.name}, কোনো বাকি নেই।`;
+const balanceWords = (c: CustomerBalance) => words(c.name, c.balance_poisha);
 
 /**
  * বাকি খাতা (Baki.dc.html): who owes what, most first; total পাবো; tap a name for
@@ -42,7 +37,7 @@ export default function BakiScreen() {
     void speak(
       `বাকি খাতা। মোট পাবো ${formatNumber(total / 100)} টাকা। ` +
         (owing.length ? owing.slice(0, 5).map(balanceWords).join(' ') : 'কারো কাছে বাকি নেই।') +
-        ' বাকি বা জমা বলতে নিচের বোতাম চাপুন।',
+        ' নামে চাপলে শুনবেন আর হিসাব খুলবে। বাকি বা জমা বলতে নিচের বোতাম চাপুন।',
     );
 
   return (
@@ -71,7 +66,11 @@ export default function BakiScreen() {
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={`${c.name}, ${formatTaka(c.balance_poisha)}, হিসাব দেখুন`}
-            onPress={() => router.push({ pathname: '/customer/[id]', params: { id: c.id } })}
+            onPress={() => {
+              // tap = hear it, and open their হিসাব
+              void speak(balanceWords(c));
+              router.push({ pathname: '/customer/[id]', params: { id: c.id } });
+            }}
             style={({ pressed }) => [styles.row, pressed && styles.pressed]}
           >
             <Avatar name={c.name} />

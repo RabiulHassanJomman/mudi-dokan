@@ -36,7 +36,7 @@ describe('pick → command for the confirm card', () => {
       items: [{ product: 'চাল', quantity: { value: 2.5, unit: 'kg' } }],
     });
     expect(p.amount).toBeUndefined();
-    expect(p.raw).toBe('চাল ২.৫ কেজি');
+    expect(p.raw).toBe('চাল ২½ কেজি');
   });
 
   it('টাকার: an amount, the confirm card works out the quantity', () => {

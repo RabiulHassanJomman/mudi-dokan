@@ -214,6 +214,20 @@ export function parseCommand(text: string, ctx: ParseContext = {}): ParsedComman
   if (has(K.PROFIT)) {
     return compact({ intent: 'profit_query', period, missing: [], confidence: 'high', ...base });
   }
+  // "করিমের বাকি কত?", "করিমের কাছে কত পাবো": a question, no amount said
+  const anyNumberAt = tokens.some((_, k) => parseNumber(tokens, k) !== null);
+  if ((has(K.BAKI) || has(K.OWED)) && has(K.HOW_MUCH) && !anyNumberAt && !has(K.CREDIT) && !has(K.TAKE)) {
+    const names = tokens.filter((t) => !isNoise(t)).map(stripGenitive);
+    const hit = matchKnown(names, ctx.knownCustomers);
+    const customer = hit?.match ?? customerName(names);
+    return compact({
+      intent: 'balance_query',
+      customer,
+      missing: customer ? [] : ['customer'],
+      confidence: 'high',
+      ...base,
+    });
+  }
   if (has(K.STOCK) && !has(K.BAKI) && !has(K.CREDIT) && !has(K.JOMA)) {
     const spoken = joinOrUndef(tokens.filter((t) => !isNoise(t)).map(stripGenitive));
     const product = spoken === undefined ? undefined : canon(spoken);
@@ -441,23 +455,24 @@ export function parseCommand(text: string, ctx: ParseContext = {}): ParsedComman
     product = joinOrUndef(names);
     if (product !== undefined) product = canon(product);
   } else if (intent === 'sale') {
-    // customer: a known customer, else (on credit) the first unknown name
+    // customer: a known customer; else on credit the first unknown name; else (cash)
+    // only a name marked as a person: "রহিম ভাই", "রহিমকে", "… রহিম কে", or "নিল" with a name apart
     const productAt = knownPositions(names, knownProducts);
     const known = knownSpan(names, ctx.knownCustomers, productAt);
+    const free = names.map((_, n) => n).filter((n) => !productAt.has(n));
+    const adjacent = (a: number, b: number) => b === a + 1 && namePos[b] === namePos[a]! + 1;
+    const runs: number[][] = [];
+    for (const n of free) {
+      const last = runs[runs.length - 1];
+      if (last && adjacent(last[last.length - 1]!, n)) last.push(n);
+      else runs.push([n]);
+    }
+    // a name run with no number or unit next to it ("… তেল দিলাম হাসান কে")
+    const touchesNumber = (r: number[]) =>
+      used[namePos[r[0]!]! - 1] === true || used[namePos[r[r.length - 1]!]! + 1] === true;
     let custAt: number[] = [];
     if (known) custAt = Array.from({ length: known[1] }, (_, o) => known[0] + o);
     else if (credit) {
-      const free = names.map((_, n) => n).filter((n) => !productAt.has(n));
-      const adjacent = (a: number, b: number) => b === a + 1 && namePos[b] === namePos[a]! + 1;
-      // a name run with no number or unit next to it is the customer ("… তেল দিলাম হাসান কে")
-      const runs: number[][] = [];
-      for (const n of free) {
-        const last = runs[runs.length - 1];
-        if (last && adjacent(last[last.length - 1]!, n)) last.push(n);
-        else runs.push([n]);
-      }
-      const touchesNumber = (r: number[]) =>
-        used[namePos[r[0]!]! - 1] === true || used[namePos[r[r.length - 1]!]! + 1] === true;
       const apart = productAt.size ? undefined : runs.find((r) => !touchesNumber(r));
       if (apart) custAt = apart;
       else if (free.length) custAt = [free[0]!];
@@ -465,6 +480,18 @@ export function parseCommand(text: string, ctx: ParseContext = {}): ParsedComman
       if (productAt.size && !apart) {
         for (let n = 1; n < free.length && adjacent(free[n - 1]!, free[n]!); n++) custAt.push(free[n]!);
       }
+    } else {
+      const marked = (r: number[]) => {
+        const lastRaw = rawNames[r[r.length - 1]!]!;
+        const after = tokens[namePos[r[r.length - 1]!]! + 1];
+        return (
+          (lastRaw.length > OBJECTIVE.length + 1 && lastRaw.endsWith(OBJECTIVE)) ||
+          (after !== undefined && (after === OBJECTIVE || K.HONORIFIC_SET.has(after)))
+        );
+      };
+      const pick = runs.find(marked) ?? (has(K.TAKE) ? runs.find((r) => !touchesNumber(r)) : undefined);
+      // never the only name: "চাল নিল ২ কেজি" has a product, not a customer
+      if (pick && pick.length < names.length) custAt = pick;
     }
     const custNames = custAt.map((n) => names[n]!);
     customer = !custNames.length ? undefined : known ? custNames.join(' ') : customerName(custNames);

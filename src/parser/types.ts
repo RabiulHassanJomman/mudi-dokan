@@ -6,6 +6,8 @@ export type Intent =
   | 'expense'
   | 'owner_withdrawal'
   | 'stock_query'
+  /** "করিমের বাকি কত?" — what a customer owes. */
+  | 'balance_query'
   | 'profit_query'
   | 'unknown';
 

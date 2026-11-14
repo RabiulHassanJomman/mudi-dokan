@@ -6,6 +6,8 @@
 import { basketSummary, storedLine, type BasketDraft, type ProductInfo } from '../domain/basket';
 import { entrySummary, type EntryDraft } from '../domain/entry';
 import type { PickProduct } from '../domain/pick';
+import type { RecentEntry } from '../domain/recent';
+import type { StockRow } from '../domain/stock';
 import type { Role, SetupDraft } from '../domain/setup';
 import { ENTRY_TABLES, noDeleteTrigger } from './migrations';
 import type { ParsedCommand, Unit } from '../parser/types';
@@ -142,6 +144,44 @@ export async function knownNames(db: Db): Promise<{ products: string[]; customer
   );
   return { products: products.map((r) => r.n), customers: customers.map((r) => r.n) };
 }
+
+/** Spoken name → product name, for the parser (ctx.productAliases). */
+export async function productAliasMap(db: Db): Promise<Record<string, string>> {
+  const rows = await db.getAllAsync<{ alias: string; name: string }>(
+    `SELECT a.alias, p.name FROM product_aliases a JOIN products p ON p.id = a.product_id
+     WHERE p.archived = 0 ORDER BY a.created_at`,
+  );
+  return Object.fromEntries(rows.map((r) => [r.alias, r.name]));
+}
+
+/**
+ * Remembers a spoken name for a product ("চাউল" → চাল) after the user chose it from the
+ * closest matches. Skipped when the name is already a product or an alias.
+ */
+export async function addProductAlias(db: Db, w: Writer, alias: string, productId: string): Promise<void> {
+  const a = alias.normalize('NFC').replace(/\s+/g, ' ').trim();
+  if (!a) return;
+  const taken = await db.getFirstAsync<{ n: number }>(
+    `SELECT (SELECT COUNT(*) FROM products WHERE name = ? AND archived = 0)
+          + (SELECT COUNT(*) FROM product_aliases WHERE alias = ?) AS n`,
+    a,
+    a,
+  );
+  if (taken && taken.n > 0) return;
+  await insert(db, 'product_aliases', { id: w.newId(), alias: a, product_id: productId, ...rowCols(w) });
+}
+
+/** মাল: every product with its effective bought and sold totals, most sold first. */
+export const stockList = (db: Db) =>
+  db.getAllAsync<StockRow>(
+    `SELECT p.id, p.name, p.unit, p.sell_price_poisha AS sellPricePoisha,
+       COALESCE((SELECT SUM(quantity) FROM v_purchases WHERE product_id = p.id), 0) AS bought,
+       COALESCE((SELECT SUM(quantity) FROM v_sales WHERE product_id = p.id), 0) AS sold,
+       (SELECT COUNT(*) FROM v_purchases WHERE product_id = p.id) AS purchases
+     FROM products p
+     WHERE p.archived = 0
+     ORDER BY (SELECT COUNT(*) FROM v_sales s WHERE s.product_id = p.id) DESC, p.created_at`,
+  );
 
 interface ProductRow {
   id: string;
@@ -316,7 +356,8 @@ export async function saveBasket(
   const basketId = w.newId();
   await db.withTransactionAsync(async () => {
     const created = new Map<string, string>();
-    const customerId = b.credit && b.customerName ? await findOrCreateCustomer(db, w, b.customerName) : null;
+    // credit: who owes; cash: who bought, if a name was confirmed
+    const customerId = b.customerName ? await findOrCreateCustomer(db, w, b.customerName) : null;
     const entry = () => ({ voice_log_id: voiceLogId, device_name: w.deviceName, ...rowCols(w) });
     let firstSaleId: string | null = null;
 
@@ -337,6 +378,7 @@ export async function saveBasket(
           ...rowCols(w),
         });
       }
+      if (it.alias && it.product) await addProductAlias(db, w, it.alias, it.product.id);
       const cost = it.product?.costPricePoisha ?? null;
       const saleId = w.newId();
       firstSaleId ??= saleId;
@@ -356,7 +398,7 @@ export async function saveBasket(
         ...entry(),
       });
     }
-    if (customerId) {
+    if (customerId && b.credit) {
       await insert(db, 'ledger', {
         id: w.newId(),
         party_id: customerId,
@@ -415,6 +457,7 @@ export async function saveEntry(db: Db, w: Writer, d: EntryDraft, voiceLogId: st
       } else if (l.sellPricePoisha !== null && !l.unitWarning) {
         await db.runAsync('UPDATE products SET sell_price_poisha = ?, updated_at = ? WHERE id = ?', l.sellPricePoisha, w.now(), productId);
       }
+      if (l.alias) await addProductAlias(db, w, l.alias, productId);
       await insert(db, 'purchases', {
         product_id: productId,
         quantity: l.quantity,
@@ -462,6 +505,10 @@ export const customerBalances = (db: Db) =>
 export const getCustomer = (db: Db, id: string) =>
   db.getFirstAsync<CustomerBalance>(`${BALANCE_SQL} AND c.id = ? GROUP BY c.id`, id);
 
+/** "করিমের বাকি কত?": the customer by exact name (oldest first if two share it), or null. */
+export const customerByName = (db: Db, name: string) =>
+  db.getFirstAsync<CustomerBalance>(`${BALANCE_SQL} AND c.name = ? GROUP BY c.id ORDER BY c.created_at LIMIT 1`, name.trim());
+
 export async function setCustomerPhone(db: Db, w: Writer, id: string, phone: string | null): Promise<void> {
   await db.runAsync('UPDATE customers SET phone = ?, updated_at = ? WHERE id = ?', phone, w.now(), id);
 }
@@ -491,39 +538,44 @@ export const customerHistory = (db: Db, customerId: string) =>
     customerId,
   );
 
-export interface RecentBasket {
-  id: string;
-  /** "চাল, ডাল" */
-  products: string;
-  lines: number;
-  /** Only meaningful when lines = 1. */
-  quantity: number;
-  unit: Unit;
-  amount_poisha: number;
-  credit: number;
-  customer: string | null;
-  audio_path: string | null;
-  created_at: number;
-}
-
-/** Latest sales, one row per basket. */
-export const recentBaskets = (db: Db, limit = 3) =>
-  db.getAllAsync<RecentBasket>(
-    `SELECT COALESCE(s.basket_id, s.id) AS id,
-            GROUP_CONCAT(p.name, ', ') AS products,
-            COUNT(*) AS lines,
-            MIN(s.quantity) AS quantity,
-            MIN(p.unit) AS unit,
-            SUM(s.amount_poisha) AS amount_poisha,
-            MAX(s.credit) AS credit,
-            MAX(c.name) AS customer,
-            MAX(v.audio_path) AS audio_path,
-            MAX(s.created_at) AS created_at
-     FROM (SELECT * FROM v_sales ORDER BY created_at, line_no) s
-     JOIN products p ON p.id = s.product_id
-     LEFT JOIN customers c ON c.id = s.customer_id
-     LEFT JOIN voice_logs v ON v.id = s.voice_log_id
-     GROUP BY COALESCE(s.basket_id, s.id)
+/**
+ * Home "শেষ entry": sale baskets and every other entry (বাকি, জমা, খরচ, মালিক নিল, কেনা),
+ * newest first. A credit sale's own baki row is left out (the sale shows it).
+ */
+export const recentEntries = (db: Db, limit = 3) =>
+  db.getAllAsync<RecentEntry>(
+    `SELECT * FROM (
+       SELECT 'sale' AS kind, COALESCE(s.basket_id, s.id) AS id,
+              GROUP_CONCAT(p.name, ', ') AS title,
+              COUNT(*) AS lines,
+              CASE WHEN COUNT(*) = 1 THEN MIN(s.quantity) END AS quantity,
+              CASE WHEN COUNT(*) = 1 THEN MIN(p.unit) END AS unit,
+              SUM(s.amount_poisha) AS amount_poisha,
+              MAX(s.credit) AS credit,
+              MAX(c.name) AS customer,
+              MAX(v.audio_path) AS audio_path,
+              MAX(s.created_at) AS created_at
+       FROM (SELECT * FROM v_sales ORDER BY created_at, line_no) s
+       JOIN products p ON p.id = s.product_id
+       LEFT JOIN customers c ON c.id = s.customer_id
+       LEFT JOIN voice_logs v ON v.id = s.voice_log_id
+       GROUP BY COALESCE(s.basket_id, s.id)
+     UNION ALL
+       SELECT l.kind, l.id, c.name, 0, NULL, NULL, l.amount_poisha, 0, NULL, v.audio_path, l.created_at
+       FROM v_ledger l JOIN customers c ON c.id = l.party_id
+       LEFT JOIN voice_logs v ON v.id = l.voice_log_id
+       WHERE l.basket_id IS NULL AND l.sale_id IS NULL
+     UNION ALL
+       SELECT 'expense', e.id, e.item, 0, NULL, NULL, e.amount_poisha, 0, NULL, v.audio_path, e.created_at
+       FROM v_expenses e LEFT JOIN voice_logs v ON v.id = e.voice_log_id
+     UNION ALL
+       SELECT 'owner_withdrawal', o.id, COALESCE(o.person, 'মালিক'), 0, NULL, NULL, o.amount_poisha, 0, NULL, v.audio_path, o.created_at
+       FROM v_owner_withdrawals o LEFT JOIN voice_logs v ON v.id = o.voice_log_id
+     UNION ALL
+       SELECT 'purchase', pu.id, p.name, 0, pu.quantity, COALESCE(pu.spoken_unit, p.unit), pu.total_poisha, 0, NULL, v.audio_path, pu.created_at
+       FROM v_purchases pu JOIN products p ON p.id = pu.product_id
+       LEFT JOIN voice_logs v ON v.id = pu.voice_log_id
+     )
      ORDER BY created_at DESC LIMIT ?`,
     limit,
   );

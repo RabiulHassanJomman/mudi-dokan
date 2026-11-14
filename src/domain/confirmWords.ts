@@ -17,3 +17,7 @@ export function classifyAnswer(text: string): 'yes' | 'no' | null {
   if (tokens.some((t) => YES.has(t))) return 'yes';
   return null;
 }
+
+/** The line above the confirm card: what the app got, and how. */
+export const heardPrefix = (how: 'voice' | 'typed' | 'pick'): string =>
+  how === 'pick' ? 'বেছে নিয়েছি' : how === 'typed' ? 'লিখেছি' : 'শুনেছি';

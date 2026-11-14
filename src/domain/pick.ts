@@ -2,7 +2,7 @@
  * ছবি দেখে বেছে নিন: a picked product + number + unit chip → the same ParsedCommand
  * shape the voice parser gives, so it goes to the same confirm card. Pure TS.
  */
-import { UNIT_BN, formatNumber } from '../lib/bn';
+import { UNIT_BN, formatNumber, formatQty, spokenQty } from '../lib/bn';
 import type { ParsedCommand, Unit } from '../parser/types';
 
 /** A unit chip, or টাকার ("১০০ টাকার চিনি": an amount, the quantity is worked out). */
@@ -40,9 +40,13 @@ export const halfAllowed = (mode: PickMode) => HALVES.has(mode);
 
 export const pickModeLabel = (mode: PickMode) => (mode === 'taka' ? 'টাকার' : UNIT_BN[mode]);
 
-/** "চাল ২.৫ কেজি", "১০০ টাকার চিনি" — for the log, the heard-text line and TTS. */
+/** "চাল ২½ কেজি", "১০০ টাকার চিনি" — for the log, the button and the "বেছে নিয়েছি" line. */
 export const pickText = (p: PickedItem) =>
-  p.mode === 'taka' ? `${formatNumber(p.value)} টাকার ${p.product}` : `${p.product} ${formatNumber(p.value, 3)} ${UNIT_BN[p.mode]}`;
+  p.mode === 'taka' ? `${formatNumber(p.value)} টাকার ${p.product}` : `${p.product} ${formatQty(p.value, p.mode)}`;
+
+/** The same for TTS: "চাল আড়াই কেজি". */
+export const pickWords = (p: PickedItem) =>
+  p.mode === 'taka' ? pickText(p) : `${p.product} ${spokenQty(p.value, p.mode)}`;
 
 export function pickedCommand(p: PickedItem): ParsedCommand {
   const text = pickText(p);

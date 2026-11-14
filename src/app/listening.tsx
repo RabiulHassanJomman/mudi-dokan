@@ -158,8 +158,9 @@ export default function ListeningScreen() {
               আবার বলুন
             </Txt>
           </Pressable>
-          {/* voice failed: products by picture (Pick); বাকি/জমা on the number pad (empty confirm card) */}
-          <Pressable
+          {/* voice failed: products by picture (Pick); বাকি/জমা on the number pad (empty confirm card).
+              Pick only sells, so a purchase (মাল কেনা) offers just "আবার বলুন". */}
+          {tab !== 'purchase' && <Pressable
             accessibilityRole="button"
             onPress={() => {
               closing.current = true;
@@ -172,7 +173,7 @@ export default function ListeningScreen() {
             <Txt size={fontSize.listAmount} weight="bold" color={colors.onColor}>
               {ledger ? 'টাকা চেপে দিন' : 'ছবি দেখে বেছে নিন'}
             </Txt>
-          </Pressable>
+          </Pressable>}
         </>
       ) : (
         <Pressable

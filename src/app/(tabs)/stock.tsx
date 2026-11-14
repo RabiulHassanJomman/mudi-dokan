@@ -1,24 +1,142 @@
-import { StyleSheet, View } from 'react-native';
+import { useCallback, useState } from 'react';
+import { FlatList, Pressable, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { router, useFocusEffect } from 'expo-router';
+import { useSQLiteContext } from 'expo-sqlite';
 
-import { ComingSoon } from '../../components/ComingSoon';
+import { Icon, productIcon } from '../../components/Icon';
 import { ScreenHeader } from '../../components/ScreenHeader';
-import { speak } from '../../lib/speak';
-import { colors, spacing } from '../../theme/tokens';
+import { Txt } from '../../components/Txt';
+import { stockList } from '../../db/repo';
+import { stockScreenWords, stockView, stockWords, type StockView } from '../../domain/stock';
+import { formatQty, formatTaka } from '../../lib/bn';
+import { speak, stopSpeaking } from '../../lib/speak';
+import { colors, fontSize, productTiles, radius, spacing } from '../../theme/tokens';
 
-/** মাল. Filled in step 4 (product grid, low-stock alert, "নতুন মাল বলুন"). */
+/**
+ * মাল (Stock.dc.html): every product with its stock (kena − becha, never stored) and
+ * selling price; low stock = orange border + ! badge. Tap a card = TTS. "নতুন মাল বলুন"
+ * opens Listening on the purchase tab.
+ */
 export default function StockScreen() {
+  const db = useSQLiteContext();
+  const [list, setList] = useState<StockView[]>([]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void (async () => setList((await stockList(db)).map(stockView)))();
+      return () => stopSpeaking();
+    }, [db]),
+  );
+
   return (
     <SafeAreaView edges={['top']} style={styles.screen}>
-      <ScreenHeader title="মাল" onListen={() => void speak('মাল পাতা। মালের তালিকা আর স্টক পরের ধাপে আসছে।')} />
-      <View style={styles.body}>
-        <ComingSoon icon="box" tint={colors.stockTint} ink={colors.stock} text="মালের তালিকা ও স্টক" step={4} />
+      <ScreenHeader title="মাল" onListen={() => void speak(stockScreenWords(list))} />
+      <FlatList
+        data={list}
+        keyExtractor={(v) => v.id}
+        numColumns={2}
+        columnWrapperStyle={styles.cols}
+        contentContainerStyle={styles.grid}
+        ListEmptyComponent={
+          <Txt wrap size={fontSize.body} weight="medium" color={colors.muted} style={styles.empty}>
+            এখনো কোনো মাল নেই। নিচের বোতাম চেপে বলুন, যেমন “নতুন চাল ৫০ কেজি কেনা ৫৫ বেচা ৬০”।
+          </Txt>
+        }
+        renderItem={({ item: v }) => <StockCard v={v} />}
+      />
+      <View style={styles.bottom}>
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => router.push({ pathname: '/listening', params: { tab: 'purchase' } })}
+          style={({ pressed }) => [styles.say, pressed && styles.pressed]}
+        >
+          <Icon name="mic" size={32} color={colors.onColor} />
+          <Txt size={fontSize.button} weight="bold" color={colors.onColor}>
+            নতুন মাল বলুন
+          </Txt>
+        </Pressable>
       </View>
     </SafeAreaView>
   );
 }
 
+function StockCard({ v }: { v: StockView }) {
+  const words = stockWords(v);
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`${words} শুনুন`}
+      onPress={() => void speak(words)}
+      style={({ pressed }) => [styles.card, v.low && styles.cardLow, pressed && styles.pressed]}
+    >
+      {v.low && (
+        <View style={styles.badge}>
+          <Icon name="alert" size={18} color={colors.onColor} strokeWidth={2.4} />
+        </View>
+      )}
+      <View style={[styles.tile, { backgroundColor: productTiles[v.name] ?? colors.neutralTint }]}>
+        <Icon name={productIcon(v.name)} size={40} color={colors.ink} strokeWidth={1.5} />
+      </View>
+      <Txt size={fontSize.label} weight="bold">
+        {v.name}
+      </Txt>
+      {v.stock === null ? (
+        <Txt size={fontSize.caption} weight="semibold" color={colors.muted}>
+          কেনা লেখা নেই
+        </Txt>
+      ) : (
+        <Txt size={26} weight="bold" color={v.low ? colors.lowStockQty : colors.ink}>
+          {v.stock <= 0 ? 'শেষ' : formatQty(v.stock, v.unit)}
+        </Txt>
+      )}
+      {v.sellPricePoisha !== null && (
+        <Txt size={fontSize.caption} weight="medium" color={colors.muted}>
+          {formatTaka(v.sellPricePoisha)}
+        </Txt>
+      )}
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
-  body: { paddingHorizontal: spacing.screen },
+  grid: { paddingHorizontal: spacing.screen, gap: 10, paddingBottom: spacing.md },
+  cols: { justifyContent: 'space-between' },
+  empty: { textAlign: 'center', padding: spacing.lg },
+  // half the row minus the gap, so a lone last card stays half width
+  card: {
+    width: '48.6%',
+    backgroundColor: colors.surface,
+    borderRadius: radius.button,
+    borderWidth: 3,
+    borderColor: 'transparent',
+    padding: 12,
+    alignItems: 'center',
+    gap: 4,
+  },
+  cardLow: { borderColor: colors.baki },
+  badge: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 32,
+    height: 32,
+    borderRadius: radius.pill,
+    backgroundColor: colors.baki,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tile: { width: 64, height: 64, borderRadius: radius.card, alignItems: 'center', justifyContent: 'center' },
+  bottom: { paddingHorizontal: spacing.screen, paddingVertical: 10 },
+  say: {
+    height: 68,
+    borderRadius: radius.button,
+    backgroundColor: colors.stock,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+  },
+  pressed: { opacity: 0.85 },
 });

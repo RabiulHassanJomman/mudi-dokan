@@ -3,7 +3,7 @@
  * the confirm card shows and edits, and what gets saved. Pure TS.
  * Customer and নগদ/বাকি apply to the whole basket.
  */
-import { UNIT_BN, UNIT_BN_LOC, formatQty, formatTaka, toBnDigits } from '../lib/bn';
+import { UNIT_BN, UNIT_BN_LOC, formatQty, formatTaka, spokenQty, toBnDigits } from '../lib/bn';
 import type { ParsedCommand, SaleItem, Unit } from '../parser/types';
 import { customerStatus } from './customers';
 import { convertQuantity, looseQuantity, quantityStep } from './units';
@@ -42,14 +42,19 @@ export interface ItemDraft {
   priceWarning: boolean;
   /** Spoken unit is not the product's ("৫ কেজি তেল", তেল by the litre): shown, never blocks, not converted. */
   unitWarning: boolean;
+  /** The parsed line, kept so choosing another product can rebuild it. */
+  parsed: SaleItem;
+  /** Spoken name to save as an alias of `product` (chosen from the closest matches). */
+  alias: string | null;
   problems: ItemProblem[];
 }
 
 export interface BasketDraft {
   items: ItemDraft[];
   credit: boolean;
+  /** On credit: who owes. On a cash sale: optional, who bought (a heard name must be confirmed or cleared). */
   customerName: string | null;
-  /** The customer is in the list, or the user chose "নতুন ক্রেতা" (only matters on credit). */
+  /** The customer is in the list, or the user chose "নতুন ক্রেতা". */
   customerOk: boolean;
   /** Sum of line amounts; null while any line has no amount. */
   totalPoisha: number | null;
@@ -134,6 +139,8 @@ function itemFrom(si: SaleItem, product: ProductInfo | null, key: string): ItemD
     storedPricePoisha,
     priceWarning,
     unitWarning,
+    parsed: si,
+    alias: null,
   });
 }
 
@@ -145,7 +152,7 @@ function finalize(b: Omit<BasketDraft, 'totalPoisha' | 'problems'>): BasketDraft
   const problems: BasketProblem[] = [];
   if (!b.items.length) problems.push('no_items');
   if (b.credit && !b.customerName) problems.push('no_customer');
-  else if (b.credit && !b.customerOk) problems.push('customer_unknown');
+  else if (b.customerName && !b.customerOk) problems.push('customer_unknown');
   if (b.items.some((i) => i.problems.length)) problems.push('item');
   return { ...b, totalPoisha, problems };
 }
@@ -209,6 +216,21 @@ export const setItemTotal = (b: BasketDraft, key: string, amountPoisha: number):
     priceWarning: false,
   }));
 
+/**
+ * The user chose a known product for a line whose name matched none ("চাউল" → চাল):
+ * the line is rebuilt from what was said, and the spoken name is saved as an alias.
+ */
+export const chooseProduct = (b: BasketDraft, key: string, product: ProductInfo): BasketDraft =>
+  finalize({
+    ...b,
+    items: b.items.map((i) => {
+      if (i.key !== key) return i;
+      const spokenName = i.parsed.product ?? i.productName;
+      const next = itemFrom(i.parsed, product, key);
+      return { ...next, alias: spokenName && spokenName !== product.name ? spokenName : null };
+    }),
+  });
+
 export const removeItem = (b: BasketDraft, key: string): BasketDraft =>
   finalize({ ...b, items: b.items.filter((i) => i.key !== key) });
 
@@ -226,7 +248,7 @@ export const canSave = (b: BasketDraft): boolean => b.problems.length === 0;
 const spoken = (n: number) => toBnDigits(Math.round(n * 100) / 100);
 
 const itemPhrase = (i: ItemDraft) =>
-  [i.productName ?? '', i.quantity ? formatQty(i.quantity, i.unit) : ''].filter(Boolean).join(' ');
+  [i.productName ?? '', i.quantity ? spokenQty(i.quantity, i.unit) : ''].filter(Boolean).join(' ');
 
 /**
  * What TTS says on the confirm card:
@@ -238,7 +260,11 @@ export function readback(b: BasketDraft): string {
   const one = b.items.length === 1 ? b.items[0]! : null;
   if (one && !one.productName) return 'মালের নাম বুঝিনি। আবার বলুন।';
 
-  const prefix = b.credit ? `${b.customerName ? `${b.customerName}, ` : ''}বাকি। ` : '';
+  const prefix = b.credit
+    ? `${b.customerName ? `${b.customerName}, ` : ''}বাকি। `
+    : b.customerName
+      ? `${b.customerName}, নগদ। `
+      : '';
   let body: string;
   if (one) {
     body = itemPhrase(one) + (one.amountPoisha !== null ? `, ${spoken(one.amountPoisha / 100)} টাকা` : '') + '।';
@@ -337,5 +363,6 @@ export const basketSummary = (b: BasketDraft) => ({
     price_mode: i.priceMode,
     price_warning: i.priceWarning,
     unit_warning: i.unitWarning,
+    alias: i.alias,
   })),
 });

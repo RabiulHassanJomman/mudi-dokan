@@ -1,0 +1,87 @@
+/**
+ * মাল (Stock): stock = bought − sold (never stored), low-stock, and what TTS says.
+ * Pure TS.
+ */
+import { UNIT_BN, spokenQty, toBnDigits } from '../lib/bn';
+import type { Unit } from '../parser/types';
+
+/** One product with its effective purchase and sale totals (repo.stockList). */
+export interface StockRow {
+  id: string;
+  name: string;
+  unit: Unit;
+  sellPricePoisha: number | null;
+  /** Sum of purchase quantities, in the product's unit. */
+  bought: number;
+  sold: number;
+  /** Number of purchase rows: 0 = never bought, so the stock is unknown. */
+  purchases: number;
+}
+
+export interface StockView {
+  id: string;
+  name: string;
+  unit: Unit;
+  sellPricePoisha: number | null;
+  /** null = no purchase written yet (sold before any কেনা): unknown, not negative. */
+  stock: number | null;
+  known: boolean;
+  low: boolean;
+}
+
+/**
+ * At or under this much (in the product's unit) the card turns orange. One rule per
+ * unit until products get their own threshold.
+ */
+export const LOW_STOCK: Readonly<Record<Unit, number>> = {
+  kg: 5,
+  g: 500,
+  litre: 2,
+  ml: 500,
+  piece: 5,
+  packet: 5,
+  dozen: 1,
+  hali: 2,
+  bosta: 1,
+};
+
+const round3 = (n: number) => Math.round(n * 1000) / 1000;
+
+export function stockView(r: StockRow): StockView {
+  const known = r.purchases > 0;
+  const stock = known ? round3(r.bought - r.sold) : null;
+  return {
+    id: r.id,
+    name: r.name,
+    unit: r.unit,
+    sellPricePoisha: r.sellPricePoisha,
+    stock,
+    known,
+    low: stock !== null && stock <= LOW_STOCK[r.unit],
+  };
+}
+
+const priceWords = (v: StockView) =>
+  v.sellPricePoisha !== null ? ` বেচা দাম ${UNIT_BN[v.unit]} ${toBnDigits(Math.round(v.sellPricePoisha) / 100)} টাকা।` : '';
+
+/** "চাল ৪২ কেজি আছে। বেচা দাম কেজি ৬০ টাকা।" — card tap and "চাল কত আছে?". */
+export function stockWords(v: StockView): string {
+  if (v.stock === null) return `${v.name} কেনার হিসাব নেই।${priceWords(v)} নতুন মাল বলে কেনা লিখুন।`;
+  if (v.stock <= 0) return `${v.name} শেষ, আর নেই।${priceWords(v)}`;
+  const qty = spokenQty(v.stock, v.unit);
+  if (v.low) return `${v.name} আছে মাত্র ${qty}, কম।${priceWords(v)}`;
+  return `${v.name} ${qty} আছে।${priceWords(v)}`;
+}
+
+/** 🔊 on the মাল screen. */
+export function stockScreenWords(list: readonly StockView[]): string {
+  const end = ' নতুন মাল বলতে নিচের বোতাম চাপুন।';
+  if (!list.length) return `মাল পাতা। এখনো কোনো মাল নেই।${end}`;
+  const low = list.filter((v) => v.low).map((v) => v.name);
+  return (
+    `মাল পাতা। ${toBnDigits(list.length)}টি মাল।` +
+    (low.length ? ` কম আছে: ${low.join(', ')}।` : '') +
+    ' কোনো মালে চাপলে শুনবেন।' +
+    end
+  );
+}

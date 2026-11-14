@@ -4,6 +4,10 @@ export const PROFIT = wordSet(['লাভ', 'লাভের', 'লাভটা'
 export const TODAY = wordSet(['আজ', 'আজকে', 'আজকের', 'আজকা']);
 
 export const STOCK = wordSet(['আছে', 'স্টক', 'মজুদ']);
+/** "how much" — with বাকি/পাবো and no number, a balance question. */
+export const HOW_MUCH = wordSet(['কত', 'কতো']);
+/** "(I) will get" — what a customer owes the shop. */
+export const OWED = wordSet(['পাবো', 'পাব', 'পাওনা']);
 export const QUESTION = wordSet(['কত', 'কতো', 'কি', 'কী', 'কতটুকু', 'কয়টা', 'কয়', 'কতগুলো', 'এখন', 'দোকানে']);
 
 export const PURCHASE = wordSet(['কেনা', 'কিনলাম', 'কিনেছি', 'কিনছি', 'এনেছি', 'আনলাম', 'আনছি', 'ক্রয়']);
@@ -50,7 +54,11 @@ export const MONEY = wordSet(['টাকা', 'টাকার', 'টাকা�
 export const HONORIFIC = [
   'ভাই', 'ভাইয়া', 'ভাইয়ের', 'ভাইজান', 'আপা', 'আপু', 'আপার', 'সাহেব', 'সাহেবের', 'চাচা', 'চাচার',
   'মামা', 'খালা', 'কাকা', 'ভাবি', 'ভাবী', 'দাদা', 'দিদি', 'বুবু', 'মিয়া',
+  // genitive forms ("সুমি আপুর বাকি")
+  'আপুর', 'ভাইয়ার', 'মামার', 'খালার', 'কাকার', 'ভাবির', 'ভাবীর', 'দাদার', 'দিদির',
 ];
+
+export const HONORIFIC_SET = wordSet(HONORIFIC);
 
 export const FILLER = wordSet([
   'করলাম', 'করেছি', 'করেছে', 'করল', 'করলো', 'করে', 'করছে', 'করো', 'করলেন', 'করেছেন', 'করছেন',
@@ -73,5 +81,5 @@ export const PER = wordSet(['প্রতি']);
 export const ALL_KEYWORDS: ReadonlySet<string> = new Set([
   ...PROFIT, ...TODAY, ...STOCK, ...QUESTION, ...PURCHASE, ...NEW,
   ...BUY_MARKER, ...SELL_MARKER, ...DAM, ...SALE, ...BAKI, ...CREDIT,
-  ...TAKE, ...JOMA, ...GAVE, ...EXPENSE, ...SELF_TAKE, ...CASH_BOX, ...MONEY, ...FILLER, ...EACH, ...PER,
+  ...TAKE, ...OWED, ...JOMA, ...GAVE, ...EXPENSE, ...SELF_TAKE, ...CASH_BOX, ...MONEY, ...FILLER, ...EACH, ...PER,
 ]);

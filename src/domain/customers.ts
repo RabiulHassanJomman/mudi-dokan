@@ -1,4 +1,5 @@
 /** Customer names: is it someone we know, and who did STT probably mean? Pure TS. */
+import { formatNumber } from '../lib/bn';
 
 const norm = (s: string) => s.normalize('NFC').replace(/\s+/g, ' ').trim();
 
@@ -11,7 +12,7 @@ export function customerStatus(name: string | null | undefined, known: readonly 
 }
 
 /** Levenshtein distance over code points (Bangla vowel signs count as one each). */
-function distance(a: string, b: string): number {
+export function distance(a: string, b: string): number {
   const x = [...a];
   const y = [...b];
   let prev = Array.from({ length: y.length + 1 }, (_, j) => j);
@@ -64,3 +65,11 @@ export function initialOf(name: string): string {
   }
   return out;
 }
+
+/** "করিম, পাবো ২,৩০০ টাকা।" / "অগ্রিম দিয়েছে" when the customer paid ahead. */
+export const balanceWords = (name: string, balancePoisha: number): string =>
+  balancePoisha > 0
+    ? `${name}, পাবো ${formatNumber(balancePoisha / 100)} টাকা।`
+    : balancePoisha < 0
+      ? `${name}, অগ্রিম দিয়েছে ${formatNumber(-balancePoisha / 100)} টাকা।`
+      : `${name}, কোনো বাকি নেই।`;

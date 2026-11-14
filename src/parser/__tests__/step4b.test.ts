@@ -1,0 +1,97 @@
+/**
+ * Build step 4b: "করিমের বাকি কত?" (balance question) and the customer's name in a
+ * cash sale ("করিম চাল ২ কেজি নিল" — known bug: it was dropped or became the product).
+ */
+import { check, type Case } from './helpers';
+import { parseCommand } from '../parse';
+import type { ParseContext } from '../types';
+
+const ctx: ParseContext = {
+  tab: 'sale',
+  knownProducts: ['চাল', 'ডাল', 'তেল', 'চিনি', 'সাবান'],
+  knownCustomers: ['করিম', 'হাসান', 'সুমি'],
+};
+const kg = (value: number) => ({ value, unit: 'kg' as const });
+
+describe('balance question: "<name> বাকি কত?"', () => {
+  const cases: Case[] = [
+    { text: 'করিমের বাকি কত?', expected: { intent: 'balance_query', customer: 'করিম' } },
+    { text: 'করিমের বাকি কত', ctx, expected: { intent: 'balance_query', customer: 'করিম' } },
+    { text: 'রহিম কত টাকা বাকি', expected: { intent: 'balance_query', customer: 'রহিম' } },
+    { text: 'করিমের কাছে কত পাবো', expected: { intent: 'balance_query', customer: 'করিম' } },
+    { text: 'সুমি আপুর বাকি কতো', ctx, expected: { intent: 'balance_query', customer: 'সুমি' } },
+    { text: 'হাসান ভাইয়ের কাছে কত বাকি আছে', ctx, expected: { intent: 'balance_query', customer: 'হাসান' } },
+    { text: 'বাকি কত', expected: { intent: 'balance_query', missing: ['customer'] } },
+  ];
+  it.each(cases.map((c) => [c.text, c] as const))('%s', (_n, c) => check(c));
+
+  it('a বাকি with an amount is still an entry, not a question', () => {
+    expect(parseCommand('করিম ২০০ টাকা বাকি', ctx)).toMatchObject({ intent: 'baki', customer: 'করিম', amount: 200 });
+    expect(parseCommand('করিম কত টাকা বাকি নিল ২০০', ctx).intent).not.toBe('balance_query');
+  });
+
+  it('on the বাকি tab too', () => {
+    expect(parseCommand('করিমের বাকি কত', { tab: 'ledger' })).toMatchObject({ intent: 'balance_query', customer: 'করিম' });
+  });
+
+  it('stock questions are unchanged', () => {
+    expect(parseCommand('চাল কত আছে?', ctx)).toMatchObject({ intent: 'stock_query', product: 'চাল', confidence: 'high' });
+    expect(parseCommand('চিনি কতটুকু আছে')).toMatchObject({ intent: 'stock_query', product: 'চিনি' });
+  });
+});
+
+describe('customer name in a cash sale', () => {
+  it('a known customer, no verb', () => {
+    expect(parseCommand('করিম চাল ২ কেজি', ctx)).toMatchObject({
+      intent: 'sale',
+      customer: 'করিম',
+      items: [{ product: 'চাল', quantity: kg(2) }],
+    });
+  });
+
+  it('an unknown name before a known product, with নিল', () => {
+    const r = parseCommand('রহিম চাল ২ কেজি নিল', ctx);
+    expect(r).toMatchObject({ intent: 'sale', customer: 'রহিম', items: [{ product: 'চাল', quantity: kg(2) }] });
+    expect(r.credit).toBeUndefined();
+  });
+
+  it('honorific after the name (no products known)', () => {
+    expect(parseCommand('রহিম ভাই দুই কেজি চাল নিলেন', { tab: 'sale' })).toMatchObject({
+      customer: 'রহিম',
+      items: [{ product: 'চাল', quantity: kg(2) }],
+    });
+  });
+
+  it('"… দিলাম হাসান কে" and "করিমকে …"', () => {
+    expect(parseCommand('চাল ২ কেজি দিলাম রহিম কে', { tab: 'sale' })).toMatchObject({
+      customer: 'রহিম',
+      items: [{ product: 'চাল', quantity: kg(2) }],
+    });
+    expect(parseCommand('রহিমকে এক কেজি চিনি দিলাম', ctx)).toMatchObject({
+      customer: 'রহিম',
+      items: [{ product: 'চিনি', quantity: kg(1) }],
+    });
+  });
+
+  it('several lines, customer first', () => {
+    expect(parseCommand('রহিম নিল চাল ২ কেজি আর ডাল ১ কেজি', ctx)).toMatchObject({
+      customer: 'রহিম',
+      items: [
+        { product: 'চাল', quantity: kg(2) },
+        { product: 'ডাল', quantity: kg(1) },
+      ],
+    });
+  });
+
+  it.each([
+    ['লাক্স সাবান দুইটা আশি টাকা', ctx],
+    ['চাল ২ কেজি ১২০ টাকা', ctx],
+    ['চাল নিল ২ কেজি', { tab: 'sale' } as ParseContext],
+    ['সয়াবিন তেল ২ লিটার', { tab: 'sale' } as ParseContext],
+  ])('no name, no customer: %s', (t, c) => {
+    const r = parseCommand(t, c);
+    expect(r.intent).toBe('sale');
+    expect(r.customer).toBeUndefined();
+    expect(r.items?.every((i) => i.product)).toBe(true);
+  });
+});

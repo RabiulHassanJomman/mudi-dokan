@@ -4,16 +4,40 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useFocusEffect } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 
-import { Icon, productIcon } from '../../components/Icon';
+import { Icon, productIcon, type IconName } from '../../components/Icon';
 import { ScreenHeader } from '../../components/ScreenHeader';
 import { Txt } from '../../components/Txt';
 import { buildLabel } from '../../lib/buildInfo';
-import { getSetup, pilotStats, recentBaskets, todayTotals, type PilotStats, type RecentBasket } from '../../db/repo';
+import { getSetup, pilotStats, recentEntries, todayTotals, type PilotStats } from '../../db/repo';
+import { recentLine, type RecentEntry } from '../../domain/recent';
 import { getDevice } from '../../device';
-import { formatNumber, formatQty, formatTaka, toBnDigits } from '../../lib/bn';
+import { formatNumber, formatTaka, toBnDigits } from '../../lib/bn';
 import { speak } from '../../lib/speak';
 import { useClipPlayer } from '../../lib/useClipPlayer';
 import { colors, fontSize, productTiles, radius, size, spacing } from '../../theme/tokens';
+
+/** Tile picture and colours per entry type (sale lines keep their product picture). */
+function entryLook(e: RecentEntry): { icon: IconName; tile: string; ink: string; border: string } {
+  switch (e.kind) {
+    case 'sale':
+      return {
+        icon: e.lines === 1 ? productIcon(e.title) : 'box',
+        tile: (e.lines === 1 && productTiles[e.title]) || colors.neutralTint,
+        ink: colors.bakiInk,
+        border: e.credit ? colors.bakiBorder : 'transparent',
+      };
+    case 'baki':
+      return { icon: 'book', tile: colors.bakiTint, ink: colors.bakiInk, border: colors.bakiBorder };
+    case 'joma':
+      return { icon: 'cash', tile: colors.saleTint, ink: colors.saleDark, border: 'transparent' };
+    case 'expense':
+      return { icon: 'cash', tile: colors.bakiTint, ink: colors.bakiInk, border: 'transparent' };
+    case 'owner_withdrawal':
+      return { icon: 'person', tile: colors.stockTint, ink: colors.stock, border: 'transparent' };
+    case 'purchase':
+      return { icon: productIcon(e.title), tile: colors.stockTint, ink: colors.stock, border: 'transparent' };
+  }
+}
 
 const startOfToday = () => {
   const d = new Date();
@@ -27,14 +51,14 @@ export default function SaleScreen() {
   const play = useClipPlayer();
   const [shopName, setShopName] = useState<string | null>(null);
   const [today, setToday] = useState({ sales: 0, baki: 0 });
-  const [recent, setRecent] = useState<RecentBasket[]>([]);
+  const [recent, setRecent] = useState<RecentEntry[]>([]);
   const [stats, setStats] = useState<PilotStats | null>(null);
 
   useFocusEffect(
     useCallback(() => {
       void (async () => {
         setToday(await todayTotals(db, startOfToday()));
-        setRecent(await recentBaskets(db, 3));
+        setRecent(await recentEntries(db, 3));
         setStats(await pilotStats(db));
         setShopName((await getSetup(db, getDevice().id)).shopName);
       })();
@@ -45,7 +69,7 @@ export default function SaleScreen() {
     const last = recent[0];
     void speak(
       `আজ বিক্রি ${formatNumber(today.sales / 100)} টাকা। আজ বাকি ${formatNumber(today.baki / 100)} টাকা। ` +
-        (last ? `শেষ বিক্রি: ${last.products}, ${formatNumber(last.amount_poisha / 100)} টাকা। ` : '') +
+        (last ? `শেষ: ${recentLine(last).words} ` : '') +
         'বিক্রি বলতে মাইক চাপুন। ছবি দেখে বেছে নিতে লিখুন চাপুন।',
     );
   };
@@ -104,40 +128,50 @@ export default function SaleScreen() {
           </Pressable>
         </View>
 
-        {recent.map((r) => (
-          <View key={r.id} style={[styles.entry, r.credit ? styles.entryCredit : null]}>
-            <View style={[styles.entryTile, { backgroundColor: (r.lines === 1 && productTiles[r.products]) || colors.neutralTint }]}>
-              <Icon name={r.lines === 1 ? productIcon(r.products) : 'box'} size={30} color={colors.ink} strokeWidth={1.6} />
-            </View>
-            <View style={styles.flex}>
-              <Txt size={21} weight="bold">
-                {r.customer ? `${r.products} · ${r.customer}` : r.products}
-              </Txt>
-              <Txt size={fontSize.bodyLg} weight="medium" color={colors.ink2}>
-                {r.lines === 1 ? formatQty(r.quantity, r.unit) : `${toBnDigits(r.lines)}টি জিনিস`}
-              </Txt>
-            </View>
-            <View style={styles.entryRight}>
-              <Txt size={fontSize.button} weight="bold">
-                {formatTaka(r.amount_poisha)}
-              </Txt>
-              {!!r.credit && (
-                <Txt size={fontSize.caption} weight="bold" color={colors.bakiInk}>
-                  বাকি
-                </Txt>
-              )}
-            </View>
+        {recent.map((r) => {
+          const line = recentLine(r);
+          const look = entryLook(r);
+          return (
             <Pressable
+              key={`${r.kind}-${r.id}`}
               accessibilityRole="button"
-              accessibilityLabel={`${r.products} শুনুন`}
-              accessibilityState={{ disabled: !r.audio_path }}
-              onPress={() => play(r.audio_path)}
-              style={[styles.play, !r.audio_path && styles.disabled]}
+              accessibilityLabel={`${line.words} শুনুন`}
+              onPress={() => void speak(line.words)}
+              style={({ pressed }) => [styles.entry, { borderColor: look.border }, pressed && styles.pressed]}
             >
-              <Icon name="play" size={22} color={colors.sale} />
+              <View style={[styles.entryTile, { backgroundColor: look.tile }]}>
+                <Icon name={look.icon} size={30} color={r.kind === 'sale' || r.kind === 'purchase' ? colors.ink : look.ink} strokeWidth={1.6} />
+              </View>
+              <View style={styles.flex}>
+                <Txt size={21} weight="bold">
+                  {line.title}
+                </Txt>
+                <Txt size={fontSize.bodyLg} weight="medium" color={colors.ink2}>
+                  {line.detail}
+                </Txt>
+              </View>
+              <View style={styles.entryRight}>
+                <Txt size={fontSize.button} weight="bold">
+                  {formatTaka(r.amount_poisha)}
+                </Txt>
+                {line.badge && line.badge !== line.detail && (
+                  <Txt size={fontSize.caption} weight="bold" color={look.ink}>
+                    {line.badge}
+                  </Txt>
+                )}
+              </View>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`${line.title}, রেকর্ড শুনুন`}
+                accessibilityState={{ disabled: !r.audio_path }}
+                onPress={() => play(r.audio_path)}
+                style={[styles.play, !r.audio_path && styles.disabled]}
+              >
+                <Icon name="play" size={22} color={colors.sale} />
+              </Pressable>
             </Pressable>
-          </View>
-        ))}
+          );
+        })}
 
         <Pressable accessibilityRole="button" onPress={() => router.push('/pilot-log')} style={styles.logLink}>
           <Icon name="list" size={20} color={colors.muted} />
@@ -204,7 +238,7 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: 'transparent',
   },
-  entryCredit: { borderColor: colors.bakiBorder },
+  pressed: { opacity: 0.85 },
   entryTile: {
     width: size.listTile,
     height: size.listTile,

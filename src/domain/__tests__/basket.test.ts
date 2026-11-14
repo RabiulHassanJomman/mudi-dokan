@@ -50,7 +50,7 @@ describe('bn formatting', () => {
   it('taka, qty, digits', () => {
     expect(formatTaka(823000)).toBe('৳ ৮,২৩০');
     expect(formatTaka(13750)).toBe('৳ ১৩৭.৫');
-    expect(formatQty(0.5, 'kg')).toBe('০.৫ কেজি');
+    expect(formatQty(0.5, 'kg')).toBe('½ কেজি');
     expect(toBnDigits('2026')).toBe('২০২৬');
   });
   it.each([

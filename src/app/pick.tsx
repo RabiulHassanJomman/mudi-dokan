@@ -7,7 +7,7 @@ import { useSQLiteContext } from 'expo-sqlite';
 import { Icon, productIcon } from '../components/Icon';
 import { NumberPad } from '../components/NumberPad';
 import { Txt } from '../components/Txt';
-import { knownNames, pickProducts } from '../db/repo';
+import { knownNames, pickProducts, productAliasMap } from '../db/repo';
 import { padDisplay, padPress, padValue, type PadKey } from '../domain/numpad';
 import {
   filterProducts,
@@ -15,6 +15,7 @@ import {
   pickModeLabel,
   pickText,
   pickUnits,
+  pickWords,
   type PickMode,
   type PickProduct,
   type PickedItem,
@@ -38,6 +39,7 @@ export default function PickScreen() {
   const db = useSQLiteContext();
   const [products, setProducts] = useState<PickProduct[]>([]);
   const [names, setNames] = useState<{ products: string[]; customers: string[] }>({ products: [], customers: [] });
+  const [aliases, setAliases] = useState<Record<string, string>>({});
   const [query, setQuery] = useState('');
   const [chosen, setChosen] = useState<Chosen | null>(null);
   const [mode, setMode] = useState<PickMode>('kg');
@@ -49,6 +51,7 @@ export default function PickScreen() {
       void (async () => {
         setProducts(await pickProducts(db));
         setNames(await knownNames(db));
+        setAliases(await productAliasMap(db));
       })();
       return () => {
         stopSpeaking();
@@ -89,7 +92,7 @@ export default function PickScreen() {
   const pick: PickedItem | null = chosen && value ? { product: chosen.name, value, mode } : null;
 
   const readScreen = useCallback(() => {
-    void speak(pick ? `${pickText(pick)}। ঠিক থাকলে ঠিক আছে চাপুন।` : chosen ? `${chosen.name}। এবার নম্বর চাপুন।` : HINT);
+    void speak(pick ? `${pickWords(pick)}। ঠিক থাকলে ঠিক আছে চাপুন।` : chosen ? `${chosen.name}। এবার নম্বর চাপুন।` : HINT);
   }, [pick, chosen]);
 
   const done = () => {
@@ -101,7 +104,7 @@ export default function PickScreen() {
   /** Keyboard ✓: a whole command ("চাল ২ কেজি") goes to the confirm card; a name just searches. */
   const submitTyped = () => {
     if (!q) return;
-    const p = parseCommand(q, { tab: 'sale', knownProducts: names.products, knownCustomers: names.customers });
+    const p = parseCommand(q, { tab: 'sale', knownProducts: names.products, knownCustomers: names.customers, productAliases: aliases });
     const isCommand = p.intent !== 'sale' || (p.items ?? []).some((i) => i.quantity || i.total !== undefined);
     if (isCommand) router.replace({ pathname: '/confirm', params: { text: q, tab: 'sale' } });
     else if (shown.length === 1) choose({ name: shown[0]!.name, product: shown[0]! });

@@ -7,7 +7,7 @@ import {
   getVoiceLog,
   knownNames,
   pilotStats,
-  recentBaskets,
+  recentEntries,
   saveBasket,
   setOutcome,
   setSttOk,
@@ -190,15 +190,15 @@ describe('reads', () => {
     const logId = await createVoiceLog(db, sameMs, { transcript: text, source: 'typed', contextTab: 'sale' });
     await saveBasket(db, sameMs, await draft(db, text), logId, []);
     expect(raw.prepare('SELECT COUNT(DISTINCT created_at) AS n FROM sales').get()).toEqual({ n: 1 });
-    expect((await recentBaskets(db, 1))[0]!.products).toBe('তেল, চাল, ডাল');
+    expect((await recentEntries(db, 1))[0]!.title).toBe('তেল, চাল, ডাল');
   });
 
   it('recent baskets group lines; today totals', async () => {
     const { db, w } = await setup();
     await sell(db, w, 'চাল ২ কেজি ১২০ টাকা');
     await sell(db, w, 'করিম বাকিতে নিল চাল ১ কেজি ডাল ১ কেজি ১১০ টাকা');
-    const recent = await recentBaskets(db, 5);
-    expect(recent.map((r) => [r.products, r.lines, r.amount_poisha, r.credit, r.customer])).toEqual([
+    const recent = await recentEntries(db, 5);
+    expect(recent.map((r) => [r.title, r.lines, r.amount_poisha, r.credit, r.customer])).toEqual([
       ['চাল, ডাল', 2, 17000, 1, 'করিম'],
       ['চাল', 1, 12000, 0, null],
     ]);

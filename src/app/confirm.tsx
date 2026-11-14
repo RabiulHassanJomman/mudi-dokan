@@ -6,12 +6,14 @@ import { useSQLiteContext } from 'expo-sqlite';
 import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-speech-recognition';
 
 import { CustomerPicker } from '../components/CustomerPicker';
+import { ProductSuggest } from '../components/ProductSuggest';
 import { EntryForm } from '../components/EntryForm';
 import { Icon, productIcon, type IconName } from '../components/Icon';
 import { Txt } from '../components/Txt';
 import {
   basketFromParse,
   canSave,
+  chooseProduct,
   diffBaskets,
   otherPriceText,
   priceWarningText,
@@ -26,18 +28,36 @@ import {
   type BasketDraft,
   type ItemDraft,
 } from '../domain/basket';
-import { classifyAnswer } from '../domain/confirmWords';
-import { canSaveEntry, diffEntries, entryFromParse, entryReadback, type EntryDraft, type LedgerKind } from '../domain/entry';
+import { classifyAnswer, heardPrefix } from '../domain/confirmWords';
+import { balanceWords, suggestCustomers } from '../domain/customers';
 import {
+  canSaveEntry,
+  choosePurchaseProduct,
+  diffEntries,
+  entryFromParse,
+  entryReadback,
+  type EntryDraft,
+  type LedgerKind,
+} from '../domain/entry';
+import type { PickProduct } from '../domain/pick';
+import { suggestProducts } from '../domain/products';
+import { stockView, stockWords } from '../domain/stock';
+import {
+  addProductAlias,
   createVoiceLog,
   customerBalances,
+  customerByName,
+  findProduct,
   findProducts,
   getVoiceLog,
   knownNames,
+  pickProducts,
+  productAliasMap,
   saveBasket,
   saveEntry,
   setOutcome,
   setParsed,
+  stockList,
 } from '../db/repo';
 import { getDevice, writer } from '../device';
 import { UNIT_BN, formatNumber, formatQty, formatTaka, parseTakaInput, toBnDigits } from '../lib/bn';
@@ -47,9 +67,22 @@ import { parseCommand } from '../parser';
 import type { Intent, ParseContext } from '../parser/types';
 import { colors, fonts, fontSize, productTiles, radius, size, spacing } from '../theme/tokens';
 
+type How = 'voice' | 'typed' | 'pick';
+
+/** "চাল কত আছে?" / "করিমের বাকি কত?": the answer, or (name not known) the closest names to choose from. */
+interface Answer {
+  question: 'stock' | 'balance';
+  /** The name as heard. */
+  spoken: string | null;
+  /** What TTS said; null until a name is chosen. */
+  text: string | null;
+  choices: string[];
+}
+
 type State =
   | { kind: 'loading' }
   | { kind: 'unsupported'; transcript: string; intent: Intent }
+  | { kind: 'answer'; transcript: string; answer: Answer }
   | { kind: 'ready'; transcript: string }
   | { kind: 'entry'; transcript: string };
 
@@ -63,6 +96,7 @@ const INTENT_BN: Record<Intent, string> = {
   expense: 'খরচ',
   owner_withdrawal: 'মালিক নিল',
   stock_query: 'স্টক জানা',
+  balance_query: 'বাকি জানা',
   profit_query: 'লাভ জানা',
   unknown: 'বুঝিনি',
 };
@@ -86,6 +120,11 @@ export default function ConfirmScreen() {
   const [entry, setEntry] = useState<EntryDraft | null>(null);
   /** Customer names, most owed first (for the picker). */
   const [known, setKnown] = useState<string[]>([]);
+  /** Products with aliases, for the closest-name chips. */
+  const [catalog, setCatalog] = useState<PickProduct[]>([]);
+  /** The parsed sale had a customer: keep the name box on a cash sale too. */
+  const [showCustomer, setShowCustomer] = useState(false);
+  const how: How = params.pick ? 'pick' : params.logId ? 'voice' : 'typed';
   const [answering, setAnswering] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -121,7 +160,8 @@ export default function ConfirmScreen() {
     [listenForAnswer, stopListening],
   );
   const readAloud = () => {
-    if (entry) void sayAndListen(entryReadback(entry), canSaveEntry(entry));
+    if (state.kind === 'answer') void speak(state.answer.text ?? answerPrompt(state.answer));
+    else if (entry) void sayAndListen(entryReadback(entry), canSaveEntry(entry));
     else if (basket) void sayAndListen(readback(basket), canSave(basket));
   };
 
@@ -144,6 +184,8 @@ export default function ConfirmScreen() {
       const names = await knownNames(db);
       const owed = (await customerBalances(db)).map((c) => c.name);
       setKnown(owed);
+      const catalogNow = await pickProducts(db);
+      setCatalog(catalogNow);
       if (params.pick) {
         // no speech, no parser: the picked product + number is the command
         const pick = JSON.parse(params.pick) as PickedItem;
@@ -163,12 +205,27 @@ export default function ConfirmScreen() {
           tab: PARSE_TABS.find((t) => t === tab),
           knownProducts: names.products,
           knownCustomers: names.customers,
+          productAliases: await productAliasMap(db),
           deviceRole: device.role ?? undefined,
           deviceName: device.name,
         });
         await setParsed(db, w, logId.current, parsed);
       }
       if (!alive) return;
+
+      if (parsed.intent === 'stock_query' || parsed.intent === 'balance_query') {
+        // a question: answered here, nothing to save
+        await setOutcome(db, w, logId.current, 'unsupported');
+        decided.current = true;
+        const answer =
+          parsed.intent === 'stock_query'
+            ? await stockAnswer(parsed.product ?? null, catalogNow)
+            : await balanceAnswer(parsed.customer ?? null, owed);
+        if (!alive) return;
+        setState({ kind: 'answer', transcript, answer });
+        void speak(answer.text ?? answerPrompt(answer));
+        return;
+      }
 
       if (parsed.intent !== 'sale') {
         const products = await findProducts(db, parsed.product ? [parsed.product] : []);
@@ -196,6 +253,7 @@ export default function ConfirmScreen() {
       }
       const products = await findProducts(db, (parsed.items ?? []).map((i) => i.product ?? ''));
       const b = basketFromParse(parsed, products, names.customers);
+      setShowCustomer(!!b.customerName);
       first.current = b;
       setBasket(b);
       setState({ kind: 'ready', transcript });
@@ -207,6 +265,56 @@ export default function ConfirmScreen() {
     // load once per screen
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ── questions ──────────────────────────────────────────────────
+  async function stockAnswer(spoken: string | null, products: PickProduct[]): Promise<Answer> {
+    const found = spoken ? await findProduct(db, spoken) : null;
+    if (found) {
+      const row = (await stockList(db)).find((r) => r.id === found.id);
+      return { question: 'stock', spoken, text: row ? stockWords(stockView(row)) : `${found.name} এর হিসাব নেই।`, choices: [] };
+    }
+    const choices = spoken ? suggestProducts(spoken, products).map((p) => p.name) : products.slice(0, 6).map((p) => p.name);
+    return { question: 'stock', spoken, text: choices.length ? null : `${spoken ?? 'এই মাল'} নামে কোনো মাল নেই।`, choices };
+  }
+
+  async function balanceAnswer(spoken: string | null, owed: string[]): Promise<Answer> {
+    const c = spoken ? await customerByName(db, spoken) : null;
+    if (c) return { question: 'balance', spoken, text: balanceWords(c.name, c.balance_poisha), choices: [] };
+    const choices = spoken ? suggestCustomers(spoken, owed, 3) : owed.slice(0, 6);
+    return { question: 'balance', spoken, text: choices.length ? null : `${spoken ?? 'এই নামে'} কাউকে চিনি না।`, choices };
+  }
+
+  /** A name was chosen on the answer card. A product's heard name becomes its alias. */
+  async function chooseAnswer(name: string) {
+    if (state.kind !== 'answer') return;
+    const a = state.answer;
+    let answer: Answer;
+    if (a.question === 'stock') {
+      const p = catalog.find((x) => x.name === name);
+      if (p && a.spoken && a.spoken !== p.name) await addProductAlias(db, writer(), a.spoken, p.id);
+      answer = await stockAnswer(name, catalog);
+    } else {
+      answer = await balanceAnswer(name, known);
+    }
+    setState({ ...state, answer });
+    void speak(answer.text ?? answerPrompt(answer));
+  }
+
+  /** A sale line or purchase whose name matched none: the user chose a known product. */
+  async function chooseLineProduct(key: string | null, name: string) {
+    const p = await findProduct(db, name);
+    if (!p) return;
+    stopListening();
+    if (key === null) {
+      const e = latestEntry.current;
+      if (e) setEntry(choosePurchaseProduct(e, p));
+    } else {
+      const b = latest.current;
+      if (b) setBasket(chooseProduct(b, key, p));
+    }
+  }
+
+  const productChoices = (spoken: string | null) => (spoken ? suggestProducts(spoken, catalog).map((p) => p.name) : []);
 
   // leaving without a decision counts as না
   useEffect(
@@ -343,7 +451,7 @@ export default function ConfirmScreen() {
         <Pressable accessibilityRole="button" accessibilityLabel="ফিরে যান" onPress={() => void onNo()} style={styles.back}>
           <Icon name="back" size={26} color={colors.ink} strokeWidth={2.2} />
         </Pressable>
-        {(basket || entry) && (
+        {(basket || entry || state.kind === 'answer') && (
           <Pressable
             accessibilityRole="button"
             onPress={readAloud}
@@ -364,13 +472,56 @@ export default function ConfirmScreen() {
       )}
 
       {state.kind === 'unsupported' && (
-        <Unsupported transcript={state.transcript} intent={state.intent} onAgain={again} onClose={leave} />
+        <Unsupported transcript={state.transcript} how={how} intent={state.intent} onAgain={again} onClose={leave} />
+      )}
+
+      {state.kind === 'answer' && (
+        <ScrollView contentContainerStyle={styles.body}>
+          <Heard text={state.transcript} how={how} />
+          <View style={styles.card}>
+            {state.answer.text !== null ? (
+              <Txt wrap size={fontSize.headingLg} weight="bold" style={styles.center}>
+                {state.answer.text}
+              </Txt>
+            ) : (
+              <Txt wrap size={fontSize.label} weight="bold" style={styles.center}>
+                {answerPrompt(state.answer)}
+              </Txt>
+            )}
+          </View>
+          {state.answer.choices.length > 0 &&
+            (state.answer.question === 'stock' ? (
+              <ProductSuggest
+                spoken={state.answer.spoken ?? ''}
+                choices={state.answer.choices}
+                question="চেপে বেছে নিন:"
+                onChoose={(n) => void chooseAnswer(n)}
+              />
+            ) : (
+              <View style={styles.chips}>
+                {state.answer.choices.map((n) => (
+                  <Pressable
+                    key={n}
+                    accessibilityRole="button"
+                    onPress={() => void chooseAnswer(n)}
+                    style={({ pressed }) => [styles.chip, pressed && styles.pressed]}
+                  >
+                    <Txt size={fontSize.label} weight="bold">
+                      {n}
+                    </Txt>
+                  </Pressable>
+                ))}
+              </View>
+            ))}
+          <BigButton label="আবার বলুন" icon="mic" bg={colors.sale} ink={colors.onColor} onPress={again} />
+          <BigButton label="বন্ধ" icon="close" bg={colors.surface} ink={colors.ink} onPress={leave} />
+        </ScrollView>
       )}
 
       {state.kind === 'ready' && basket && (
         <>
           <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
-            <Heard text={state.transcript} />
+            <Heard text={state.transcript} how={how} />
             {basket.items.length === 0 ? (
               <View style={styles.card}>
                 <Txt wrap size={fontSize.headingLg} weight="bold" style={styles.center}>
@@ -381,15 +532,23 @@ export default function ConfirmScreen() {
               </View>
             ) : (
               basket.items.map((it) => (
-                <ItemRow
-                  key={it.key}
-                  item={it}
-                  onStep={(dir) => edit(stepItem(basket, it.key, dir))}
-                  onPrice={(p) =>
-                    edit(it.priceMode === 'unit' ? setItemPrice(basket, it.key, p) : setItemTotal(basket, it.key, p))
-                  }
-                  onRemove={() => edit(removeItem(basket, it.key))}
-                />
+                <View key={it.key} style={styles.lineBox}>
+                  <ItemRow
+                    item={it}
+                    onStep={(dir) => edit(stepItem(basket, it.key, dir))}
+                    onPrice={(p) =>
+                      edit(it.priceMode === 'unit' ? setItemPrice(basket, it.key, p) : setItemTotal(basket, it.key, p))
+                    }
+                    onRemove={() => edit(removeItem(basket, it.key))}
+                  />
+                  {!it.product && it.productName && (
+                    <ProductSuggest
+                      spoken={it.productName}
+                      choices={productChoices(it.productName)}
+                      onChoose={(n) => void chooseLineProduct(it.key, n)}
+                    />
+                  )}
+                </View>
               ))
             )}
 
@@ -413,9 +572,9 @@ export default function ConfirmScreen() {
                 onPress={() => edit(withCredit(basket, true))}
               />
             </View>
-            {basket.credit && (
+            {(basket.credit || showCustomer) && (
               <CustomerPicker
-                label="কার বাকি?"
+                label={basket.credit ? 'কার বাকি?' : 'ক্রেতা'}
                 name={basket.customerName}
                 ok={basket.customerOk}
                 known={known}
@@ -440,7 +599,14 @@ export default function ConfirmScreen() {
       {state.kind === 'entry' && entry && (
         <>
           <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
-            {!!state.transcript && <Heard text={state.transcript} />}
+            {!!state.transcript && <Heard text={state.transcript} how={how} />}
+            {entry.purchase && !entry.purchase.product && entry.purchase.productName && (
+              <ProductSuggest
+                spoken={entry.purchase.productName}
+                choices={productChoices(entry.purchase.productName)}
+                onChoose={(n) => void chooseLineProduct(null, n)}
+              />
+            )}
             <EntryForm entry={entry} known={known} onChange={editEntry} />
           </ScrollView>
           {decideBar}
@@ -450,12 +616,19 @@ export default function ConfirmScreen() {
   );
 }
 
-function Heard({ text }: { text: string }) {
+/** "শুনেছি" (voice), "লিখেছি" (typed), "বেছে নিয়েছি" (ছবি দেখে). */
+function Heard({ text, how }: { text: string; how: How }) {
   return (
     <Txt wrap size={fontSize.captionLg} weight="medium" color={colors.muted} style={styles.center}>
-      শুনেছি: “{text}”
+      {heardPrefix(how)}: “{text}”
     </Txt>
   );
+}
+
+/** The answer card when the name is not known yet. */
+function answerPrompt(a: Answer): string {
+  if (a.question === 'stock') return a.spoken ? `${a.spoken} নামে মাল চিনি না। কোন মাল?` : 'কোন মালের কথা? নিচে বেছে নিন।';
+  return a.spoken ? `${a.spoken} নামে কাউকে চিনি না। কে?` : 'কার বাকি? নিচে বেছে নিন।';
 }
 
 /**
@@ -631,10 +804,10 @@ function BigButton(props: { label: string; icon: IconName; bg: string; ink: stri
   );
 }
 
-function Unsupported(props: { transcript: string; intent: Intent; onAgain: () => void; onClose: () => void }) {
+function Unsupported(props: { transcript: string; how: How; intent: Intent; onAgain: () => void; onClose: () => void }) {
   return (
     <View style={styles.body}>
-      <Heard text={props.transcript} />
+      <Heard text={props.transcript} how={props.how} />
       <View style={styles.card}>
         <Txt wrap size={fontSize.headingLg} weight="bold" style={styles.center}>
           {props.intent === 'unknown' ? 'কিছু বুঝিনি' : `${INTENT_BN[props.intent]}: পরের ধাপে আসছে`}
@@ -642,7 +815,7 @@ function Unsupported(props: { transcript: string; intent: Intent; onAgain: () =>
         <Txt wrap size={fontSize.body} weight="medium" color={colors.muted} style={styles.center}>
           {props.intent === 'unknown'
             ? 'বিক্রি, বাকি, জমা, খরচ বা মাল কেনা — আবার বলুন।'
-            : 'স্টক আর লাভের প্রশ্নের উত্তর পরের ধাপে আসবে।'}
+            : 'লাভের প্রশ্নের উত্তর পরের ধাপে আসবে।'}
         </Txt>
       </View>
       <BigButton label="আবার বলুন" icon="mic" bg={colors.sale} ink={colors.onColor} onPress={props.onAgain} />
@@ -691,6 +864,17 @@ const styles = StyleSheet.create({
     borderColor: 'transparent',
   },
   rowProblem: { borderColor: colors.bakiBorder },
+  lineBox: { gap: spacing.xxs },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, justifyContent: 'center' },
+  chip: {
+    minHeight: 56,
+    paddingHorizontal: spacing.lg,
+    borderRadius: radius.pill,
+    borderWidth: 2,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    justifyContent: 'center',
+  },
   rowTop: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   rowTile: { width: 44, height: 44, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' },
   remove: {

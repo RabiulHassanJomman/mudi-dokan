@@ -144,7 +144,7 @@ describe('pilot log: what was saved and what was changed', () => {
     const d = withEntryCustomer(draft('কোরিম ৫০০ টাকা বাকি')!, 'করিম', true);
     expect(entrySummary(d)).toEqual({ intent: 'baki', customer: 'করিম', amount: 500, item: null, person: null, note: null, purchase: null });
     expect(entrySummary(draft('নতুন চাল ৫০ কেজি কেনা ৫৫ বেচা ৬০')!).purchase).toEqual({
-      product: 'চাল', new_product: false, quantity: 50, unit: 'kg', buy_price: 55, sell_price: 60, unit_warning: false,
+      product: 'চাল', new_product: false, quantity: 50, unit: 'kg', buy_price: 55, sell_price: 60, unit_warning: false, alias: null,
     });
   });
   it('diff lists the edited fields', () => {

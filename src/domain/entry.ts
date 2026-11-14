@@ -3,7 +3,7 @@
  * Parsed command + what the DB knows → the draft the confirm card shows and edits,
  * and what gets saved. Pure TS. Money in poisha.
  */
-import { UNIT_BN, toBnDigits } from '../lib/bn';
+import { UNIT_BN, spokenQty, toBnDigits } from '../lib/bn';
 import type { ParseContext, ParsedCommand, Unit } from '../parser/types';
 import type { ProductInfo } from './basket';
 import { customerStatus } from './customers';
@@ -34,6 +34,8 @@ export interface PurchaseLine {
   /** New selling price per `unit`, if said ("বেচা ৬০") or typed. */
   sellPricePoisha: number | null;
   unitWarning: boolean;
+  /** Spoken name to save as an alias of `product` (chosen from the closest matches). */
+  alias: string | null;
 }
 
 export interface EntryDraft {
@@ -115,7 +117,7 @@ function purchaseFrom(p: ParsedCommand, product: ProductInfo | null): { line: Pu
   }
   const sell = p.sellPrice !== undefined ? Math.round(poisha(p.sellPrice) * factor) : null;
   return {
-    line: { productName: product?.name ?? p.product ?? null, product, quantity, unit, buyPricePoisha: buy, sellPricePoisha: sell, unitWarning },
+    line: { productName: product?.name ?? p.product ?? null, product, quantity, unit, buyPricePoisha: buy, sellPricePoisha: sell, unitWarning, alias: null },
     amountPoisha,
   };
 }
@@ -181,6 +183,34 @@ export function setBuyPrice(d: EntryDraft, perUnitPoisha: number): EntryDraft {
 export const setSellPrice = (d: EntryDraft, perUnitPoisha: number | null): EntryDraft =>
   d.purchase ? finalize({ ...d, purchase: { ...d.purchase, sellPricePoisha: perUnitPoisha } }) : d;
 
+/**
+ * The user chose a known product for a purchase whose name matched none: the quantity
+ * and prices move to the product's unit when they convert (else kept, with the warning),
+ * and the spoken name is saved as an alias.
+ */
+export function choosePurchaseProduct(d: EntryDraft, product: ProductInfo): EntryDraft {
+  const l = d.purchase;
+  if (!l) return d;
+  let { quantity, unit, buyPricePoisha, sellPricePoisha } = l;
+  let unitWarning = false;
+  if (unit !== product.unit) {
+    const q = quantity !== null ? convertQuantity(quantity, unit, product.unit) : convertQuantity(1, unit, product.unit);
+    if (q === null) unitWarning = true;
+    else {
+      const factor = quantity !== null ? quantity / q : 1 / q;
+      if (quantity !== null) quantity = q;
+      unit = product.unit;
+      if (buyPricePoisha !== null) buyPricePoisha = Math.round(buyPricePoisha * factor);
+      if (sellPricePoisha !== null) sellPricePoisha = Math.round(sellPricePoisha * factor);
+    }
+  }
+  const alias = l.productName && l.productName !== product.name ? l.productName : null;
+  return finalize({
+    ...d,
+    purchase: { ...l, product, productName: product.name, quantity, unit, buyPricePoisha, sellPricePoisha, unitWarning, alias },
+  });
+}
+
 export const canSaveEntry = (d: EntryDraft) => d.problems.length === 0;
 
 // ── speech & pilot log ─────────────────────────────────────────
@@ -223,7 +253,7 @@ export function entryReadback(d: EntryDraft): string {
   }
   const l = d.purchase!;
   const unit = UNIT_BN[l.unit];
-  let s = `কেনা: ${l.productName ?? 'মাল'}${l.quantity ? ` ${toBnDigits(l.quantity)} ${unit}` : ''}`;
+  let s = `কেনা: ${l.productName ?? 'মাল'}${l.quantity ? ` ${spokenQty(l.quantity, l.unit)}` : ''}`;
   if (l.buyPricePoisha !== null) s += `, ${unit} ${taka(l.buyPricePoisha)}`;
   if (d.amountPoisha !== null && l.buyPricePoisha !== null) s += `, মোট ${taka(d.amountPoisha)}`;
   s += '।';
@@ -251,6 +281,7 @@ export const entrySummary = (d: EntryDraft) => ({
         buy_price: d.purchase.buyPricePoisha === null ? null : d.purchase.buyPricePoisha / 100,
         sell_price: d.purchase.sellPricePoisha === null ? null : d.purchase.sellPricePoisha / 100,
         unit_warning: d.purchase.unitWarning,
+        alias: d.purchase.alias,
       }
     : null,
 });

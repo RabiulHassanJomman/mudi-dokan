@@ -10,6 +10,7 @@ import { PhoneSheet } from '../../components/PhoneSheet';
 import { Txt } from '../../components/Txt';
 import { customerHistory, getCustomer, setCustomerPhone, type CustomerBalance, type LedgerLine } from '../../db/repo';
 import { writer } from '../../device';
+import { balanceWords } from '../../domain/customers';
 import { dayLabel, formatNumber, formatTaka, toBnDigits } from '../../lib/bn';
 import { speak } from '../../lib/speak';
 import { useClipPlayer } from '../../lib/useClipPlayer';
@@ -83,7 +84,12 @@ export default function CustomerScreen() {
         </Pressable>
       </View>
 
-      <View style={styles.hero}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`${balanceWords(c.name, owed)} শুনুন`}
+        onPress={() => void speak(balanceWords(c.name, owed))}
+        style={({ pressed }) => [styles.hero, pressed && styles.pressed]}
+      >
         <Avatar name={c.name} size={72} />
         <View style={styles.flex}>
           <Txt accessibilityRole="header" size={fontSize.headingLg} weight="bold">
@@ -97,7 +103,7 @@ export default function CustomerScreen() {
             {formatTaka(Math.abs(owed))}
           </Txt>
         </View>
-      </View>
+      </Pressable>
 
       <View style={styles.actions}>
         <Pressable accessibilityRole="button" onPress={() => say('joma')} style={({ pressed }) => [styles.action, { backgroundColor: colors.sale }, pressed && styles.pressed]}>
@@ -129,7 +135,12 @@ export default function CustomerScreen() {
         renderItem={({ item: r }) => {
           const baki = r.kind === 'baki';
           return (
-            <View style={styles.row}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`${dayLabel(r.created_at)}, ${what(r)}, ${formatTaka(r.amount_poisha)}, শুনুন`}
+              onPress={() => void speak(`${dayLabel(r.created_at)}, ${what(r)}, ${formatNumber(r.amount_poisha / 100)} টাকা।`)}
+              style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+            >
               <View style={[styles.sign, { backgroundColor: baki ? colors.baki : colors.sale }]}>
                 <Icon name={baki ? 'plus' : 'minus'} size={20} color={colors.onColor} strokeWidth={3} />
               </View>
@@ -153,7 +164,7 @@ export default function CustomerScreen() {
               >
                 <Icon name="play" size={20} color={colors.sale} />
               </Pressable>
-            </View>
+            </Pressable>
           );
         }}
       />
