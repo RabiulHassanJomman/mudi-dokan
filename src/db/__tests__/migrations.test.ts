@@ -309,8 +309,8 @@ describe('v7–v9 (shared by main and exp/gemini-audio)', () => {
     expect(() => db.exec("UPDATE sales SET quantity = 1 WHERE id = 's1'")).toThrow(/append-only/);
   }
 
-  it('schema version is 9 on every branch', () => {
-    expect(SCHEMA_VERSION).toBe(9);
+  it('v7–v9 are shared by every branch (the latest is now 10)', () => {
+    expect(SCHEMA_VERSION).toBe(10);
   });
 
   it('v6 shop phone (main) → v9: data kept, new columns null', async () => {
@@ -379,5 +379,90 @@ describe('v7 Gemini columns (used on exp/gemini-audio)', () => {
     insert(raw, 'voice_logs', { ...row('v1'), transcript: 'চাল ২ কেজি', device_name: 'আব্বু', engine: 'both', parsed_by: 'android' });
     expect(() => insert(raw, 'voice_logs', { ...row('v2'), transcript: 'x', device_name: 'আব্বু', engine: 'openai' })).toThrow();
     expect(() => insert(raw, 'voice_logs', { ...row('v3'), transcript: 'x', device_name: 'আব্বু', parsed_by: 'both' })).toThrow();
+  });
+});
+
+describe('v10: voided + entry_at (corrections and undo)', () => {
+  /** A v9 shop phone with real-looking pilot rows of every entry type. */
+  function v9Shop() {
+    const old = new DatabaseSync(':memory:');
+    old.exec('PRAGMA foreign_keys = ON;');
+    for (const sql of MIGRATIONS.slice(0, 9)) old.exec(sql);
+    old.exec('PRAGMA user_version = 9');
+    insert(old, 'devices', { ...row('d1'), device_name: 'আব্বু', role: 'owner' });
+    insert(old, 'shop', { ...row('shop'), name: 'রহিম স্টোর' });
+    insert(old, 'products', { ...row('p1'), name: 'চাল', unit: 'kg', sell_price_poisha: 6000 });
+    insert(old, 'customers', { ...row('c1'), name: 'করিম', phone: '01711123456', note: 'ভাই' });
+    insert(old, 'customer_aliases', { ...row('ca1'), alias: 'কোরিম', customer_id: 'c1' });
+    insert(old, 'voice_logs', {
+      ...row('v1'), transcript: 'করিম চাল ২ কেজি বাকি', device_name: 'আব্বু', outcome: 'saved', source: 'voice', intent: 'sale',
+      audio_path: 'file:///x/voice_1.wav', audio_status: 'local', context_tab: 'sale', engine: 'android', parsed_by: 'android',
+    });
+    insert(old, 'purchases', { ...entry('pu1'), product_id: 'p1', quantity: 50, buy_price_poisha: 5500, total_poisha: 275000 });
+    insert(old, 'sales', {
+      ...entry('s1'), product_id: 'p1', quantity: 2, sell_price_poisha: 6000, amount_poisha: 12000, cost_price_poisha: 5500,
+      credit: 1, customer_id: 'c1', voice_log_id: 'v1', basket_id: 'b1', line_no: 1,
+    });
+    // an earlier fix: s2 corrects s1
+    insert(old, 'sales', {
+      ...entry('s2'), product_id: 'p1', quantity: 3, sell_price_poisha: 6000, amount_poisha: 18000, cost_price_poisha: 5500,
+      credit: 1, customer_id: 'c1', voice_log_id: 'v1', basket_id: 'b1', line_no: 1, corrects_id: 's1',
+    });
+    insert(old, 'ledger', { ...entry('l1'), party_id: 'c1', kind: 'baki', amount_poisha: 18000, basket_id: 'b1', voice_log_id: 'v1' });
+    insert(old, 'expenses', { ...entry('e1'), item: 'বিদ্যুৎ বিল', amount_poisha: 50000 });
+    insert(old, 'owner_withdrawals', { ...entry('o1'), person: 'আব্বু', amount_poisha: 30000, note: 'বাসার জন্য' });
+    insert(old, 'day_close', { ...entry('dc1'), business_date: '2026-11-13', kind: 'opening', opening_cash_poisha: 520000 });
+    return old;
+  }
+  const TABLES = ['shop', 'devices', 'products', 'customers', 'customer_aliases', 'voice_logs', 'purchases', 'sales', 'ledger', 'expenses', 'owner_withdrawals', 'day_close'];
+  const dumpAll = (db: DatabaseSyncT) =>
+    Object.fromEntries(TABLES.map((t) => [t, db.prepare(`SELECT * FROM ${t} ORDER BY id`).all() as Record<string, unknown>[]]));
+
+  it('v9 shop phone → v10: every row and value kept, new columns default, views the same', async () => {
+    const old = v9Shop();
+    const before = dumpAll(old);
+    const viewsBefore = {
+      stock: old.prepare('SELECT * FROM v_stock').all(),
+      sales: old.prepare('SELECT id, quantity FROM v_sales').all(),
+      ledger: old.prepare('SELECT id, amount_poisha FROM v_ledger').all(),
+    };
+    await expect(migrate(adapter(old))).resolves.toBe(9);
+    expect(old.prepare('PRAGMA user_version').get()).toEqual({ user_version: 10 });
+    const after = dumpAll(old);
+    for (const t of TABLES) {
+      expect(after[t]!.map((r, k) => Object.fromEntries(Object.keys(before[t]![k]!).map((c) => [c, r[c]])))).toEqual(before[t]);
+    }
+    for (const t of ENTRY_TABLES) {
+      expect(old.prepare(`SELECT DISTINCT voided, entry_at FROM ${t}`).all()).toEqual([{ voided: 0, entry_at: null }]);
+    }
+    expect(old.prepare('SELECT * FROM v_stock').all()).toEqual(viewsBefore.stock);
+    expect(old.prepare('SELECT id, quantity FROM v_sales').all()).toEqual(viewsBefore.sales);
+    expect(old.prepare('SELECT id, amount_poisha FROM v_ledger').all()).toEqual(viewsBefore.ledger);
+    // `at` = created_at for old rows
+    expect(old.prepare('SELECT at FROM v_expenses').get()).toEqual({ at: now });
+    // still append-only, triggers intact
+    expect(() => old.exec("UPDATE sales SET quantity = 1 WHERE id = 's2'")).toThrow(/append-only/);
+    expect(() => old.exec("DELETE FROM ledger WHERE id = 'l1'")).toThrow(/append-only/);
+    old.close();
+  });
+
+  it('a voided correction hides the entry from v_ views and stock', () => {
+    insert(raw, 'products', { ...row('p1'), name: 'চাল', unit: 'kg' });
+    insert(raw, 'purchases', { ...entry('pu1'), product_id: 'p1', quantity: 10, buy_price_poisha: 5500, total_poisha: 55000 });
+    insert(raw, 'sales', { ...entry('s1'), product_id: 'p1', quantity: 2, sell_price_poisha: 6000, amount_poisha: 12000, cost_price_poisha: 5500 });
+    expect(raw.prepare('SELECT stock FROM v_stock').get()).toEqual({ stock: 8 });
+    insert(raw, 'sales', {
+      ...entry('s1x'), product_id: 'p1', quantity: 2, sell_price_poisha: 6000, amount_poisha: 12000, cost_price_poisha: 5500,
+      corrects_id: 's1', voided: 1, entry_at: now,
+    });
+    expect(raw.prepare('SELECT COUNT(*) AS n FROM v_sales').get()).toEqual({ n: 0 });
+    expect(raw.prepare('SELECT stock FROM v_stock').get()).toEqual({ stock: 10 });
+    expect(() => insert(raw, 'expenses', { ...entry('e9'), item: 'x', amount_poisha: 1, voided: 2 })).toThrow();
+  });
+
+  it('a correction keeps the original time in `at`', () => {
+    insert(raw, 'expenses', { ...entry('e1'), item: 'বিল', amount_poisha: 50000 });
+    insert(raw, 'expenses', { ...entry('e2'), item: 'বিল', amount_poisha: 45000, corrects_id: 'e1', entry_at: now - 86_400_000, created_at: now + 5 });
+    expect(raw.prepare('SELECT id, at FROM v_expenses').all()).toEqual([{ id: 'e2', at: now - 86_400_000 }]);
   });
 });

@@ -4,6 +4,9 @@
  * tested on node:sqlite.
  */
 import { basketSummary, storedLine, type BasketDraft, type ProductInfo } from '../domain/basket';
+import { ZERO_FLOWS, dayStart, netCash, openingAnchor, type CashAnchor, type CashFlows, type NoteCounts, type OpeningSource, type ProfitInput } from '../domain/cash';
+import type { StoredEntry, StoredSaleLine } from '../domain/fix';
+import type { EntryTable, RawEntry } from '../domain/history';
 import { entrySummary, type EntryDraft } from '../domain/entry';
 import type { CustomerLine } from '../domain/customerImport';
 import type { Candidate } from '../domain/names';
@@ -632,7 +635,7 @@ export interface CustomerBalance {
 const BALANCE_SQL = `
   SELECT c.id, c.name, c.phone, c.note,
     COALESCE(SUM(CASE l.kind WHEN 'baki' THEN l.amount_poisha ELSE -l.amount_poisha END), 0) AS balance_poisha,
-    MAX(l.created_at) AS last_at
+    MAX(l.at) AS last_at
   FROM customers c LEFT JOIN v_ledger l ON l.party_id = c.id
   WHERE c.archived = 0 AND c.party_type = 'customer'`;
 
@@ -665,14 +668,14 @@ export interface LedgerLine {
 /** A customer's ledger, newest first, with the clip that made each line. */
 export const customerHistory = (db: Db, customerId: string) =>
   db.getAllAsync<LedgerLine>(
-    `SELECT l.id, l.kind, l.amount_poisha, l.created_at,
+    `SELECT l.id, l.kind, l.amount_poisha, l.at AS created_at,
        (SELECT GROUP_CONCAT(name, ', ') FROM (
           SELECT p.name FROM v_sales s JOIN products p ON p.id = s.product_id
           WHERE l.basket_id IS NOT NULL AND s.basket_id = l.basket_id ORDER BY s.line_no)) AS products,
        v.transcript, v.audio_path
      FROM v_ledger l LEFT JOIN voice_logs v ON v.id = l.voice_log_id
      WHERE l.party_id = ?
-     ORDER BY l.created_at DESC`,
+     ORDER BY l.at DESC`,
     customerId,
   );
 
@@ -692,25 +695,25 @@ export const recentEntries = (db: Db, limit = 3) =>
               MAX(s.credit) AS credit,
               MAX(c.name) AS customer,
               MAX(v.audio_path) AS audio_path,
-              MAX(s.created_at) AS created_at
-       FROM (SELECT * FROM v_sales ORDER BY created_at, line_no) s
+              MAX(s.at) AS created_at
+       FROM (SELECT * FROM v_sales ORDER BY at, line_no) s
        JOIN products p ON p.id = s.product_id
        LEFT JOIN customers c ON c.id = s.customer_id
        LEFT JOIN voice_logs v ON v.id = s.voice_log_id
        GROUP BY COALESCE(s.basket_id, s.id)
      UNION ALL
-       SELECT l.kind, l.id, c.name, 0, NULL, NULL, l.amount_poisha, 0, NULL, v.audio_path, l.created_at
+       SELECT l.kind, l.id, c.name, 0, NULL, NULL, l.amount_poisha, 0, NULL, v.audio_path, l.at
        FROM v_ledger l JOIN customers c ON c.id = l.party_id
        LEFT JOIN voice_logs v ON v.id = l.voice_log_id
        WHERE l.basket_id IS NULL AND l.sale_id IS NULL
      UNION ALL
-       SELECT 'expense', e.id, e.item, 0, NULL, NULL, e.amount_poisha, 0, NULL, v.audio_path, e.created_at
+       SELECT 'expense', e.id, e.item, 0, NULL, NULL, e.amount_poisha, 0, NULL, v.audio_path, e.at
        FROM v_expenses e LEFT JOIN voice_logs v ON v.id = e.voice_log_id
      UNION ALL
-       SELECT 'owner_withdrawal', o.id, COALESCE(o.person, 'মালিক'), 0, NULL, NULL, o.amount_poisha, 0, NULL, v.audio_path, o.created_at
+       SELECT 'owner_withdrawal', o.id, COALESCE(o.person, 'মালিক'), 0, NULL, NULL, o.amount_poisha, 0, NULL, v.audio_path, o.at
        FROM v_owner_withdrawals o LEFT JOIN voice_logs v ON v.id = o.voice_log_id
      UNION ALL
-       SELECT 'purchase', pu.id, p.name, 0, pu.quantity, COALESCE(pu.spoken_unit, p.unit), pu.total_poisha, 0, NULL, v.audio_path, pu.created_at
+       SELECT 'purchase', pu.id, p.name, 0, pu.quantity, COALESCE(pu.spoken_unit, p.unit), pu.total_poisha, 0, NULL, v.audio_path, pu.at
        FROM v_purchases pu JOIN products p ON p.id = pu.product_id
        LEFT JOIN voice_logs v ON v.id = pu.voice_log_id
      )
@@ -721,13 +724,425 @@ export const recentEntries = (db: Db, limit = 3) =>
 /** Today's sales and new baki (credit sales + plain বাকি entries); the shop-local day starts at `dayStart`. */
 export async function todayTotals(db: Db, dayStart: number): Promise<{ sales: number; baki: number }> {
   const r = await db.getFirstAsync<{ sales: number | null; baki: number | null }>(
-    `SELECT (SELECT SUM(amount_poisha) FROM v_sales WHERE created_at >= ?) AS sales,
-            (SELECT SUM(amount_poisha) FROM v_ledger WHERE kind = 'baki' AND party_type = 'customer' AND created_at >= ?) AS baki`,
+    `SELECT (SELECT SUM(amount_poisha) FROM v_sales WHERE at >= ?) AS sales,
+            (SELECT SUM(amount_poisha) FROM v_ledger WHERE kind = 'baki' AND party_type = 'customer' AND at >= ?) AS baki`,
     dayStart,
     dayStart,
   );
   return { sales: r?.sales ?? 0, baki: r?.baki ?? 0 };
 }
+
+// ── cash (আজকের ক্যাশ, নোট গুনুন) ───────────────────────────────
+
+/** Money movements of the effective entries that happened in [start, end). */
+export async function cashFlows(db: Db, start: number, end: number): Promise<CashFlows> {
+  if (end <= start) return { ...ZERO_FLOWS };
+  const r = await db.getFirstAsync<CashFlows>(
+    `SELECT
+       (SELECT COALESCE(SUM(amount_poisha), 0) FROM v_sales WHERE at >= ? AND at < ?) AS sales,
+       (SELECT COALESCE(SUM(amount_poisha), 0) FROM v_sales WHERE credit = 0 AND at >= ? AND at < ?) AS cashSales,
+       (SELECT COALESCE(SUM(amount_poisha), 0) FROM v_ledger WHERE kind = 'baki' AND party_type = 'customer' AND at >= ? AND at < ?) AS bakiGiven,
+       (SELECT COALESCE(SUM(amount_poisha), 0) FROM v_ledger WHERE kind = 'joma' AND party_type = 'customer' AND at >= ? AND at < ?) AS joma,
+       (SELECT COALESCE(SUM(amount_poisha), 0) FROM v_expenses WHERE at >= ? AND at < ?) AS expenses,
+       (SELECT COALESCE(SUM(total_poisha), 0) FROM v_purchases WHERE paid_cash = 1 AND at >= ? AND at < ?) AS cashPurchases,
+       (SELECT COALESCE(SUM(amount_poisha), 0) FROM v_owner_withdrawals WHERE at >= ? AND at < ?) AS withdrawals`,
+    ...Array.from({ length: 7 }, () => [start, end]).flat(),
+  );
+  return r ?? { ...ZERO_FLOWS };
+}
+
+/** Setup's opening cash and every counted close (effective rows). */
+export async function cashAnchors(db: Db): Promise<CashAnchor[]> {
+  const rows = await db.getAllAsync<{ business_date: string; kind: 'opening' | 'close'; opening_cash_poisha: number; counted_cash_poisha: number | null }>(
+    'SELECT business_date, kind, opening_cash_poisha, counted_cash_poisha FROM v_day_close',
+  );
+  return rows.map((r) => ({
+    date: r.business_date,
+    kind: r.kind,
+    amountPoisha: r.kind === 'close' ? (r.counted_cash_poisha ?? r.opening_cash_poisha) : r.opening_cash_poisha,
+  }));
+}
+
+export interface DayClose {
+  id: string;
+  counted_cash_poisha: number;
+  expected_cash_poisha: number;
+  note_counts_json: string | null;
+}
+
+export interface CashDay {
+  date: string;
+  openingPoisha: number;
+  source: OpeningSource;
+  flows: CashFlows;
+  expectedPoisha: number;
+  /** দিন শেষ করুন was done for this day (the latest count). */
+  close: DayClose | null;
+}
+
+/**
+ * A day's cash: opening (Setup's, yesterday's counted cash, or an older anchor plus the
+ * days in between), that day's flows and the expected cash in hand.
+ */
+export async function cashDay(db: Db, date: string): Promise<CashDay> {
+  const anchor = openingAnchor(await cashAnchors(db), date);
+  let openingPoisha = 0;
+  let source: OpeningSource = 'none';
+  if (anchor) {
+    openingPoisha = anchor.amountPoisha + netCash(await cashFlows(db, dayStart(anchor.from), dayStart(date)));
+    source = anchor.source;
+  }
+  const flows = await cashFlows(db, dayStart(date), dayStart(nextDate(date)));
+  const close = await db.getFirstAsync<DayClose>(
+    `SELECT id, counted_cash_poisha, expected_cash_poisha, note_counts_json FROM v_day_close
+     WHERE kind = 'close' AND business_date = ? ORDER BY created_at DESC LIMIT 1`,
+    date,
+  );
+  return { date, openingPoisha, source, flows, expectedPoisha: openingPoisha + netCash(flows), close };
+}
+
+const nextDate = (date: string) => {
+  const t = new Date(dayStart(date));
+  t.setDate(t.getDate() + 1);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${t.getFullYear()}-${p(t.getMonth() + 1)}-${p(t.getDate())}`;
+};
+
+/**
+ * দিন শেষ করুন: a day_close 'close' entry with the counted cash (the next day's opening).
+ * Counting the same day again adds a correction of that day's close.
+ */
+export async function saveDayClose(
+  db: Db,
+  w: Writer,
+  day: Pick<CashDay, 'date' | 'openingPoisha' | 'expectedPoisha'>,
+  notes: NoteCounts,
+  countedPoisha: number,
+): Promise<string> {
+  const id = w.newId();
+  await db.withTransactionAsync(async () => {
+    const prev = await db.getFirstAsync<{ id: string }>(
+      "SELECT id FROM v_day_close WHERE kind = 'close' AND business_date = ? ORDER BY created_at DESC LIMIT 1",
+      day.date,
+    );
+    await insert(db, 'day_close', {
+      id,
+      business_date: day.date,
+      kind: 'close',
+      opening_cash_poisha: day.openingPoisha,
+      expected_cash_poisha: day.expectedPoisha,
+      counted_cash_poisha: countedPoisha,
+      note_counts_json: JSON.stringify(notes),
+      corrects_id: prev?.id ?? null,
+      device_name: w.deviceName,
+      ...rowCols(w),
+    });
+  });
+  return id;
+}
+
+/** "আজ লাভ কত?": sales, the cost of goods with a known buy price, and expenses in [start, end). */
+export async function profitInput(db: Db, start: number, end: number): Promise<ProfitInput> {
+  const r = await db.getFirstAsync<ProfitInput>(
+    `SELECT
+       (SELECT COALESCE(SUM(amount_poisha), 0) FROM v_sales WHERE at >= ? AND at < ?) AS salesPoisha,
+       (SELECT COALESCE(SUM(amount_poisha), 0) FROM v_sales WHERE cost_known = 1 AND at >= ? AND at < ?) AS knownSalesPoisha,
+       (SELECT COALESCE(SUM(ROUND(cost_price_poisha * quantity)), 0) FROM v_sales WHERE cost_known = 1 AND at >= ? AND at < ?) AS knownCostPoisha,
+       (SELECT COUNT(*) FROM v_sales WHERE cost_known = 0 AND at >= ? AND at < ?) AS unknownLines,
+       (SELECT COALESCE(SUM(amount_poisha), 0) FROM v_expenses WHERE at >= ? AND at < ?) AS expensesPoisha`,
+    ...Array.from({ length: 5 }, () => [start, end]).flat(),
+  );
+  return {
+    salesPoisha: r?.salesPoisha ?? 0,
+    knownSalesPoisha: r?.knownSalesPoisha ?? 0,
+    knownCostPoisha: Math.round(r?.knownCostPoisha ?? 0),
+    unknownLines: r?.unknownLines ?? 0,
+    expensesPoisha: r?.expensesPoisha ?? 0,
+  };
+}
+
+// ── history (আজকের খাতা) ───────────────────────────────────────
+
+/** Every version of every entry that happened in [start, end), for domain/history.buildHistory. */
+export const historyRows = (db: Db, start: number, end: number) =>
+  db.getAllAsync<RawEntry>(
+    `SELECT * FROM (
+       SELECT 'sales' AS "table", s.id, s.corrects_id, s.voided, COALESCE(s.entry_at, s.created_at) AS at, s.created_at,
+              NULL AS kind, s.basket_id, s.line_no, NULL AS sale_id, p.name AS title, s.quantity, p.unit AS unit,
+              s.amount_poisha, s.credit, c.name AS customer, v.audio_path
+       FROM sales s JOIN products p ON p.id = s.product_id
+       LEFT JOIN customers c ON c.id = s.customer_id LEFT JOIN voice_logs v ON v.id = s.voice_log_id
+     UNION ALL
+       SELECT 'ledger', l.id, l.corrects_id, l.voided, COALESCE(l.entry_at, l.created_at), l.created_at,
+              l.kind, l.basket_id, NULL, l.sale_id, c.name, NULL, NULL, l.amount_poisha, 0, NULL, v.audio_path
+       FROM ledger l JOIN customers c ON c.id = l.party_id LEFT JOIN voice_logs v ON v.id = l.voice_log_id
+       WHERE l.party_type = 'customer'
+     UNION ALL
+       SELECT 'expenses', e.id, e.corrects_id, e.voided, COALESCE(e.entry_at, e.created_at), e.created_at,
+              NULL, NULL, NULL, NULL, e.item, NULL, NULL, e.amount_poisha, 0, NULL, v.audio_path
+       FROM expenses e LEFT JOIN voice_logs v ON v.id = e.voice_log_id
+     UNION ALL
+       SELECT 'owner_withdrawals', o.id, o.corrects_id, o.voided, COALESCE(o.entry_at, o.created_at), o.created_at,
+              NULL, NULL, NULL, NULL, COALESCE(o.person, 'মালিক'), NULL, NULL, o.amount_poisha, 0, NULL, v.audio_path
+       FROM owner_withdrawals o LEFT JOIN voice_logs v ON v.id = o.voice_log_id
+     UNION ALL
+       SELECT 'purchases', pu.id, pu.corrects_id, pu.voided, COALESCE(pu.entry_at, pu.created_at), pu.created_at,
+              NULL, NULL, NULL, NULL, p.name, pu.quantity, COALESCE(pu.spoken_unit, p.unit), pu.total_poisha, 0, NULL, v.audio_path
+       FROM purchases pu JOIN products p ON p.id = pu.product_id LEFT JOIN voice_logs v ON v.id = pu.voice_log_id
+     ) WHERE at >= ? AND at < ?`,
+    start,
+    end,
+  );
+
+// ── corrections (✏️ ঠিক করুন) and undo ("ভুল হয়েছে") ─────────────
+
+type Row = Record<string, Bind>;
+
+/**
+ * A correction of `oldId`: a copy of its row with `changes`, corrects_id = oldId and the
+ * original time (entry_at). voided = the entry is cancelled from now on.
+ */
+async function correct(db: Db, w: Writer, table: EntryTable, oldId: string, changes: Row, voided = false): Promise<string> {
+  const old = await db.getFirstAsync<Row>(`SELECT * FROM ${table} WHERE id = ?`, oldId);
+  if (!old) throw new Error(`${table} ${oldId} not found`);
+  const id = w.newId();
+  await insert(db, table, {
+    ...old,
+    ...changes,
+    id,
+    corrects_id: oldId,
+    voided: voided ? 1 : 0,
+    entry_at: (old.entry_at as number | null) ?? (old.created_at as number),
+    device_name: w.deviceName,
+    ...rowCols(w),
+  });
+  return id;
+}
+
+type SaleRow = Row & { id: string; product_id: string; quantity: number; sell_price_poisha: number; amount_poisha: number; cost_price_poisha: number; cost_known: number; credit: number; customer_id: string | null; basket_id: string | null; line_no: number | null; voice_log_id: string | null; at: number };
+
+/** The effective lines of a basket. `basketId` is the basket_id, or a pre-v3 sale's own id. */
+const basketRows = (db: Db, basketId: string) =>
+  db.getAllAsync<SaleRow>('SELECT * FROM v_sales WHERE basket_id = ? OR (basket_id IS NULL AND id = ?) ORDER BY line_no', basketId, basketId);
+
+/** A credit basket's baki row (effective). */
+const basketLedger = (db: Db, basketId: string) =>
+  db.getFirstAsync<Row & { id: string; party_id: string; amount_poisha: number }>(
+    'SELECT * FROM v_ledger WHERE basket_id = ? OR (basket_id IS NULL AND sale_id = ?) LIMIT 1',
+    basketId,
+    basketId,
+  );
+
+async function productInfoById(db: Db, id: string): Promise<ProductInfo> {
+  const r = await db.getFirstAsync<ProductRow>(
+    `SELECT p.id, p.name, p.unit, p.sell_price_poisha,
+       (SELECT CAST(ROUND(SUM(buy_price_poisha * quantity) / SUM(quantity)) AS INTEGER)
+          FROM v_purchases WHERE product_id = p.id AND quantity > 0) AS cost
+     FROM products p WHERE p.id = ?`,
+    id,
+  );
+  if (!r) throw new Error(`product ${id} not found`);
+  return { id: r.id, name: r.name, unit: r.unit, sellPricePoisha: r.sell_price_poisha, costPricePoisha: r.cost };
+}
+
+/** ✏️ on a sale: its lines for basketFromStored. */
+export async function basketForFix(db: Db, basketId: string): Promise<StoredSaleLine[]> {
+  const out: StoredSaleLine[] = [];
+  for (const r of await basketRows(db, basketId)) {
+    const c = r.customer_id ? await db.getFirstAsync<{ name: string }>('SELECT name FROM customers WHERE id = ?', r.customer_id) : null;
+    out.push({
+      id: r.id,
+      line_no: r.line_no,
+      product: await productInfoById(db, r.product_id),
+      quantity: r.quantity,
+      sell_price_poisha: r.sell_price_poisha,
+      amount_poisha: r.amount_poisha,
+      cost_price_poisha: r.cost_price_poisha,
+      cost_known: r.cost_known,
+      credit: r.credit,
+      customer: c?.name ?? null,
+    });
+  }
+  return out;
+}
+
+/**
+ * Saves a fixed basket as corrections: a changed line → a correction row, a removed line →
+ * a voided one; the baki row follows the new total / customer / নগদ-বাকি. Unchanged lines
+ * get nothing. Returns whether anything changed.
+ */
+export async function saveBasketFix(db: Db, w: Writer, basketId: string, b: BasketDraft): Promise<boolean> {
+  if (b.problems.length || b.totalPoisha === null) throw new Error(`basket is not complete: ${b.problems.join(', ')}`);
+  let changed = false;
+  await db.withTransactionAsync(async () => {
+    const rows = await basketRows(db, basketId);
+    if (!rows.length) throw new Error(`basket ${basketId} not found`);
+    const customerId = b.customerName ? await findOrCreateCustomer(db, w, b.customerName) : null;
+    const credit = b.credit ? 1 : 0;
+    const created = new Map<string, string>();
+    for (const r of rows) {
+      const it = b.items.find((i) => i.key === r.id);
+      if (!it) {
+        await correct(db, w, 'sales', r.id, { basket_id: basketId }, true);
+        changed = true;
+        continue;
+      }
+      if (!it.productName || it.quantity === null || it.amountPoisha === null) throw new Error(`line ${it.key} is not complete`);
+      const line = storedLine(it);
+      let productId = it.product?.id ?? created.get(it.productName) ?? null;
+      if (!productId) {
+        productId = w.newId();
+        created.set(it.productName, productId);
+        await insert(db, 'products', { id: productId, name: it.productName, unit: it.unit, sell_price_poisha: line.pricePoisha, ...rowCols(w) });
+      }
+      if (it.alias && it.product) await addProductAlias(db, w, it.alias, it.product.id);
+      const sameProduct = productId === r.product_id;
+      const diff =
+        !sameProduct || line.quantity !== r.quantity || line.pricePoisha !== r.sell_price_poisha ||
+        it.amountPoisha !== r.amount_poisha || credit !== r.credit || customerId !== r.customer_id;
+      if (!diff) continue;
+      const cost = sameProduct ? null : it.product?.costPricePoisha ?? null;
+      await correct(db, w, 'sales', r.id, {
+        basket_id: basketId,
+        product_id: productId,
+        quantity: line.quantity,
+        spoken_unit: line.spokenUnit,
+        sell_price_poisha: line.pricePoisha,
+        amount_poisha: it.amountPoisha,
+        credit,
+        customer_id: customerId,
+        ...(sameProduct ? {} : { cost_price_poisha: cost ?? 0, cost_known: cost === null ? 0 : 1 }),
+      });
+      changed = true;
+    }
+    // the basket's baki row
+    const led = await basketLedger(db, basketId);
+    const want = credit && customerId ? { party_id: customerId, amount_poisha: b.totalPoisha! } : null;
+    if (led && !want) {
+      await correct(db, w, 'ledger', led.id, {}, true);
+      changed = true;
+    } else if (led && want && (led.party_id !== want.party_id || led.amount_poisha !== want.amount_poisha)) {
+      await correct(db, w, 'ledger', led.id, want);
+      changed = true;
+    } else if (!led && want) {
+      const first = rows[0]!;
+      await insert(db, 'ledger', {
+        id: w.newId(),
+        ...want,
+        party_type: 'customer',
+        kind: 'baki',
+        basket_id: first.basket_id ?? null,
+        sale_id: first.basket_id ? null : first.id,
+        voice_log_id: first.voice_log_id,
+        entry_at: first.at,
+        device_name: w.deviceName,
+        ...rowCols(w),
+      });
+      changed = true;
+    }
+  });
+  return changed;
+}
+
+const FIX_TABLES = ['ledger', 'expenses', 'owner_withdrawals', 'purchases'] as const;
+export type FixTable = (typeof FIX_TABLES)[number];
+export const isFixTable = (t: string): t is FixTable => (FIX_TABLES as readonly string[]).includes(t);
+
+/** ✏️ on a বাকি / জমা / খরচ / মালিক নিল / কেনা: the latest version for entryFromStored. */
+export async function entryForFix(db: Db, table: FixTable, id: string): Promise<StoredEntry | null> {
+  const r = await db.getFirstAsync<Row>(`SELECT * FROM v_${table} WHERE id = ?`, id);
+  if (!r) return null;
+  const customer = table === 'ledger' ? await db.getFirstAsync<{ name: string }>('SELECT name FROM customers WHERE id = ?', r.party_id as string) : null;
+  const product = table === 'purchases' ? await productInfoById(db, r.product_id as string) : null;
+  return {
+    table,
+    id,
+    kind: (r.kind as string | undefined) ?? null,
+    customer: customer?.name ?? null,
+    amount_poisha: (table === 'purchases' ? r.total_poisha : r.amount_poisha) as number,
+    item: (r.item as string | undefined) ?? null,
+    person: (r.person as string | undefined) ?? null,
+    note: (r.note as string | undefined) ?? null,
+    product,
+    quantity: (r.quantity as number | undefined) ?? null,
+    spoken_unit: (r.spoken_unit as Unit | undefined) ?? null,
+    buy_price_poisha: (r.buy_price_poisha as number | undefined) ?? null,
+    sell_price_poisha: (r.sell_price_poisha as number | undefined) ?? null,
+  };
+}
+
+/** Saves a fixed entry as one correction row (nothing when nothing changed). Returns whether it changed. */
+export async function saveEntryFix(db: Db, w: Writer, s: StoredEntry, d: EntryDraft): Promise<boolean> {
+  if (d.problems.length || d.amountPoisha === null) throw new Error(`entry is not complete: ${d.problems.join(', ')}`);
+  let changed = false;
+  await db.withTransactionAsync(async () => {
+    const old = await db.getFirstAsync<Row>(`SELECT * FROM ${s.table} WHERE id = ?`, s.id);
+    if (!old) throw new Error(`${s.table} ${s.id} not found`);
+    let changes: Row;
+    if (s.table === 'ledger') {
+      changes = { party_id: await findOrCreateCustomer(db, w, d.customerName!), kind: d.kind!, amount_poisha: d.amountPoisha };
+    } else if (s.table === 'expenses') {
+      changes = { item: d.item!, amount_poisha: d.amountPoisha, person: d.person, note: d.note };
+    } else if (s.table === 'owner_withdrawals') {
+      changes = { person: d.person, amount_poisha: d.amountPoisha, note: d.note };
+    } else {
+      const l = d.purchase!;
+      if (!l.productName || !l.quantity || l.buyPricePoisha === null) throw new Error('purchase line is not complete');
+      let productId = l.product?.id ?? (await findProduct(db, l.productName))?.id ?? null;
+      if (!productId) {
+        productId = w.newId();
+        await insert(db, 'products', { id: productId, name: l.productName, unit: l.unit, sell_price_poisha: l.sellPricePoisha, ...rowCols(w) });
+      } else if (l.sellPricePoisha !== null && l.sellPricePoisha !== old.sell_price_poisha && !l.unitWarning) {
+        await db.runAsync('UPDATE products SET sell_price_poisha = ?, updated_at = ? WHERE id = ?', l.sellPricePoisha, w.now(), productId);
+      }
+      if (l.alias) await addProductAlias(db, w, l.alias, productId);
+      changes = {
+        product_id: productId,
+        quantity: l.quantity,
+        spoken_unit: l.unitWarning ? l.unit : null,
+        buy_price_poisha: l.buyPricePoisha,
+        sell_price_poisha: l.sellPricePoisha,
+        total_poisha: d.amountPoisha,
+      };
+    }
+    if (Object.entries(changes).every(([k, v]) => old[k] === v)) return;
+    await correct(db, w, s.table, s.id, changes);
+    changed = true;
+  });
+  return changed;
+}
+
+/**
+ * Undo / ✏️ বাতিল: cancels an entry with a voided correction (never a delete). A sale
+ * (`id` = basket id) cancels every line and its baki row. Returns the correction ids.
+ */
+export async function voidEntry(db: Db, w: Writer, table: EntryTable, id: string): Promise<string[]> {
+  const out: string[] = [];
+  await db.withTransactionAsync(async () => {
+    if (table === 'sales') {
+      const rows = await basketRows(db, id);
+      if (!rows.length) throw new Error(`basket ${id} not found`);
+      for (const r of rows) out.push(await correct(db, w, 'sales', r.id, { basket_id: id }, true));
+      const led = await basketLedger(db, id);
+      if (led) out.push(await correct(db, w, 'ledger', led.id, {}, true));
+    } else {
+      const r = await db.getFirstAsync<{ id: string }>(`SELECT id FROM v_${table} WHERE id = ?`, id);
+      if (!r) throw new Error(`${table} ${id} not found`);
+      out.push(await correct(db, w, table, id, {}, true));
+    }
+  });
+  return out;
+}
+
+/** The table a recentEntries / history kind lives in. */
+export const TABLE_OF: Record<RecentEntry['kind'], EntryTable> = {
+  sale: 'sales',
+  baki: 'ledger',
+  joma: 'ledger',
+  expense: 'expenses',
+  owner_withdrawal: 'owner_withdrawals',
+  purchase: 'purchases',
+};
 
 // ── pilot stats & export ───────────────────────────────────────
 

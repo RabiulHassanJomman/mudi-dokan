@@ -231,6 +231,27 @@ export const chooseProduct = (b: BasketDraft, key: string, product: ProductInfo)
     }),
   });
 
+/**
+ * A name typed or said on the card (not one of the chips). A known product (by name or
+ * alias) is chosen like a chip; anything else becomes a new product, keeping the line's
+ * quantity and price. Empty names are ignored.
+ */
+export function renameItem(b: BasketDraft, key: string, name: string, known: ProductInfo | null): BasketDraft {
+  const n = name.normalize('NFC').replace(/\s+/g, ' ').trim();
+  if (!n) return b;
+  if (known) return chooseProduct(b, key, known);
+  return editItem(b, key, (i) => ({
+    ...i,
+    productName: n,
+    product: null,
+    storedPricePoisha: null,
+    priceWarning: false,
+    unitWarning: false,
+    alias: null,
+    parsed: { ...i.parsed, product: n },
+  }));
+}
+
 export const removeItem = (b: BasketDraft, key: string): BasketDraft =>
   finalize({ ...b, items: b.items.filter((i) => i.key !== key) });
 

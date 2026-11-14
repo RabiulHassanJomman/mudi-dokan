@@ -24,6 +24,24 @@ describe('unit chips', () => {
   });
 });
 
+describe('purchase (Pick from the মাল কেনা tab)', () => {
+  it('no টাকার chip; a new product also offers লিটার / পিস', () => {
+    expect(pickUnits('kg', true)).toEqual(['kg', 'g']);
+    expect(pickUnits(null, true)).toEqual(['kg', 'g', 'litre', 'piece']);
+  });
+  it('quantity + total paid → purchase command (the card works out the buy price)', () => {
+    const item = { product: 'চাল', value: 50, mode: 'kg' as const, purchase: { totalTaka: 2750 } };
+    expect(pickText(item)).toBe('চাল ৫০ কেজি কেনা ৳ ২,৭৫০');
+    expect(pickedCommand(item)).toMatchObject({ intent: 'purchase', product: 'চাল', quantity: { value: 50, unit: 'kg' }, amount: 2750, missing: [] });
+  });
+  it('no price typed: the card asks for it', () => {
+    const item = { product: 'চাল', value: 50, mode: 'kg' as const, purchase: { totalTaka: null } };
+    expect(pickText(item)).toBe('চাল ৫০ কেজি কেনা');
+    expect(pickedCommand(item)).toMatchObject({ intent: 'purchase', missing: ['buyPrice'] });
+    expect(pickedCommand(item).amount).toBeUndefined();
+  });
+});
+
 describe('pick → command for the confirm card', () => {
   it('quantity in a unit', () => {
     const p = pickedCommand({ product: 'চাল', value: 2.5, mode: 'kg' });

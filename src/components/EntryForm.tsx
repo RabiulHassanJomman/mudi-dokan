@@ -24,6 +24,8 @@ interface Props {
   entry: EntryDraft;
   known: readonly string[];
   onChange: (next: EntryDraft) => void;
+  /** ✏️ the purchase's product name: type or say another (a new product too). */
+  onRenameProduct?: () => void;
 }
 
 type PadFor = 'amount' | 'buy' | 'sell' | null;
@@ -39,7 +41,7 @@ const KIND_LOOK: Record<string, { icon: IconName; ink: string; tint: string }> =
 };
 
 /** The confirm card body for বাকি / জমা / খরচ / মালিক নিল / মাল কেনা. Numbers are typed on the big pad. */
-export function EntryForm({ entry, known, onChange }: Props) {
+export function EntryForm({ entry, known, onChange, onRenameProduct }: Props) {
   const [pad, setPad] = useState<PadFor>(null);
   const ledger = entry.kind === null || entry.kind === 'baki' || entry.kind === 'joma';
   const look = KIND_LOOK[entry.kind ?? 'baki']!;
@@ -90,16 +92,25 @@ export function EntryForm({ entry, known, onChange }: Props) {
             <View style={[styles.tile, { backgroundColor: (l.productName && productTiles[l.productName]) || colors.neutralTint }]}>
               <Icon name={productIcon(l.productName ?? '')} size={28} color={colors.ink} strokeWidth={1.6} />
             </View>
-            <View style={styles.flex}>
-              <Txt size={fontSize.button} weight="bold">
-                {l.productName ?? 'নাম বুঝিনি'}
-              </Txt>
-              {!l.product && l.productName && (
-                <Txt size={fontSize.caption} weight="bold" color={colors.stock}>
-                  নতুন মাল
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`${l.productName ?? 'মালের নাম'}, নাম বদলান`}
+              accessibilityState={{ disabled: !onRenameProduct }}
+              onPress={onRenameProduct}
+              style={styles.nameButton}
+            >
+              <View style={styles.flex}>
+                <Txt size={fontSize.button} weight="bold">
+                  {l.productName ?? 'নাম বুঝিনি'}
                 </Txt>
-              )}
-            </View>
+                {!l.product && l.productName && (
+                  <Txt size={fontSize.caption} weight="bold" color={colors.stock}>
+                    নতুন মাল
+                  </Txt>
+                )}
+              </View>
+              {onRenameProduct && <Icon name="edit" size={20} color={colors.ink2} strokeWidth={1.8} />}
+            </Pressable>
           </View>
           <View style={styles.qtyRow}>
             <Step icon="minus" label="কমান" onPress={() => onChange(stepPurchase(entry, -1))} />
@@ -219,6 +230,7 @@ function Hint({ text }: { text: string }) {
 }
 
 const styles = StyleSheet.create({
+  nameButton: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 44 },
   card: { backgroundColor: colors.surface, borderRadius: radius.section, padding: spacing.lg, gap: spacing.md },
   head: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   tile: { width: size.listTile, height: size.listTile, borderRadius: radius.icon, alignItems: 'center', justifyContent: 'center' },

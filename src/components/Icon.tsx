@@ -5,6 +5,8 @@ export type IconName =
   | 'cart' | 'box' | 'book' | 'speaker' | 'mic' | 'keyboard'
   | 'back' | 'plus' | 'minus' | 'check' | 'close' | 'cash' | 'play' | 'list'
   | 'settings' | 'keypad' | 'arrow' | 'search' | 'image' | 'phone' | 'person' | 'alert'
+  // step 5: cash card, ✏️ fix, day picker, cash out
+  | 'wallet' | 'edit' | 'forward' | 'up' | 'equals' | 'undo'
   // product pictures (Pick.dc.html)
   | 'rice' | 'dal' | 'oil' | 'sugar' | 'egg' | 'soap';
 
@@ -70,6 +72,12 @@ export function Icon({ name, size = 24, color, strokeWidth = 1.8 }: Props) {
         </>
       )}
       {name === 'back' && <Path {...p} d="M15 6l-6 6 6 6" />}
+      {name === 'forward' && <Path {...p} d="M9 6l6 6-6 6" />}
+      {name === 'wallet' && <Path {...p} d="M3 7h15a3 3 0 0 1 3 3v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z M3 7l12-4v4 M16 14h.01" />}
+      {name === 'edit' && <Path {...p} d="M4 20h4L19 9l-4-4L4 16v4z" />}
+      {name === 'up' && <Path {...p} d="M12 19V5 M6 11l6-6 6 6" />}
+      {name === 'equals' && <Path {...p} d="M5 9h14M5 15h14" />}
+      {name === 'undo' && <Path {...p} d="M9 14L4 9l5-5 M4 9h10a6 6 0 0 1 0 12h-3" />}
       {name === 'plus' && <Path {...p} d="M5 12h14M12 5v14" />}
       {name === 'minus' && <Path {...p} d="M5 12h14" />}
       {name === 'check' && <Path {...p} d="M5 12l5 5 9-10" />}

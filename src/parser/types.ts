@@ -15,6 +15,10 @@ export type Intent =
   /** "সব মাল কত আছে", "মালের লিস্ট" — every product's stock. */
   | 'all_stock_query'
   | 'profit_query'
+  /** "আজকের হিসাব", "ক্যাশে কত আছে" — today's sales, baki, joma, expenses, expected cash. */
+  | 'day_summary_query'
+  /** "ভুল হয়েছে", "বাতিল", "শেষটা মুছে দাও" — reverse the last entry (after a confirm). */
+  | 'undo'
   | 'unknown';
 
 export type Unit =

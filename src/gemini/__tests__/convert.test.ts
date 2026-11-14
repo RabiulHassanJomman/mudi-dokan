@@ -113,6 +113,9 @@ describe('convertGemini: other intents', () => {
     expect(convertGemini({ ...NULLS, intent: 'all_stock_query' }, names).parsed).toMatchObject({ intent: 'all_stock_query', missing: [], confidence: 'high' });
     expect(convertGemini({ ...NULLS, intent: 'customer_history_query', customer: 'করিম' }, names).parsed).toMatchObject({ intent: 'customer_history_query', customer: 'করিম', missing: [] });
     expect(convertGemini({ ...NULLS, intent: 'customer_history_query' }, names).parsed).toMatchObject({ intent: 'customer_history_query', missing: ['customer'] });
+    expect(convertGemini({ ...NULLS, intent: 'day_summary_query' }, names).parsed).toMatchObject({ intent: 'day_summary_query', missing: [], confidence: 'high' });
+    expect(convertGemini({ ...NULLS, intent: 'undo' }, names).parsed).toMatchObject({ intent: 'undo', missing: [], confidence: 'high' });
+    expect(convertGemini({ ...NULLS, intent: 'profit_query' }, names).parsed).toMatchObject({ intent: 'profit_query', missing: [], confidence: 'high' });
     // a balance question with no name = all customers, like the rule parser
     expect(convertGemini({ ...NULLS, intent: 'balance_query' }, names).parsed).toMatchObject({ intent: 'total_baki_query', missing: [] });
   });

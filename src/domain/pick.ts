@@ -12,6 +12,8 @@ export interface PickedItem {
   product: string;
   value: number;
   mode: PickMode;
+  /** মাল কেনা (Pick opened from the purchase tab): a purchase, with the total paid if typed. */
+  purchase?: { totalTaka: number | null };
 }
 
 export interface PickProduct {
@@ -32,8 +34,12 @@ const SUB_UNITS: Partial<Record<Unit, Unit[]>> = {
   hali: ['hali', 'piece'],
 };
 
-/** Chips for a product's unit; no product (or a new one): কেজি / গ্রাম / টাকার. */
-export const pickUnits = (unit: Unit | null): PickMode[] => [...(unit ? SUB_UNITS[unit] ?? [unit] : ['kg', 'g'] as Unit[]), 'taka'];
+/** Chips for a product's unit; no product (or a new one): কেজি / গ্রাম / টাকার. A purchase has no টাকার. */
+export const pickUnits = (unit: Unit | null, purchase = false): PickMode[] => [
+  // a new product bought: its unit is decided here, so লিটার / পিস too
+  ...(unit ? SUB_UNITS[unit] ?? [unit] : ((purchase ? ['kg', 'g', 'litre', 'piece'] : ['kg', 'g']) as Unit[])),
+  ...(purchase ? [] : (['taka'] as PickMode[])),
+];
 
 const HALVES = new Set<PickMode>(['kg', 'litre', 'dozen', 'hali', 'bosta']);
 export const halfAllowed = (mode: PickMode) => HALVES.has(mode);
@@ -42,14 +48,26 @@ export const pickModeLabel = (mode: PickMode) => (mode === 'taka' ? 'টাক�
 
 /** "চাল ২½ কেজি", "১০০ টাকার চিনি" — for the log, the button and the "বেছে নিয়েছি" line. */
 export const pickText = (p: PickedItem) =>
-  p.mode === 'taka' ? `${formatNumber(p.value)} টাকার ${p.product}` : `${p.product} ${formatQty(p.value, p.mode)}`;
+  p.mode === 'taka'
+    ? `${formatNumber(p.value)} টাকার ${p.product}`
+    : `${p.product} ${formatQty(p.value, p.mode)}${p.purchase ? ` কেনা${p.purchase.totalTaka ? ` ৳ ${formatNumber(p.purchase.totalTaka)}` : ''}` : ''}`;
 
 /** The same for TTS: "চাল আড়াই কেজি". */
 export const pickWords = (p: PickedItem) =>
-  p.mode === 'taka' ? pickText(p) : `${p.product} ${spokenQty(p.value, p.mode)}`;
+  p.mode === 'taka'
+    ? pickText(p)
+    : `${p.product} ${spokenQty(p.value, p.mode)}${p.purchase ? ` কেনা${p.purchase.totalTaka ? `, ${formatNumber(p.purchase.totalTaka, 0).replace(/,/g, '')} টাকা` : ''}` : ''}`;
 
 export function pickedCommand(p: PickedItem): ParsedCommand {
   const text = pickText(p);
+  if (p.purchase && p.mode !== 'taka') {
+    // the total paid → buy price per unit on the card; none → the card asks for it
+    const total = p.purchase.totalTaka;
+    return {
+      intent: 'purchase', confidence: 'high', raw: text, normalized: text, product: p.product,
+      quantity: { value: p.value, unit: p.mode }, ...(total ? { amount: total } : {}), missing: total ? [] : ['buyPrice'],
+    };
+  }
   const base = { intent: 'sale' as const, confidence: 'high' as const, missing: [], raw: text, normalized: text, product: p.product };
   if (p.mode === 'taka') {
     return { ...base, amount: p.value, items: [{ product: p.product, total: p.value, priceKind: 'total' }] };

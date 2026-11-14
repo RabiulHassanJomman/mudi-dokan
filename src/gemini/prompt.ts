@@ -18,6 +18,8 @@ export const INTENTS: readonly Intent[] = [
   'customer_history_query',
   'all_stock_query',
   'profit_query',
+  'day_summary_query',
+  'undo',
   'unknown',
 ];
 
@@ -63,7 +65,7 @@ export function responseSchema(withTranscript: boolean) {
 }
 
 export const SYSTEM = `You parse one Bangla voice command from a grocery shop (Bangladesh) into JSON.
-intent: sale (selling goods), purchase (shop buys stock: কিনলাম/কেনা), baki (customer owes money, no goods), joma (customer pays back: জমা/দিল/শোধ), expense (shop cost: বিল/ভাড়া/বেতন/নাস্তা/খরচ), owner_withdrawal (the owner takes cash: "মালিক" or a name in "owners" + নিল/নিয়েছে), stock_query (one product: চাল কত আছে?), all_stock_query (every product, no product named: সব মাল কত আছে? মালের লিস্ট, কি কি মাল আছে? স্টক দেখাও), balance_query (one named customer: করিমের বাকি কত?), customer_history_query (one customer's full ledger / list: করিমের হিসাব দেখাও, করিমের খাতা, করিম কি কি বাকিতে নিয়েছে? করিমের বাকির লিস্ট), total_baki_query (all customers together, no name: মোট কত বাকি? সবার বাকি কত? কে কে বাকি আছে? বাকির লিস্ট), profit_query (লাভ কত?), unknown.
+intent: sale (selling goods), purchase (shop buys stock: কিনলাম/কেনা), baki (customer owes money, no goods), joma (customer pays back: জমা/দিল/শোধ), expense (shop cost: বিল/ভাড়া/বেতন/নাস্তা/খরচ), owner_withdrawal (the owner takes cash: "মালিক" or a name in "owners" + নিল/নিয়েছে), stock_query (one product: চাল কত আছে?), all_stock_query (every product, no product named: সব মাল কত আছে? মালের লিস্ট, কি কি মাল আছে? স্টক দেখাও), balance_query (one named customer: করিমের বাকি কত?), customer_history_query (one customer's full ledger / list: করিমের হিসাব দেখাও, করিমের খাতা, করিম কি কি বাকিতে নিয়েছে? করিমের বাকির লিস্ট), total_baki_query (all customers together, no name: মোট কত বাকি? সবার বাকি কত? কে কে বাকি আছে? বাকির লিস্ট), profit_query (লাভ কত? আজ লাভ কত?), day_summary_query (the whole day, no customer name: আজকের হিসাব, আজকের খাতা, হিসাব বলো, ক্যাশে কত আছে? হাতে কত টাকা আছে?), undo (cancel the last saved entry, nothing else said, no number: ভুল হয়েছে, বাতিল, বাতিল করো, শেষটা মুছে দাও), unknown.
 Rules:
 - items only for sale; one entry per line in spoken order; the same product twice stays two lines.
 - product: use ONLY a name from the given product list (map spelling variants and brand words to it, e.g. চাউল → চাল). If none fits, use the spoken word.
@@ -104,6 +106,8 @@ export const EXAMPLES: [string, Record<string, unknown>][] = [
   ['সবার বাকি কত', { intent: 'total_baki_query', ...NULLS }],
   ['করিমের খাতা দেখাও', { intent: 'customer_history_query', ...NULLS, customer: 'করিম' }],
   ['কি কি মাল আছে', { intent: 'all_stock_query', ...NULLS }],
+  ['আজকের হিসাব বলো', { intent: 'day_summary_query', ...NULLS }],
+  ['শেষটা মুছে দাও', { intent: 'undo', ...NULLS }],
   ['মিজান সাতশো টাকা জমা দিল', { intent: 'joma', ...NULLS, customer: 'মিজান', amount: 700 }],
   ['গ্যাস বিল আটশো টাকা খরচ', { intent: 'expense', ...NULLS, amount: 800, item: 'গ্যাস বিল' }],
   ['মালিক তিনশো টাকা নিল ওষুধের জন্য', { intent: 'owner_withdrawal', ...NULLS, amount: 300, person: 'মালিক', note: 'ওষুধের জন্য' }],

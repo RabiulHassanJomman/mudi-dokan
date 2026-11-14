@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import { Keyboard, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router, useFocusEffect } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 
 import { Icon, productIcon } from '../components/Icon';
@@ -29,6 +29,7 @@ import { colors, fonts, fontSize, productTiles, radius, size, spacing } from '..
 type Chosen = { name: string; product: PickProduct | null };
 
 const HINT = 'ছবি দেখে মাল বেছে নিন। তারপর নম্বর চাপুন, তারপর ঠিক আছে।';
+const HINT_BUY = 'মাল কেনা। ছবি দেখে মাল বেছে নিন। পরিমাণ চাপুন, তারপর মোট দামে চেপে টাকা দিন।';
 
 /**
  * ছবি দেখে বেছে নিন / লিখুন (Pick.dc.html): product grid with search, big number pad
@@ -37,6 +38,12 @@ const HINT = 'ছবি দেখে মাল বেছে নিন। তা�
  */
 export default function PickScreen() {
   const db = useSQLiteContext();
+  /** tab = purchase: মাল কেনা (from the purchase tab's voice fallback) — quantity + total paid. */
+  const { tab } = useLocalSearchParams<{ tab?: string }>();
+  const buying = tab === 'purchase';
+  /** Which box the pad types into (purchase only has two). */
+  const [field, setField] = useState<'qty' | 'price'>('qty');
+  const [priceNum, setPriceNum] = useState('');
   const [products, setProducts] = useState<PickProduct[]>([]);
   const [names, setNames] = useState<{ products: string[]; customers: string[] }>({ products: [], customers: [] });
   const [aliases, setAliases] = useState<Record<string, string>>({});
@@ -62,12 +69,13 @@ export default function PickScreen() {
   const shown = useMemo(() => filterProducts(products, query), [products, query]);
   const q = query.trim();
   const offerNew = q.length > 0 && !products.some((p) => p.name === q || p.aliases.includes(q));
-  const units = pickUnits(chosen?.product?.unit ?? null);
+  const units = pickUnits(chosen?.product?.unit ?? null, buying);
 
   const choose = (c: Chosen) => {
     Keyboard.dismiss();
     setChosen(c);
-    const next = pickUnits(c.product?.unit ?? null)[0]!;
+    const next = pickUnits(c.product?.unit ?? null, buying)[0]!;
+    setField('qty');
     setMode(next);
     if (!halfAllowed(next)) setNum((n) => n.replace(/\.5$/, ''));
     const price = c.product?.sellPricePoisha;
@@ -86,27 +94,33 @@ export default function PickScreen() {
     void speak(pickModeLabel(m));
   };
 
-  const onKey = (k: PadKey) => setNum((n) => padPress(n, k, { allowHalf: halfAllowed(mode), maxDigits: mode === 'taka' ? 6 : 5 }));
+  const onKey = (k: PadKey) =>
+    field === 'price'
+      ? setPriceNum((n) => padPress(n, k, { allowHalf: false, maxDigits: 7 }))
+      : setNum((n) => padPress(n, k, { allowHalf: halfAllowed(mode), maxDigits: mode === 'taka' ? 6 : 5 }));
 
   const value = padValue(num);
-  const pick: PickedItem | null = chosen && value ? { product: chosen.name, value, mode } : null;
+  const price = padValue(priceNum);
+  const pick: PickedItem | null =
+    chosen && value ? { product: chosen.name, value, mode, ...(buying ? { purchase: { totalTaka: price } } : {}) } : null;
 
   const readScreen = useCallback(() => {
-    void speak(pick ? `${pickWords(pick)}। ঠিক থাকলে ঠিক আছে চাপুন।` : chosen ? `${chosen.name}। এবার নম্বর চাপুন।` : HINT);
-  }, [pick, chosen]);
+    void speak(pick ? `${pickWords(pick)}। ঠিক থাকলে ঠিক আছে চাপুন।` : chosen ? `${chosen.name}। এবার নম্বর চাপুন।` : buying ? HINT_BUY : HINT);
+  }, [pick, chosen, buying]);
 
   const done = () => {
     if (!chosen) return void speak('আগে মাল বেছে নিন।');
     if (!value) return void speak('কতটুকু, নম্বর চাপুন।');
-    router.replace({ pathname: '/confirm', params: { pick: JSON.stringify(pick), tab: 'sale' } });
+    router.replace({ pathname: '/confirm', params: { pick: JSON.stringify(pick), tab: buying ? 'purchase' : 'sale' } });
   };
 
   /** Keyboard ✓: a whole command ("চাল ২ কেজি") goes to the confirm card; a name just searches. */
   const submitTyped = () => {
     if (!q) return;
-    const p = parseCommand(q, { tab: 'sale', knownProducts: names.products, knownCustomers: names.customers, productAliases: aliases });
-    const isCommand = p.intent !== 'sale' || (p.items ?? []).some((i) => i.quantity || i.total !== undefined);
-    if (isCommand) router.replace({ pathname: '/confirm', params: { text: q, tab: 'sale' } });
+    const t = buying ? 'purchase' : 'sale';
+    const p = parseCommand(q, { tab: t, knownProducts: names.products, knownCustomers: names.customers, productAliases: aliases });
+    const isCommand = p.intent !== t || (p.items ?? []).some((i) => i.quantity || i.total !== undefined) || (buying && !!p.quantity);
+    if (isCommand) router.replace({ pathname: '/confirm', params: { text: q, tab: t } });
     else if (shown.length === 1) choose({ name: shown[0]!.name, product: shown[0]! });
     else Keyboard.dismiss();
   };
@@ -144,7 +158,18 @@ export default function PickScreen() {
         )}
       </ScrollView>
 
-      <View style={styles.qtyRow}>
+      {buying && (
+        <Txt size={fontSize.body} weight="bold" color={colors.stock}>
+          মাল কেনা
+        </Txt>
+      )}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="পরিমাণ"
+        accessibilityState={{ selected: field === 'qty' }}
+        onPress={() => setField('qty')}
+        style={[styles.qtyRow, buying && field === 'qty' && styles.fieldOn]}
+      >
         <Txt size={fontSize.amount} weight="bold" color={num ? colors.ink : colors.muted} style={styles.flex}>
           {mode === 'taka' ? `৳ ${padDisplay(num) || '০'}` : padDisplay(num) || '০'}
         </Txt>
@@ -163,9 +188,28 @@ export default function PickScreen() {
             </Pressable>
           ))}
         </View>
-      </View>
+      </Pressable>
+      {buying && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="মোট দাম, টাকা"
+          accessibilityState={{ selected: field === 'price' }}
+          onPress={() => {
+            setField('price');
+            void speak('মোট কত টাকায় কিনলেন?');
+          }}
+          style={[styles.qtyRow, field === 'price' && styles.fieldOn]}
+        >
+          <Txt size={fontSize.body} weight="semibold" color={colors.ink2}>
+            মোট দাম
+          </Txt>
+          <Txt size={fontSize.amount} weight="bold" color={priceNum ? colors.ink : colors.muted} style={styles.flex}>
+            {`৳ ${padDisplay(priceNum) || '?'}`}
+          </Txt>
+        </Pressable>
+      )}
 
-      <NumberPad onKey={onKey} allowHalf={halfAllowed(mode)} keyHeight={56} />
+      <NumberPad onKey={onKey} allowHalf={field === 'qty' && halfAllowed(mode)} keyHeight={buying ? 50 : 56} />
 
       <Pressable
         accessibilityRole="button"
@@ -272,6 +316,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   unitOn: { borderColor: colors.sale, backgroundColor: colors.saleTint },
+  fieldOn: { borderWidth: 3, borderColor: colors.stock },
   ok: {
     height: 72,
     borderRadius: radius.button,

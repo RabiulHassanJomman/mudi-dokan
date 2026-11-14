@@ -128,7 +128,7 @@ export function entryFromParse(p: ParsedCommand, ctx: EntryContext): EntryDraft 
   let kind: EntryKind | null;
   if (p.intent === 'baki' || p.intent === 'joma') kind = p.intent;
   else if (p.intent === 'unknown' && (ctx.tab === 'ledger' || p.missing.includes('intent'))) kind = ctx.defaultKind ?? null;
-  else if (p.intent === 'expense') {
+  else if (p.intent === 'expense' || (p.intent === 'unknown' && ctx.tab === 'expense' && !p.raw.trim())) {
     return finalize({ ...base, kind: 'expense', item: p.item ?? null, person: p.person ?? null, note: p.note ?? null });
   } else if (p.intent === 'owner_withdrawal') {
     return finalize({ ...base, kind: 'owner_withdrawal', person: p.person ?? null, note: p.note ?? null });
@@ -209,6 +209,14 @@ export function choosePurchaseProduct(d: EntryDraft, product: ProductInfo): Entr
     ...d,
     purchase: { ...l, product, productName: product.name, quantity, unit, buyPricePoisha, sellPricePoisha, unitWarning, alias },
   });
+}
+
+/** A purchase's product name typed or said on the card: a known one is chosen, else a new product. */
+export function renamePurchaseProduct(d: EntryDraft, name: string, known: ProductInfo | null): EntryDraft {
+  const n = name.normalize('NFC').replace(/\s+/g, ' ').trim();
+  if (!d.purchase || !n) return d;
+  if (known) return choosePurchaseProduct(d, known);
+  return finalize({ ...d, purchase: { ...d.purchase, productName: n, product: null, unitWarning: false, alias: null } });
 }
 
 export const canSaveEntry = (d: EntryDraft) => d.problems.length === 0;

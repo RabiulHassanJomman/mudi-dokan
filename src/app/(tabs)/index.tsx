@@ -8,7 +8,8 @@ import { Icon, productIcon, type IconName } from '../../components/Icon';
 import { ScreenHeader } from '../../components/ScreenHeader';
 import { Txt } from '../../components/Txt';
 import { buildLabel } from '../../lib/buildInfo';
-import { getSetup, pilotStats, recentEntries, todayTotals, type PilotStats } from '../../db/repo';
+import { cashDay, getSetup, pilotStats, recentEntries, todayTotals, type PilotStats } from '../../db/repo';
+import { today as todayDate } from '../../domain/cash';
 import { recentLine, type RecentEntry } from '../../domain/recent';
 import { getDevice } from '../../device';
 import { formatNumber, formatTaka, toBnDigits } from '../../lib/bn';
@@ -53,11 +54,14 @@ export default function SaleScreen() {
   const [today, setToday] = useState({ sales: 0, baki: 0 });
   const [recent, setRecent] = useState<RecentEntry[]>([]);
   const [stats, setStats] = useState<PilotStats | null>(null);
+  /** হাতে ক্যাশ = today's expected cash in hand. */
+  const [cash, setCash] = useState<number | null>(null);
 
   useFocusEffect(
     useCallback(() => {
       void (async () => {
         setToday(await todayTotals(db, startOfToday()));
+        setCash((await cashDay(db, todayDate())).expectedPoisha);
         setRecent(await recentEntries(db, 3));
         setStats(await pilotStats(db));
         setShopName((await getSetup(db, getDevice().id)).shopName);
@@ -68,7 +72,8 @@ export default function SaleScreen() {
   const readScreen = () => {
     const last = recent[0];
     void speak(
-      `আজ বিক্রি ${formatNumber(today.sales / 100)} টাকা। আজ বাকি ${formatNumber(today.baki / 100)} টাকা। ` +
+      (cash !== null ? `হাতে ক্যাশ ${formatNumber(cash / 100).replace(/,/g, '')} টাকা। ` : '') +
+        `আজ বিক্রি ${formatNumber(today.sales / 100)} টাকা। আজ বাকি ${formatNumber(today.baki / 100)} টাকা। ` +
         (last ? `শেষ: ${recentLine(last).words} ` : '') +
         'বিক্রি বলতে মাইক চাপুন। ছবি দেখে বেছে নিতে লিখুন চাপুন।',
     );
@@ -82,8 +87,32 @@ export default function SaleScreen() {
         onSettings={() => router.push({ pathname: '/setup', params: { edit: '1' } })}
       />
       <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`হাতে ক্যাশ ${cash !== null ? formatTaka(cash) : ''}, আজকের ক্যাশ দেখুন`}
+          onPress={() => router.push('/cash')}
+          style={({ pressed }) => [styles.cashCard, pressed && styles.pressed]}
+        >
+          <View style={styles.cashTile}>
+            <Icon name="wallet" size={32} color={colors.onColor} strokeWidth={1.8} />
+          </View>
+          <View style={styles.flex}>
+            <Txt size={17} weight="medium" color={colors.onDarkMuted}>
+              হাতে ক্যাশ
+            </Txt>
+            <Txt size={fontSize.amount} weight="bold" color={colors.onColor}>
+              {cash !== null ? formatTaka(cash) : '৳ …'}
+            </Txt>
+          </View>
+          <Icon name="forward" size={26} color={colors.onColor} strokeWidth={2.2} />
+        </Pressable>
         <View style={styles.tiles}>
-          <View style={[styles.tile, { backgroundColor: colors.sale }]}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`আজ বিক্রি ${formatTaka(today.sales)}, আজকের খাতা দেখুন`}
+            onPress={() => router.push({ pathname: '/history', params: { filter: 'sale' } })}
+            style={({ pressed }) => [styles.tile, { backgroundColor: colors.sale }, pressed && styles.pressed]}
+          >
             <Icon name="cash" size={30} color={colors.onColor} />
             <View style={styles.flex}>
               <Txt numberOfLines={1} size={fontSize.listAmount} weight="bold" color={colors.onColor}>
@@ -93,7 +122,7 @@ export default function SaleScreen() {
                 আজ বিক্রি
               </Txt>
             </View>
-          </View>
+          </Pressable>
           <View style={[styles.tile, { backgroundColor: colors.bakiTint }]}>
             <Icon name="book" size={30} color={colors.bakiInk} />
             <View style={styles.flex}>
@@ -206,7 +235,24 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.sm,
   },
-  micArea: { alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.xl },
+  micArea: { alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.lg },
+  cashCard: {
+    backgroundColor: colors.dark,
+    borderRadius: radius.button,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.screen,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.lg,
+  },
+  cashTile: {
+    width: size.iconButton,
+    height: size.iconButton,
+    borderRadius: radius.icon,
+    backgroundColor: colors.darkTile,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   mic: {
     width: size.mic,
     height: size.mic,

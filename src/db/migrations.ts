@@ -254,11 +254,44 @@ CREATE TABLE customer_aliases (
 CREATE INDEX customer_aliases_alias ON customer_aliases(alias);
 `;
 
+/** The v_<table> view from v10 on: latest version, not voided, with `at` = when it happened. */
+const latestView = (table: string) => `
+CREATE VIEW v_${table} AS
+  SELECT t.*, COALESCE(t.entry_at, t.created_at) AS at FROM ${table} t
+  WHERE t.voided = 0 AND NOT EXISTS (SELECT 1 FROM ${table} c WHERE c.corrects_id = t.id);`;
+
+const V_STOCK = `
+CREATE VIEW v_stock AS
+  SELECT p.id AS product_id, p.name, p.unit,
+    COALESCE((SELECT SUM(quantity) FROM v_purchases WHERE product_id = p.id), 0)
+      - COALESCE((SELECT SUM(quantity) FROM v_sales WHERE product_id = p.id), 0) AS stock
+  FROM products p WHERE p.archived = 0;`;
+
+/**
+ * v10 (build step 5): corrections and undo.
+ * - voided = 1: the correction that cancels an entry (✏️ মুছুন, "ভুল হয়েছে"). It copies the
+ *   old values; the v_ views leave the entry out from then on.
+ * - entry_at: when the entry happened. A correction copies its original's time, so fixing
+ *   yesterday's sale today keeps it in yesterday's cash and history. null = created_at
+ *   (every row before v10, and new rows). The views expose it as `at`.
+ * Views are dropped and made again with the voided filter (v_stock reads two of them).
+ */
+const V10 = `
+DROP VIEW v_stock;
+${ENTRY_TABLES.map((t) => `DROP VIEW v_${t};`).join('\n')}
+${ENTRY_TABLES.map(
+  (t) => `ALTER TABLE ${t} ADD COLUMN voided INTEGER NOT NULL DEFAULT 0 CHECK (voided IN (0,1));
+ALTER TABLE ${t} ADD COLUMN entry_at INTEGER;`,
+).join('\n')}
+${ENTRY_TABLES.map(latestView).join('\n')}
+${V_STOCK}
+`;
+
 /**
  * Index i holds the SQL that takes the DB from user_version i to i + 1.
  * Append only; never edit or renumber a shipped one.
  */
-export const MIGRATIONS: readonly string[] = [V1, V2, V3, V4, V5, V6, V7, V8, V9];
+export const MIGRATIONS: readonly string[] = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10];
 
 /**
  * Nov 14 fork: an early main build shipped v7 = customers.note (no Gemini columns) while

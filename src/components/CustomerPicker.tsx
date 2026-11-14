@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { customerStatus, suggestCustomers } from '../domain/customers';
+import { speak, stopSpeaking } from '../lib/speak';
+import { useVoiceOnce } from '../lib/useVoiceOnce';
 import { colors, fonts, fontSize, radius, spacing } from '../theme/tokens';
 import { Icon } from './Icon';
 import { Txt } from './Txt';
@@ -30,6 +32,16 @@ export function CustomerPicker({ label, name, ok, known, onChange }: Props) {
     setText(n);
     onChange(n, true);
   };
+  // 🎤: say the name (a new customer too, not only one of the chips)
+  const voice = useVoiceOnce();
+  const sayName = async () => {
+    stopSpeaking();
+    const heard = await voice.listen();
+    const t = heard?.[0]?.trim();
+    if (!t) return void speak('শুনতে পাইনি। আবার বলুন বা লিখুন।');
+    setText(t);
+    onChange(t, customerStatus(t, known) === 'known');
+  };
 
   return (
     <View style={styles.box}>
@@ -49,7 +61,20 @@ export function CustomerPicker({ label, name, ok, known, onChange }: Props) {
           style={[styles.input, status === 'unknown' && !ok && styles.inputWarn]}
         />
         {status === 'known' && <Icon name="check" size={28} color={colors.sale} strokeWidth={2.8} />}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="ক্রেতার নাম বলুন"
+          onPress={() => (voice.listening ? voice.stop() : void sayName())}
+          style={[styles.mic, voice.listening && styles.micOn]}
+        >
+          <Icon name="mic" size={26} color={colors.onColor} />
+        </Pressable>
       </View>
+      {voice.listening && (
+        <Txt size={fontSize.body} weight="bold" color={colors.saleDark}>
+          শুনছি… নাম বলুন
+        </Txt>
+      )}
 
       {status === 'missing' && known.length > 0 && (
         <View style={styles.chips}>
@@ -113,6 +138,8 @@ const styles = StyleSheet.create({
     color: colors.ink,
   },
   inputWarn: { borderColor: colors.baki },
+  mic: { width: 56, height: 56, borderRadius: radius.pill, backgroundColor: colors.sale, alignItems: 'center', justifyContent: 'center' },
+  micOn: { backgroundColor: colors.saleDark, borderWidth: 4, borderColor: colors.micRing },
   warn: { backgroundColor: colors.bakiTint, borderRadius: radius.card, padding: spacing.md, gap: spacing.xs },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
   chip: {

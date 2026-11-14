@@ -50,7 +50,8 @@ export default function ListeningScreen() {
   /** customer / kind: from the customer screen (জমা নিন / বাকি দিন), passed on to the confirm card. */
   const { tab = 'sale', customer, kind } = useLocalSearchParams<{ tab?: string; customer?: string; kind?: string }>();
   const carry = { ...(customer ? { customer } : {}), ...(kind ? { kind } : {}) };
-  const ledger = tab === 'ledger';
+  /** No goods to pick: বাকি/জমা and খরচ fall back to the number pad. */
+  const byPad = tab === 'ledger' || tab === 'expense';
   const [phase, setPhase] = useState<Phase>('starting');
   const [heard, setHeard] = useState('');
   const [errorText, setErrorText] = useState('');
@@ -262,22 +263,22 @@ export default function ListeningScreen() {
               আবার বলুন
             </Txt>
           </Pressable>
-          {/* voice failed: products by picture (Pick); বাকি/জমা on the number pad (empty confirm card).
-              Pick only sells, so a purchase (মাল কেনা) offers just "আবার বলুন". */}
-          {tab !== 'purchase' && <Pressable
+          {/* voice failed: products by picture (Pick: sale or purchase); বাকি/জমা/খরচ on the number
+              pad (empty confirm card) */}
+          <Pressable
             accessibilityRole="button"
             onPress={() => {
               closing.current = true;
-              if (ledger) router.replace({ pathname: '/confirm', params: { text: '', tab, ...carry } });
-              else router.replace('/pick');
+              if (byPad) router.replace({ pathname: '/confirm', params: { text: '', tab, ...carry } });
+              else router.replace({ pathname: '/pick', params: { tab: tab === 'purchase' ? 'purchase' : 'sale' } });
             }}
             style={[styles.action, styles.actionAlt]}
           >
-            <Icon name={ledger ? 'keypad' : 'image'} size={30} color={colors.onColor} />
+            <Icon name={byPad ? 'keypad' : 'image'} size={30} color={colors.onColor} />
             <Txt size={fontSize.listAmount} weight="bold" color={colors.onColor}>
-              {ledger ? 'টাকা চেপে দিন' : 'ছবি দেখে বেছে নিন'}
+              {byPad ? 'টাকা চেপে দিন' : 'ছবি দেখে বেছে নিন'}
             </Txt>
-          </Pressable>}
+          </Pressable>
         </>
       ) : phase === 'thinking' ? null : (
         <Pressable

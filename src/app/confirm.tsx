@@ -5,7 +5,9 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-speech-recognition';
 
+import { ConfirmSheet } from '../components/ConfirmSheet';
 import { CustomerPicker } from '../components/CustomerPicker';
+import { NameSheet } from '../components/NameSheet';
 import { ProductSuggest } from '../components/ProductSuggest';
 import { EntryForm } from '../components/EntryForm';
 import { Avatar } from '../components/Avatar';
@@ -20,6 +22,7 @@ import {
   priceWarningText,
   readback,
   removeItem,
+  renameItem,
   setItemPrice,
   setItemTotal,
   stepItem,
@@ -37,10 +40,14 @@ import {
   diffEntries,
   entryFromParse,
   entryReadback,
+  renamePurchaseProduct,
   type EntryDraft,
   type LedgerKind,
 } from '../domain/entry';
-import type { PickProduct } from '../domain/pick';
+import { addDays, dayStart, daySummaryWords, profitOf, profitWords, today } from '../domain/cash';
+import { basketFromStored, entryFromStored, type StoredEntry } from '../domain/fix';
+import { filterProducts, type PickProduct } from '../domain/pick';
+import { recentLine, type RecentEntry } from '../domain/recent';
 import { suggestProducts } from '../domain/products';
 import { allStockList, allStockWords, stockView, stockWords, type StockView } from '../domain/stock';
 import {
@@ -63,6 +70,16 @@ import {
   setParsed,
   stockList,
   customerHistory,
+  basketForFix,
+  cashDay,
+  entryForFix,
+  isFixTable,
+  profitInput,
+  recentEntries,
+  saveBasketFix,
+  saveEntryFix,
+  TABLE_OF,
+  voidEntry,
 } from '../db/repo';
 import { getDevice, writer } from '../device';
 import { UNIT_BN, formatNumber, formatQty, formatTaka, parseTakaInput, toBnDigits } from '../lib/bn';
@@ -77,7 +94,7 @@ type How = 'voice' | 'typed' | 'pick';
 
 /** "চাল কত আছে?" / "করিমের বাকি কত?": the answer, or (name not known) the closest names to choose from. */
 interface Answer {
-  question: 'stock' | 'balance' | 'history' | 'total_baki' | 'all_stock';
+  question: 'stock' | 'balance' | 'history' | 'total_baki' | 'all_stock' | 'profit' | 'day';
   /** The name as heard. */
   spoken: string | null;
   /** What TTS said; null until a name is chosen. */
@@ -88,6 +105,8 @@ interface Answer {
   /** Summary questions: every customer who owes (largest first) / every product (low first). */
   owed?: { id: string; name: string; balance_poisha: number }[];
   stock?: StockView[];
+  /** লাভ / আজকের হিসাব: buttons to আজকের ক্যাশ and আজকের খাতা. */
+  links?: boolean;
 }
 
 type State =
@@ -95,7 +114,9 @@ type State =
   | { kind: 'unsupported'; transcript: string; intent: Intent }
   | { kind: 'answer'; transcript: string; answer: Answer }
   | { kind: 'ready'; transcript: string }
-  | { kind: 'entry'; transcript: string };
+  | { kind: 'entry'; transcript: string }
+  /** "ভুল হয়েছে": the last entry, to cancel after হ্যাঁ (null = nothing to cancel). */
+  | { kind: 'undo'; transcript: string; target: RecentEntry | null };
 
 const PARSE_TABS: readonly NonNullable<ParseContext['tab']>[] = ['sale', 'purchase', 'ledger', 'stock', 'expense'];
 
@@ -112,6 +133,8 @@ const INTENT_BN: Record<Intent, string> = {
   customer_history_query: 'হিসাব দেখা',
   all_stock_query: 'সব মাল জানা',
   profit_query: 'লাভ জানা',
+  day_summary_query: 'আজকের হিসাব',
+  undo: 'শেষটা বাতিল',
   unknown: 'বুঝিনি',
 };
 
@@ -125,7 +148,9 @@ export default function ConfirmScreen() {
    * logId = voice (from Listening); text = typed; pick = chosen on ছবি দেখে (JSON PickedItem).
    * customer / kind: from the customer screen (জমা নিন / বাকি দিন), used when not said.
    */
-  const params = useLocalSearchParams<{ logId?: string; text?: string; tab?: string; pick?: string; customer?: string; kind?: string }>();
+  const params = useLocalSearchParams<{ logId?: string; text?: string; tab?: string; pick?: string; customer?: string; kind?: string; fix?: string }>();
+  /** ✏️ from History: "sales:<basket id>" or "<table>:<row id>" — the card edits a saved entry. */
+  const fixing = !!params.fix;
   const tab = params.tab ?? 'sale';
   const defaultKind: LedgerKind | undefined = params.kind === 'baki' || params.kind === 'joma' ? params.kind : undefined;
 
@@ -138,11 +163,21 @@ export default function ConfirmScreen() {
   const [catalog, setCatalog] = useState<PickProduct[]>([]);
   /** The parsed sale had a customer: keep the name box on a cash sale too. */
   const [showCustomer, setShowCustomer] = useState(false);
-  const how: How = params.pick ? 'pick' : params.logId ? 'voice' : 'typed';
+  const how: How = params.pick || params.text === '' ? 'pick' : params.logId ? 'voice' : 'typed';
   const [answering, setAnswering] = useState(false);
   const [saving, setSaving] = useState(false);
   /** Experiment: the card shows Gemini's result (gemini mode). */
   const [byGemini, setByGemini] = useState(false);
+  /** The product name sheet: a basket line's key, or null for the purchase. */
+  const [renaming, setRenaming] = useState<{ key: string | null; name: string } | null>(null);
+  /** ✏️ fix: "এটা বাতিল করবো?" */
+  const [askVoid, setAskVoid] = useState(false);
+  /** ✏️ fix: what is being fixed. */
+  const fixRef = useRef<{ table: string; id: string; stored: StoredEntry | null } | null>(null);
+  /** "ভুল হয়েছে": the entry to cancel. */
+  const undoRef = useRef<RecentEntry | null>(null);
+  /** The হ্যাঁ/না listener is on (other mics on the card — names — must not answer it). */
+  const answeringRef = useRef(false);
 
   const logId = useRef<string | null>(null);
   const first = useRef<BasketDraft | null>(null);
@@ -162,10 +197,13 @@ export default function ConfirmScreen() {
     const perm = await ExpoSpeechRecognitionModule.getPermissionsAsync();
     if (!perm.granted || decided.current) return;
     setAnswering(true);
+    answeringRef.current = true;
     ExpoSpeechRecognitionModule.start({ lang: 'bn-BD', interimResults: false, maxAlternatives: 3, continuous: false });
   }, []);
 
   const stopListening = useCallback(() => {
+    if (!answeringRef.current) return;
+    answeringRef.current = false;
     setAnswering(false);
     ExpoSpeechRecognitionModule.abort();
   }, []);
@@ -181,17 +219,24 @@ export default function ConfirmScreen() {
   );
   const readAloud = () => {
     if (state.kind === 'answer') void speak(state.answer.text ?? answerPrompt(state.answer));
+    else if (state.kind === 'undo') void sayAndListen(undoWords(state.target), !!state.target);
+    else if (fixing && entry) void speak(`ঠিক করুন। ${entryReadback(entry).replace(/ ঠিক আছে\?$/, '')} বদলে হ্যাঁ চাপুন।`);
+    else if (fixing && basket) void speak(`ঠিক করুন। ${readback(basket).replace(/ ঠিক আছে\?$/, '')} বদলে হ্যাঁ চাপুন।`);
     else if (entry) void sayAndListen(entryReadback(entry), canSaveEntry(entry));
     else if (basket) void sayAndListen(readback(basket), canSave(basket));
   };
 
   useSpeechRecognitionEvent('result', (e) => {
-    if (!e.isFinal) return;
+    if (!e.isFinal || !answeringRef.current) return;
+    answeringRef.current = false;
     const answers = e.results.map((r) => classifyAnswer(r.transcript));
     if (answers.includes('no')) void onNo();
     else if (answers.includes('yes')) void onYes();
   });
-  useSpeechRecognitionEvent('end', () => setAnswering(false));
+  useSpeechRecognitionEvent('end', () => {
+    answeringRef.current = false;
+    setAnswering(false);
+  });
 
   // ── load: log row → parse → products → basket ──────────────────
   useEffect(() => {
@@ -209,6 +254,10 @@ export default function ConfirmScreen() {
       setKnown(owed);
       const catalogNow = await pickProducts(db);
       setCatalog(catalogNow);
+      if (params.fix) {
+        await loadFix(params.fix, names.customers);
+        return;
+      }
       if (params.pick) {
         // no speech, no parser: the picked product + number is the command
         const pick = JSON.parse(params.pick) as PickedItem;
@@ -288,6 +337,37 @@ export default function ConfirmScreen() {
         void speak(answer.text ?? answerPrompt(answer));
         return;
       }
+      if (parsed.intent === 'profit_query' || parsed.intent === 'day_summary_query') {
+        // "আজ লাভ কত?" / "আজকের হিসাব": TTS answer, buttons to the Cash and History screens
+        await setOutcome(db, w, logId.current, 'unsupported');
+        decided.current = true;
+        const d = today();
+        let text: string;
+        if (parsed.intent === 'profit_query') {
+          text = profitWords(profitOf(await profitInput(db, dayStart(d), dayStart(addDays(d, 1)))));
+        } else {
+          const c = await cashDay(db, d);
+          text = daySummaryWords(c.flows, c.expectedPoisha);
+        }
+        if (!alive) return;
+        const answer: Answer = { question: parsed.intent === 'profit_query' ? 'profit' : 'day', spoken: null, text, choices: [], links: true };
+        setState({ kind: 'answer', transcript, answer });
+        void speak(text);
+        return;
+      }
+      if (parsed.intent === 'undo') {
+        // "ভুল হয়েছে": show the last entry; হ্যাঁ cancels it with a correction
+        const [target] = await recentEntries(db, 1);
+        if (!alive) return;
+        undoRef.current = target ?? null;
+        setState({ kind: 'undo', transcript, target: target ?? null });
+        if (!target) {
+          await setOutcome(db, w, logId.current, 'unsupported');
+          decided.current = true;
+        }
+        void sayAndListen(undoWords(target ?? null), !!target);
+        return;
+      }
       if (parsed.intent === 'total_baki_query' || parsed.intent === 'all_stock_query') {
         // summary question: a list to tap, TTS says only the totals; nothing to save
         await setOutcome(db, w, logId.current, 'unsupported');
@@ -323,11 +403,11 @@ export default function ConfirmScreen() {
           void sayAndListen(entryReadback(e), canSaveEntry(e));
           return;
         }
-        // questions (স্টক, লাভ) and commands nobody understood
+        // commands nobody understood
         await setOutcome(db, w, logId.current, 'unsupported');
         decided.current = true;
         setState({ kind: 'unsupported', transcript, intent: parsed.intent });
-        void speak(parsed.intent === 'unknown' ? 'কিছু বুঝিনি। আবার বলুন।' : 'এই প্রশ্নের উত্তর পরের ধাপে আসবে।');
+        void speak('কিছু বুঝিনি। আবার বলুন।');
         return;
       }
       const products = await findProducts(db, (parsed.items ?? []).map((i) => i.product ?? ''));
@@ -374,6 +454,119 @@ export default function ConfirmScreen() {
     void speak(historyWords(c.name, c.balance_poisha, await customerHistory(db, c.id)));
     router.replace({ pathname: '/customer/[id]', params: { id: c.id } });
   }
+
+  /** ✏️: the saved entry → the same card (basket or entry form); nothing is logged. */
+  async function loadFix(fix: string, customers: string[]) {
+    const [table, id] = fix.split(':') as [string, string];
+    fixRef.current = { table, id, stored: null };
+    decided.current = false;
+    if (table === 'sales') {
+      const lines = await basketForFix(db, id);
+      if (!lines.length) return void setState({ kind: 'unsupported', transcript: '', intent: 'unknown' });
+      const b = basketFromStored(lines, customers);
+      first.current = b;
+      setBasket(b);
+      setShowCustomer(!!b.customerName);
+      setState({ kind: 'ready', transcript: '' });
+      void speak(`ঠিক করুন। ${readback(b).replace(/ ঠিক আছে\?$/, '')} বদলে হ্যাঁ চাপুন।`);
+      return;
+    }
+    const stored = isFixTable(table) ? await entryForFix(db, table, id) : null;
+    if (!stored) return void setState({ kind: 'unsupported', transcript: '', intent: 'unknown' });
+    fixRef.current.stored = stored;
+    const e = entryFromStored(stored);
+    firstEntry.current = e;
+    setEntry(e);
+    setState({ kind: 'entry', transcript: '' });
+    void speak(`ঠিক করুন। ${entryReadback(e).replace(/ ঠিক আছে\?$/, '')} বদলে হ্যাঁ চাপুন।`);
+  }
+
+  /** ✏️ হ্যাঁ: correction rows (never an edit). */
+  async function saveFix() {
+    const f = fixRef.current;
+    if (!f || decided.current || saving) return;
+    const b = latest.current;
+    const e = latestEntry.current;
+    if ((b && !canSave(b)) || (e && !canSaveEntry(e))) return void speak(b ? readback(b) : entryReadback(e!));
+    stopListening();
+    setSaving(true);
+    decided.current = true;
+    try {
+      const changed = b ? await saveBasketFix(db, writer(), f.id, b) : await saveEntryFix(db, writer(), f.stored!, e!);
+      void speak(changed ? 'ঠিক করা হয়েছে।' : 'কিছু বদলায়নি।');
+      leave();
+    } catch (err) {
+      decided.current = false;
+      setSaving(false);
+      void speak('রাখা গেল না।');
+      console.warn('saveFix failed', err);
+    }
+  }
+
+  /** ✏️ এটা বাতিল করুন / "ভুল হয়েছে" হ্যাঁ: a voided correction. */
+  async function cancelEntry(table: Parameters<typeof voidEntry>[2], id: string): Promise<boolean> {
+    try {
+      const ids = await voidEntry(db, writer(), table, id);
+      if (logId.current) await setOutcome(db, writer(), logId.current, 'saved', { entryTable: table, entryId: ids[0], intent: 'undo', final: { undo: table, id } });
+      return true;
+    } catch (err) {
+      console.warn('voidEntry failed', err);
+      void speak('বাতিল করা গেল না।');
+      return false;
+    }
+  }
+
+  async function confirmUndo() {
+    const t = undoRef.current;
+    if (!t || decided.current || saving) return;
+    stopListening();
+    setSaving(true);
+    decided.current = true;
+    if (await cancelEntry(TABLE_OF[t.kind], t.id)) {
+      void speak('বাতিল করা হয়েছে।');
+      leave();
+    } else {
+      decided.current = false;
+      setSaving(false);
+    }
+  }
+
+  async function voidFixed() {
+    const f = fixRef.current;
+    if (!f || saving) return;
+    setSaving(true);
+    decided.current = true;
+    if (await cancelEntry(f.table as Parameters<typeof voidEntry>[2], f.id)) {
+      setAskVoid(false);
+      void speak('বাতিল করা হয়েছে।');
+      leave();
+    } else {
+      decided.current = false;
+      setSaving(false);
+    }
+  }
+
+  /** A product name typed or said on the card (the name sheet). */
+  async function renameLine(key: string | null, name: string) {
+    setRenaming(null);
+    const known = await findProduct(db, name);
+    if (key === null) {
+      const e = latestEntry.current;
+      if (e) setEntry(renamePurchaseProduct(e, name, known));
+    } else {
+      const b = latest.current;
+      if (b) setBasket(renameItem(b, key, name, known));
+    }
+    void speak(known ? known.name : `${name}, নতুন মাল`);
+  }
+  const nameSuggestions = (t: string) => {
+    const close = suggestProducts(t, catalog).map((p) => p.name);
+    return [...new Set([...close, ...filterProducts(catalog, t).map((p) => p.name)])];
+  };
+  const openRename = (key: string | null, name: string | null) => {
+    stopListening();
+    setRenaming({ key, name: name ?? '' });
+  };
 
   /** A name was chosen on the answer card. A product's heard name becomes its alias. */
   async function chooseAnswer(name: string) {
@@ -439,6 +632,8 @@ export default function ConfirmScreen() {
   const leave = () => (router.canGoBack() ? router.back() : router.replace('/'));
 
   async function onYes() {
+    if (fixRef.current) return saveFix();
+    if (undoRef.current) return confirmUndo();
     const e = latestEntry.current;
     if (e) return saveTheEntry(e);
     const b = latest.current;
@@ -486,11 +681,18 @@ export default function ConfirmScreen() {
   }
 
   async function onNo() {
-    if (decided.current || !logId.current) return;
+    if (fixRef.current) {
+      // leaving a fix changes nothing
+      decided.current = true;
+      stopListening();
+      void speak('কিছু বদলায়নি।');
+      return leave();
+    }
+    if (decided.current || !logId.current) return leave();
     stopListening();
     decided.current = true;
     await setOutcome(db, writer(), logId.current, 'cancelled');
-    void speak('বাতিল।');
+    void speak(undoRef.current ? 'ঠিক আছে, কিছু বাতিল হয়নি।' : 'বাতিল।');
     leave();
   }
 
@@ -502,7 +704,7 @@ export default function ConfirmScreen() {
     stopListening();
     setEntry(next);
   };
-  const ready = entry ? canSaveEntry(entry) : basket ? canSave(basket) : false;
+  const ready = state.kind === 'undo' ? !!state.target : entry ? canSaveEntry(entry) : basket ? canSave(basket) : false;
 
   const again = () => {
     decided.current = true;
@@ -517,7 +719,7 @@ export default function ConfirmScreen() {
   const pickInstead = () => {
     decided.current = true;
     if (logId.current) void setOutcome(db, writer(), logId.current, 'cancelled');
-    router.replace('/pick');
+    router.replace({ pathname: '/pick', params: { tab: tab === 'purchase' ? 'purchase' : 'sale' } });
   };
 
   // ── render ─────────────────────────────────────────────────────
@@ -562,7 +764,12 @@ export default function ConfirmScreen() {
         <Pressable accessibilityRole="button" accessibilityLabel="ফিরে যান" onPress={() => void onNo()} style={styles.back}>
           <Icon name="back" size={26} color={colors.ink} strokeWidth={2.2} />
         </Pressable>
-        {(basket || entry || state.kind === 'answer') && (
+        {fixing && (
+          <Txt size={fontSize.label} weight="bold" color={colors.stock} style={styles.flex}>
+            {'  ঠিক করুন'}
+          </Txt>
+        )}
+        {(basket || entry || state.kind === 'answer' || state.kind === 'undo') && (
           <Pressable
             accessibilityRole="button"
             onPress={readAloud}
@@ -686,15 +893,66 @@ export default function ConfirmScreen() {
               </Txt>
             </Pressable>
           ))}
+          {state.answer.links && (
+            <View style={styles.toggleRow}>
+              <BigButton
+                label="আজকের ক্যাশ"
+                icon="wallet"
+                bg={colors.dark}
+                ink={colors.onColor}
+                onPress={() => {
+                  stopSpeaking();
+                  router.replace('/cash');
+                }}
+              />
+              <BigButton
+                label="আজকের খাতা"
+                icon="list"
+                bg={colors.stockTint}
+                ink={colors.stock}
+                onPress={() => {
+                  stopSpeaking();
+                  router.replace('/history');
+                }}
+              />
+            </View>
+          )}
           <BigButton label="আবার বলুন" icon="mic" bg={colors.sale} ink={colors.onColor} onPress={again} />
           <BigButton label="বন্ধ" icon="close" bg={colors.surface} ink={colors.ink} onPress={leave} />
         </ScrollView>
       )}
 
+      {state.kind === 'undo' && (
+        <>
+          <ScrollView contentContainerStyle={styles.body}>
+            <Heard text={state.transcript} how={how} gemini={byGemini} />
+            {state.target ? (
+              <>
+                <Txt wrap size={fontSize.headingLg} weight="bold" style={styles.center}>
+                  শেষ লেখাটা বাতিল করবো?
+                </Txt>
+                <UndoCard target={state.target} />
+                <Txt wrap size={fontSize.body} weight="medium" color={colors.muted} style={styles.center}>
+                  মুছে যাবে না — বাতিল লেখা থাকবে, হিসাবে ধরা হবে না।
+                </Txt>
+              </>
+            ) : (
+              <View style={styles.card}>
+                <Txt wrap size={fontSize.headingLg} weight="bold" style={styles.center}>
+                  বাতিল করার মতো কিছু নেই
+                </Txt>
+                <BigButton label="বন্ধ" icon="close" bg={colors.surface} ink={colors.ink} onPress={leave} />
+              </View>
+            )}
+          </ScrollView>
+          {state.target && decideBar}
+        </>
+      )}
+
       {state.kind === 'ready' && basket && (
         <>
           <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
-            <Heard text={state.transcript} how={how} gemini={byGemini} />
+            {fixing ? <FixBanner /> : <Heard text={state.transcript} how={how} gemini={byGemini} />}
             {basket.items.length === 0 ? (
               <View style={styles.card}>
                 <Txt wrap size={fontSize.headingLg} weight="bold" style={styles.center}>
@@ -708,6 +966,7 @@ export default function ConfirmScreen() {
                 <View key={it.key} style={styles.lineBox}>
                   <ItemRow
                     item={it}
+                    onRename={() => openRename(it.key, it.productName)}
                     onStep={(dir) => edit(stepItem(basket, it.key, dir))}
                     onPrice={(p) =>
                       edit(it.priceMode === 'unit' ? setItemPrice(basket, it.key, p) : setItemTotal(basket, it.key, p))
@@ -754,6 +1013,7 @@ export default function ConfirmScreen() {
                 onChange={(n, ok) => edit(withCustomer(basket, n, ok))}
               />
             )}
+            {fixing && <VoidButton onPress={() => setAskVoid(true)} />}
           </ScrollView>
 
           <View style={styles.totalBar}>
@@ -772,7 +1032,7 @@ export default function ConfirmScreen() {
       {state.kind === 'entry' && entry && (
         <>
           <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
-            {!!state.transcript && <Heard text={state.transcript} how={how} gemini={byGemini} />}
+            {fixing ? <FixBanner /> : !!state.transcript && <Heard text={state.transcript} how={how} gemini={byGemini} />}
             {entry.purchase && !entry.purchase.product && entry.purchase.productName && (
               <ProductSuggest
                 spoken={entry.purchase.productName}
@@ -780,12 +1040,83 @@ export default function ConfirmScreen() {
                 onChoose={(n) => void chooseLineProduct(null, n)}
               />
             )}
-            <EntryForm entry={entry} known={known} onChange={editEntry} />
+            <EntryForm entry={entry} known={known} onChange={editEntry} onRenameProduct={() => openRename(null, entry.purchase?.productName ?? null)} />
+            {fixing && <VoidButton onPress={() => setAskVoid(true)} />}
           </ScrollView>
           {decideBar}
         </>
       )}
+
+      <NameSheet
+        visible={renaming !== null}
+        title="মালের নাম — লিখুন বা বলুন"
+        initial={renaming?.name ?? ''}
+        suggest={nameSuggestions}
+        onDone={(n) => void renameLine(renaming?.key ?? null, n)}
+        onClose={() => setRenaming(null)}
+      />
+      <ConfirmSheet
+        visible={askVoid}
+        text="এই লেখাটা বাতিল করবো? মুছে যাবে না, হিসাবে ধরা হবে না। ঠিক আছে?"
+        busy={saving}
+        onYes={() => void voidFixed()}
+        onNo={() => setAskVoid(false)}
+      />
     </SafeAreaView>
+  );
+}
+
+/** What TTS says for "ভুল হয়েছে". */
+const undoWords = (t: RecentEntry | null) =>
+  t ? `শেষ লেখা: ${recentLine(t).words} এটা বাতিল করবো? হ্যাঁ বা না বলুন।` : 'বাতিল করার মতো কিছু নেই।';
+
+function UndoCard({ target }: { target: RecentEntry }) {
+  const line = recentLine(target);
+  return (
+    <View style={[styles.row, styles.undoCard]}>
+      <View style={styles.rowTop}>
+        <View style={[styles.rowTile, { backgroundColor: colors.bakiTint }]}>
+          <Icon name="undo" size={26} color={colors.bakiInk} strokeWidth={2} />
+        </View>
+        <View style={styles.flex}>
+          <Txt size={fontSize.button} weight="bold">
+            {line.title}
+          </Txt>
+          <Txt size={fontSize.body} weight="medium" color={colors.ink2}>
+            {line.detail}
+          </Txt>
+        </View>
+        <Txt size={fontSize.listAmount} weight="bold" color={colors.bakiInk}>
+          {formatTaka(target.amount_poisha)}
+        </Txt>
+      </View>
+    </View>
+  );
+}
+
+function FixBanner() {
+  return (
+    <View style={styles.fixBanner}>
+      <Icon name="edit" size={24} color={colors.stock} strokeWidth={2} />
+      <Txt wrap size={fontSize.body} weight="bold" color={colors.stock} style={styles.flex}>
+        আগের লেখা ঠিক করছেন। বদলে হ্যাঁ চাপুন — আগেরটা মুছবে না, পাশে কাটা দাগে থাকবে।
+      </Txt>
+    </View>
+  );
+}
+
+function VoidButton({ onPress }: { onPress: () => void }) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      onPress={onPress}
+      style={({ pressed }) => [styles.voidButton, pressed && styles.pressed]}
+    >
+      <Icon name="undo" size={26} color={colors.bakiInk} strokeWidth={2} />
+      <Txt size={fontSize.label} weight="bold" color={colors.bakiInk}>
+        এটা বাতিল করুন
+      </Txt>
+    </Pressable>
   );
 }
 
@@ -813,6 +1144,8 @@ function answerPrompt(a: Answer): string {
  */
 function ItemRow(props: {
   item: ItemDraft;
+  /** ✏️ the name: type or say another (a new product too). */
+  onRename: () => void;
   onStep: (dir: 1 | -1) => void;
   /** Line total or unit price, by item.priceMode. */
   onPrice: (poisha: number) => void;
@@ -841,16 +1174,24 @@ function ItemRow(props: {
         <View style={[styles.rowTile, { backgroundColor: tile }]}>
           <Icon name={productIcon(item.productName ?? '')} size={26} color={colors.ink} strokeWidth={1.6} />
         </View>
-        <View style={styles.flex}>
-          <Txt size={fontSize.button} weight="bold">
-            {item.productName ?? 'নাম বুঝিনি'}
-          </Txt>
-          {!item.product && item.productName && (
-            <Txt size={fontSize.caption} weight="bold" color={colors.stock}>
-              নতুন মাল
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`${item.productName ?? 'মালের নাম'}, নাম বদলান`}
+          onPress={props.onRename}
+          style={({ pressed }) => [styles.flex, styles.nameButton, pressed && styles.pressed]}
+        >
+          <View style={styles.flex}>
+            <Txt size={fontSize.button} weight="bold">
+              {item.productName ?? 'নাম বুঝিনি'}
             </Txt>
-          )}
-        </View>
+            {!item.product && item.productName && (
+              <Txt size={fontSize.caption} weight="bold" color={colors.stock}>
+                নতুন মাল
+              </Txt>
+            )}
+          </View>
+          <Icon name="edit" size={20} color={colors.ink2} strokeWidth={1.8} />
+        </Pressable>
         <Txt size={fontSize.listAmount} weight="bold" color={colors.sale}>
           {item.amountPoisha !== null ? formatTaka(item.amountPoisha) : '৳ ?'}
         </Txt>
@@ -985,12 +1326,10 @@ function Unsupported(props: { transcript: string; how: How; intent: Intent; onAg
       <Heard text={props.transcript} how={props.how} />
       <View style={styles.card}>
         <Txt wrap size={fontSize.headingLg} weight="bold" style={styles.center}>
-          {props.intent === 'unknown' ? 'কিছু বুঝিনি' : `${INTENT_BN[props.intent]}: পরের ধাপে আসছে`}
+          {props.intent === 'unknown' ? 'কিছু বুঝিনি' : `${INTENT_BN[props.intent]}: বুঝিনি`}
         </Txt>
         <Txt wrap size={fontSize.body} weight="medium" color={colors.muted} style={styles.center}>
-          {props.intent === 'unknown'
-            ? 'বিক্রি, বাকি, জমা, খরচ বা মাল কেনা — আবার বলুন।'
-            : 'লাভের প্রশ্নের উত্তর পরের ধাপে আসবে।'}
+          বিক্রি, বাকি, জমা, খরচ বা মাল কেনা — আবার বলুন।
         </Txt>
       </View>
       <BigButton label="আবার বলুন" icon="mic" bg={colors.sale} ink={colors.onColor} onPress={props.onAgain} />
@@ -1164,6 +1503,21 @@ const styles = StyleSheet.create({
     borderColor: 'transparent',
   },
   listRowLow: { borderColor: colors.baki },
+  nameButton: { flexDirection: 'row', alignItems: 'center', gap: spacing.xxs, minHeight: size.minTouch },
+  undoCard: { borderColor: colors.bakiBorder, padding: spacing.md },
+  fixBanner: { backgroundColor: colors.stockTint, borderRadius: radius.card, padding: spacing.md, flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  voidButton: {
+    height: 64,
+    borderRadius: radius.button,
+    borderWidth: 2,
+    borderColor: colors.bakiBorder,
+    backgroundColor: colors.surface,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+  },
   listName: { flex: 1 },
   lowBadge: {
     width: 32,

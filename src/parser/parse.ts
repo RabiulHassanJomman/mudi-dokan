@@ -210,13 +210,23 @@ export function parseCommand(text: string, ctx: ParseContext = {}): ParsedComman
   const has = (s: ReadonlySet<string>) => tokens.some((t) => s.has(t));
   const period = has(K.TODAY) ? ('today' as const) : undefined;
 
+  const anyNumberAt = tokens.some((_, k) => parseNumber(tokens, k) !== null);
+
+  // ── undo: "ভুল হয়েছে", "বাতিল করো", "শেষটা মুছে দাও" — nothing else said, no number
+  if (has(K.UNDO) && !anyNumberAt && tokens.every((t) => K.UNDO.has(t) || K.UNDO_EXTRA.has(t) || isNoise(t))) {
+    return compact({ intent: 'undo', missing: [], confidence: 'high', ...base });
+  }
+
   // ── queries ────────────────────────────────────────────────
+  // "ক্যাশে কত আছে", "হাতে কত টাকা আছে": today's summary (cash in hand at the end)
+  if (has(K.CASH_HELD) && has(K.HOW_MUCH) && !anyNumberAt && tokens.every((t) => K.CASH_HELD.has(t) || isNoise(t))) {
+    return compact({ intent: 'day_summary_query', missing: [], confidence: 'high', ...base });
+  }
   if (has(K.PROFIT)) {
     return compact({ intent: 'profit_query', period, missing: [], confidence: 'high', ...base });
   }
   // "করিমের বাকি কত?", "করিমের কাছে কত পাবো": a question, no amount said.
   // No name left ("মোট কত বাকি", "সবার বাকি কত", "কে কে বাকি আছে", "বাকির লিস্ট") = all customers.
-  const anyNumberAt = tokens.some((_, k) => parseNumber(tokens, k) !== null);
   const summaryWord = (t: string) => K.EVERY.has(t) || K.LIST.has(t) || K.SHOW.has(t);
   const bakiAsked = has(K.BAKI) || has(K.OWED) || has(K.BAKI_OF);
   const bakiQuestion = has(K.HOW_MUCH) || has(K.LIST) || has(K.WHO);
@@ -227,9 +237,13 @@ export function parseCommand(text: string, ctx: ParseContext = {}): ParsedComman
     const names = tokens
       .filter((t) => !isNoise(t) && !summaryWord(t) && !K.HISTORY.has(t) && !K.WHO.has(t) && !K.BAKI_OF.has(t))
       .map(stripGenitive);
-    if (names.length) {
+    if (names.length && !names.every((t) => K.WHOLE_DAY.has(t))) {
       const customer = matchKnown(names, ctx.knownCustomers)?.match ?? customerName(names);
       return compact({ intent: 'customer_history_query', customer, missing: [], confidence: 'high', ...base });
+    }
+    // "আজকের হিসাব", "হিসাব দেখাও", "আজকের খাতা": no name = the day
+    if (has(K.HISTORY) && !bakiAsked) {
+      return compact({ intent: 'day_summary_query', missing: [], confidence: 'high', ...base });
     }
   }
   if (bakiAsked && bakiQuestion && !anyNumberAt && !has(K.CREDIT) && !has(K.TAKE)) {
