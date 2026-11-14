@@ -30,7 +30,7 @@ import {
   type ItemDraft,
 } from '../domain/basket';
 import { classifyAnswer, heardPrefix } from '../domain/confirmWords';
-import { balanceWords, customerAliasToLearn, owedList, resolveCustomerAlias, suggestCustomers, totalBakiWords } from '../domain/customers';
+import { balanceWords, customerAliasToLearn, historyWords, owedList, resolveCustomerAlias, suggestCustomers, totalBakiWords } from '../domain/customers';
 import {
   canSaveEntry,
   choosePurchaseProduct,
@@ -62,6 +62,7 @@ import {
   setOutcome,
   setParsed,
   stockList,
+  customerHistory,
 } from '../db/repo';
 import { getDevice, writer } from '../device';
 import { UNIT_BN, formatNumber, formatQty, formatTaka, parseTakaInput, toBnDigits } from '../lib/bn';
@@ -76,12 +77,14 @@ type How = 'voice' | 'typed' | 'pick';
 
 /** "চাল কত আছে?" / "করিমের বাকি কত?": the answer, or (name not known) the closest names to choose from. */
 interface Answer {
-  question: 'stock' | 'balance' | 'total_baki' | 'all_stock';
+  question: 'stock' | 'balance' | 'history' | 'total_baki' | 'all_stock';
   /** The name as heard. */
   spoken: string | null;
   /** What TTS said; null until a name is chosen. */
   text: string | null;
   choices: string[];
+  /** The customer the balance is for: "সব দেখুন" opens their screen. */
+  customerId?: string;
   /** Summary questions: every customer who owes (largest first) / every product (low first). */
   owed?: { id: string; name: string; balance_poisha: number }[];
   stock?: StockView[];
@@ -106,6 +109,7 @@ const INTENT_BN: Record<Intent, string> = {
   stock_query: 'স্টক জানা',
   balance_query: 'বাকি জানা',
   total_baki_query: 'মোট বাকি জানা',
+  customer_history_query: 'হিসাব দেখা',
   all_stock_query: 'সব মাল জানা',
   profit_query: 'লাভ জানা',
   unknown: 'বুঝিনি',
@@ -269,6 +273,21 @@ export default function ConfirmScreen() {
         void speak(answer.text ?? answerPrompt(answer));
         return;
       }
+      if (parsed.intent === 'customer_history_query') {
+        // a known customer: read the short history, open their screen; else closest names
+        await setOutcome(db, w, logId.current, 'unsupported');
+        decided.current = true;
+        const c = parsed.customer ? await customerByName(db, parsed.customer) : null;
+        if (!alive) return;
+        if (c) {
+          await openHistory(c);
+          return;
+        }
+        const answer = unknownCustomer('history', parsed.customer ?? null, owed);
+        setState({ kind: 'answer', transcript, answer });
+        void speak(answer.text ?? answerPrompt(answer));
+        return;
+      }
       if (parsed.intent === 'total_baki_query' || parsed.intent === 'all_stock_query') {
         // summary question: a list to tap, TTS says only the totals; nothing to save
         await setOutcome(db, w, logId.current, 'unsupported');
@@ -339,9 +358,21 @@ export default function ConfirmScreen() {
 
   async function balanceAnswer(spoken: string | null, owed: string[]): Promise<Answer> {
     const c = spoken ? await customerByName(db, spoken) : null;
-    if (c) return { question: 'balance', spoken, text: balanceWords(c.name, c.balance_poisha), choices: [] };
+    if (c) return { question: 'balance', spoken, text: balanceWords(c.name, c.balance_poisha), choices: [], customerId: c.id };
+    return unknownCustomer('balance', spoken, owed);
+  }
+
+  /** Name not known (or not said): the closest names as buttons. */
+  function unknownCustomer(question: 'balance' | 'history', spoken: string | null, owed: string[]): Answer {
     const choices = spoken ? suggestCustomers(spoken, owed, 3) : owed.slice(0, 6);
-    return { question: 'balance', spoken, text: choices.length ? null : `${spoken ?? 'এই নামে'} কাউকে চিনি না।`, choices };
+    return { question, spoken, text: choices.length ? null : `${spoken ?? 'এই নামে'} কাউকে চিনি না।`, choices };
+  }
+
+  /** "করিমের হিসাব দেখাও": say balance + last 3, then the customer screen (full history, ▶️). */
+  async function openHistory(c: { id: string; name: string; balance_poisha: number }) {
+    keepSpeaking.current = true; // leaving this screen must not cut the TTS
+    void speak(historyWords(c.name, c.balance_poisha, await customerHistory(db, c.id)));
+    router.replace({ pathname: '/customer/[id]', params: { id: c.id } });
   }
 
   /** A name was chosen on the answer card. A product's heard name becomes its alias. */
@@ -353,6 +384,11 @@ export default function ConfirmScreen() {
       const p = catalog.find((x) => x.name === name);
       if (p && a.spoken && a.spoken !== p.name) await addProductAlias(db, writer(), a.spoken, p.id);
       answer = await stockAnswer(name, catalog);
+    } else if (a.question === 'history') {
+      await learnCustomerAlias(a.spoken, name);
+      const c = await customerByName(db, name);
+      if (c) return openHistory(c);
+      return;
     } else {
       await learnCustomerAlias(a.spoken, name);
       answer = await balanceAnswer(name, known);
@@ -389,9 +425,10 @@ export default function ConfirmScreen() {
   const productChoices = (spoken: string | null) => (spoken ? suggestProducts(spoken, catalog).map((p) => p.name) : []);
 
   // leaving without a decision counts as না
+  const keepSpeaking = useRef(false);
   useEffect(
     () => () => {
-      stopSpeaking();
+      if (!keepSpeaking.current) stopSpeaking();
       ExpoSpeechRecognitionModule.abort();
       if (!decided.current && logId.current) void setOutcome(db, writer(), logId.current, 'cancelled');
     },
@@ -587,6 +624,18 @@ export default function ConfirmScreen() {
                 ))}
               </View>
             ))}
+          {state.answer.customerId && (
+            <BigButton
+              label="সব দেখুন"
+              icon="list"
+              bg={colors.bakiTint}
+              ink={colors.bakiInk}
+              onPress={() => {
+                stopSpeaking();
+                router.push({ pathname: '/customer/[id]', params: { id: state.answer.customerId! } });
+              }}
+            />
+          )}
           {state.answer.owed?.map((c) => (
             <Pressable
               key={c.id}
@@ -753,6 +802,7 @@ function Heard({ text, how, gemini }: { text: string; how: How; gemini?: boolean
 /** The answer card when the name is not known yet. */
 function answerPrompt(a: Answer): string {
   if (a.question === 'stock') return a.spoken ? `${a.spoken} নামে মাল চিনি না। কোন মাল?` : 'কোন মালের কথা? নিচে বেছে নিন।';
+  if (a.question === 'history') return a.spoken ? `${a.spoken} নামে কাউকে চিনি না। কে?` : 'কার হিসাব? নিচে বেছে নিন।';
   return a.spoken ? `${a.spoken} নামে কাউকে চিনি না। কে?` : 'কার বাকি? নিচে বেছে নিন।';
 }
 

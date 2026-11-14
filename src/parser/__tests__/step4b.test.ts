@@ -146,3 +146,33 @@ describe('all stock question: every product', () => {
     expect(parseCommand('কে কে বাকি আছে', ctx).intent).toBe('total_baki_query');
   });
 });
+
+describe('customer history: "করিমের হিসাব দেখাও"', () => {
+  it.each([
+    'করিমের হিসাব দেখাও',
+    'করিম কি কি বাকিতে নিয়েছে',
+    'করিমের খাতা',
+    'করিমের বাকির লিস্ট',
+    'করিমের হিসেব',
+    'করিম ভাইয়ের খাতাটা দেখান',
+  ])('%s', (text) => {
+    for (const c of [{}, ctx, { tab: 'ledger' as const }]) {
+      expect(parseCommand(text, c)).toMatchObject({ intent: 'customer_history_query', customer: 'করিম', missing: [], confidence: 'high' });
+    }
+  });
+
+  it('a known name is matched', () => {
+    expect(parseCommand('সুমি আপুর খাতা', ctx)).toMatchObject({ intent: 'customer_history_query', customer: 'সুমি' });
+  });
+
+  it('no name is not a history question', () => {
+    expect(parseCommand('বাকির লিস্ট', ctx).intent).toBe('total_baki_query');
+    expect(parseCommand('হিসাব দেখাও', ctx).intent).not.toBe('customer_history_query');
+  });
+
+  it('balance and entries are unchanged', () => {
+    expect(parseCommand('করিমের বাকি কত', ctx)).toMatchObject({ intent: 'balance_query', customer: 'করিম' });
+    expect(parseCommand('করিম চাল ২ কেজি বাকিতে নিল', ctx)).toMatchObject({ intent: 'sale', credit: true, customer: 'করিম' });
+    expect(parseCommand('করিমের খাতায় ২০০ টাকা বাকি', ctx).intent).toBe('baki');
+  });
+});

@@ -10,6 +10,8 @@ export type Intent =
   | 'balance_query'
   /** "মোট কত বাকি?", "সবার বাকি কত" — what all customers owe together. */
   | 'total_baki_query'
+  /** "করিমের হিসাব দেখাও", "করিমের খাতা" — open that customer's history. */
+  | 'customer_history_query'
   /** "সব মাল কত আছে", "মালের লিস্ট" — every product's stock. */
   | 'all_stock_query'
   | 'profit_query'

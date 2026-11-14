@@ -1,5 +1,5 @@
 /** Customer names: is it someone we know, and who did STT probably mean? Pure TS. */
-import { formatNumber } from '../lib/bn';
+import { dayLabel, formatNumber } from '../lib/bn';
 
 const norm = (s: string) => s.normalize('NFC').replace(/\s+/g, ' ').trim();
 
@@ -85,6 +85,39 @@ export function totalBakiWords(rows: readonly { balance_poisha: number }[]): str
   if (!owed.length) return 'কারো কাছে কোনো বাকি নেই।';
   const total = owed.reduce((s, r) => s + r.balance_poisha, 0);
   return `মোট বাকি ${formatNumber(total / 100)} টাকা, ${formatNumber(owed.length)} জনের কাছে।`;
+}
+
+/** "করিম" → "করিমের", "সুমি" → "সুমির"; non-Bangla names get " এর". */
+export function genitive(name: string): string {
+  const last = name.slice(-1);
+  if (!/[\u0980-\u09FF]/.test(last)) return `${name} এর`;
+  return /[\u0985-\u0994\u09BE-\u09CC]/.test(last) ? `${name}র` : `${name}ের`;
+}
+
+const LAST_N = ['', 'শেষটা', 'শেষ দুইটা', 'শেষ তিনটা'];
+
+/**
+ * "করিমের হিসাব দেখাও": "করিমের মোট বাকি ২,৩০০ টাকা। শেষ তিনটা: আজ চাল, ডাল বাকি ৫০০ টাকা; …"
+ * rows newest first (repo.customerHistory).
+ */
+export function historyWords(
+  name: string,
+  balancePoisha: number,
+  rows: readonly { kind: 'baki' | 'joma'; amount_poisha: number; created_at: number; products: string | null }[],
+  now = Date.now(),
+): string {
+  const head =
+    balancePoisha > 0
+      ? `${genitive(name)} মোট বাকি ${formatNumber(balancePoisha / 100)} টাকা।`
+      : balancePoisha < 0
+        ? `${name} অগ্রিম দিয়েছে ${formatNumber(-balancePoisha / 100)} টাকা।`
+        : `${genitive(name)} কোনো বাকি নেই।`;
+  if (!rows.length) return `${head} এখনো কোনো হিসাব নেই।`;
+  const last = rows.slice(0, 3).map((r) => {
+    const what = r.kind === 'joma' ? 'জমা' : r.products ? `${r.products} বাকি` : 'বাকি';
+    return `${dayLabel(r.created_at, now)} ${what} ${formatNumber(r.amount_poisha / 100)} টাকা`;
+  });
+  return `${head} ${LAST_N[last.length]}: ${last.join('; ')}।`;
 }
 
 const key = (s: string) => norm(s).toLowerCase();

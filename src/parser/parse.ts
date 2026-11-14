@@ -220,6 +220,18 @@ export function parseCommand(text: string, ctx: ParseContext = {}): ParsedComman
   const summaryWord = (t: string) => K.EVERY.has(t) || K.LIST.has(t) || K.SHOW.has(t);
   const bakiAsked = has(K.BAKI) || has(K.OWED) || has(K.BAKI_OF);
   const bakiQuestion = has(K.HOW_MUCH) || has(K.LIST) || has(K.WHO);
+  // "করিমের হিসাব দেখাও", "করিমের খাতা", "করিমের বাকির লিস্ট", "করিম কি কি বাকিতে নিয়েছে"
+  const whatAll = tokens.filter((t) => t === 'কি' || t === 'কী').length >= 2;
+  const historyAsked = has(K.HISTORY) || (bakiAsked && has(K.LIST)) || (whatAll && (has(K.CREDIT) || bakiAsked));
+  if (historyAsked && !anyNumberAt) {
+    const names = tokens
+      .filter((t) => !isNoise(t) && !summaryWord(t) && !K.HISTORY.has(t) && !K.WHO.has(t) && !K.BAKI_OF.has(t))
+      .map(stripGenitive);
+    if (names.length) {
+      const customer = matchKnown(names, ctx.knownCustomers)?.match ?? customerName(names);
+      return compact({ intent: 'customer_history_query', customer, missing: [], confidence: 'high', ...base });
+    }
+  }
   if (bakiAsked && bakiQuestion && !anyNumberAt && !has(K.CREDIT) && !has(K.TAKE)) {
     const names = tokens
       .filter((t) => !isNoise(t) && !summaryWord(t) && !K.WHO.has(t) && !K.BAKI_OF.has(t))

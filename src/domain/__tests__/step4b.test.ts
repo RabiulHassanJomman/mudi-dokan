@@ -16,7 +16,7 @@ import {
   type ProductInfo,
 } from '../basket';
 import { heardPrefix } from '../confirmWords';
-import { balanceWords, owedList, totalBakiWords } from '../customers';
+import { balanceWords, genitive, historyWords, owedList, totalBakiWords } from '../customers';
 import { choosePurchaseProduct, entryFromParse, entryReadback } from '../entry';
 import { padDisplay } from '../numpad';
 import { pickText, pickWords } from '../pick';
@@ -234,6 +234,34 @@ describe('সব মাল: low first, short TTS', () => {
   it('nothing low / nothing at all', () => {
     expect(allStockWords([v('আটা', 20)])).toBe('মোট ১ রকম মাল।');
     expect(allStockWords([])).toBe('এখনো কোনো মাল নেই।');
+  });
+});
+
+describe('ক্রেতার হিসাব by voice: balance + last 3', () => {
+  const now = new Date(2026, 10, 14, 18).getTime();
+  const day = (d: number) => new Date(2026, 10, d, 10).getTime();
+  const L = (kind: 'baki' | 'joma', taka: number, d: number, products: string | null = null) => ({
+    kind, amount_poisha: taka * 100, created_at: day(d), products,
+  });
+
+  it('genitive', () => {
+    expect(genitive('করিম')).toBe('করিমের');
+    expect(genitive('সুমি')).toBe('সুমির');
+    expect(genitive('রাজা')).toBe('রাজার');
+    expect(genitive('Rahim')).toBe('Rahim এর');
+  });
+  it('owes, newest 3 of more', () => {
+    const rows = [L('baki', 500, 14, 'চাল, ডাল'), L('joma', 300, 13), L('baki', 200, 11), L('baki', 900, 2)];
+    expect(historyWords('করিম', 230000, rows, now)).toBe(
+      'করিমের মোট বাকি ২,৩০০ টাকা। শেষ তিনটা: আজ চাল, ডাল বাকি ৫০০ টাকা; গতকাল জমা ৩০০ টাকা; ১১ নভে বাকি ২০০ টাকা।',
+    );
+  });
+  it('fewer entries, advance, nothing', () => {
+    expect(historyWords('সুমি', -5000, [L('joma', 50, 14)], now)).toBe('সুমি অগ্রিম দিয়েছে ৫০ টাকা। শেষটা: আজ জমা ৫০ টাকা।');
+    expect(historyWords('সুমি', 0, [L('baki', 50, 14), L('joma', 50, 14)], now)).toBe(
+      'সুমির কোনো বাকি নেই। শেষ দুইটা: আজ বাকি ৫০ টাকা; আজ জমা ৫০ টাকা।',
+    );
+    expect(historyWords('করিম', 0, [], now)).toBe('করিমের কোনো বাকি নেই। এখনো কোনো হিসাব নেই।');
   });
 });
 

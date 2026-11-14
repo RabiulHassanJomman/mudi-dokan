@@ -142,6 +142,9 @@ export function convertGemini(json: unknown, ctx: ConvertContext): Converted {
   } else if (i === 'stock_query') {
     out.product = canon(str(json, 'product'));
     if (!out.product) missing.push('product');
+  } else if (i === 'customer_history_query') {
+    out.customer = customer;
+    if (!customer) missing.push('customer');
   } else if (i === 'balance_query') {
     // no name = all customers (as the rule parser does)
     if (customer) out.customer = customer;
