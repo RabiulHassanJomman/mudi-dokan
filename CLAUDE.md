@@ -28,6 +28,10 @@ Input = Bangla voice, output = big icons + TTS. Full plan: @docs/PLAN.md
 - Every DB change is a NEW migration (append to MIGRATIONS; never edit a shipped one).
   Never break existing pilot data on the shop phone: add an upgrade test from the
   previous version with real-looking rows.
+- Migrations are append-only and shared across branches: one MIGRATIONS list, same
+  number = same SQL everywhere. Any schema change lands on main first and is then merged
+  into exp/gemini-audio (or any other branch), never the other way. Branches always end at
+  the same schema version.
 - Release APKs only via `npm run apk` (release key, see Commands). Install as an update
   (`adb install -r`); never uninstall the app on the phone (= data loss) without asking.
 - Bangla UI, big touch targets (≥ 52 px), 🔊 read-aloud on every screen, confirm before

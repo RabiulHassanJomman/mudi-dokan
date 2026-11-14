@@ -45,7 +45,7 @@ export default function CustomerScreen() {
 
   const readScreen = () =>
     void speak(
-      `${c.name}। ${owed > 0 ? `পাবো ${formatNumber(owed / 100)} টাকা।` : owed < 0 ? `অগ্রিম ${formatNumber(-owed / 100)} টাকা।` : 'কোনো বাকি নেই।'} ` +
+      `${c.name}।${c.note ? ` ${c.note}।` : ''} ${owed > 0 ? `পাবো ${formatNumber(owed / 100)} টাকা।` : owed < 0 ? `অগ্রিম ${formatNumber(-owed / 100)} টাকা।` : 'কোনো বাকি নেই।'} ` +
         rows
           .slice(0, 3)
           .map((r) => `${dayLabel(r.created_at)}, ${what(r)}, ${formatNumber(r.amount_poisha / 100)} টাকা।`)
@@ -95,6 +95,11 @@ export default function CustomerScreen() {
           <Txt accessibilityRole="header" size={fontSize.headingLg} weight="bold">
             {c.name}
           </Txt>
+          {!!c.note && (
+            <Txt wrap size={fontSize.caption} weight="medium" color={colors.muted}>
+              {c.note}
+            </Txt>
+          )}
           <Txt size={fontSize.captionLg} weight="medium" color={colors.muted}>
             {owed < 0 ? 'অগ্রিম' : 'পাবো'}
             {c.phone ? ` · ${toBnDigits(c.phone)}` : ''}

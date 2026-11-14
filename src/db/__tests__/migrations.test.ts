@@ -263,84 +263,121 @@ describe('v6', () => {
   });
 });
 
-describe('v7 (Gemini audio experiment)', () => {
-  it('a v6 shop phone keeps its pilot data; the new voice_logs columns start null', async () => {
+describe('v7–v9 (shared by main and exp/gemini-audio)', () => {
+  /** A v6 DB with real-looking pilot rows. */
+  function v6Shop() {
     const old = new DatabaseSync(':memory:');
-    const a = adapter(old);
-    await a.execAsync('PRAGMA foreign_keys = ON;');
+    old.exec('PRAGMA foreign_keys = ON;');
     for (const sql of MIGRATIONS.slice(0, 6)) old.exec(sql);
     old.exec('PRAGMA user_version = 6');
     insert(old, 'devices', { ...row('d1'), device_name: 'আব্বু', role: 'owner' });
     insert(old, 'products', { ...row('p1'), name: 'চাল', unit: 'kg', sell_price_poisha: 6000 });
-    insert(old, 'customers', { ...row('c1'), name: 'করিম' });
+    insert(old, 'customers', { ...row('c1'), name: 'করিম', phone: '01711123456' });
+    insert(old, 'customers', { ...row('c2'), name: 'মিনা' });
     insert(old, 'voice_logs', {
-      ...row('v1'), transcript: 'করিম চাল ২ কেজি বাকি', device_name: 'আব্বু', outcome: 'saved_edited', stt_ok: 1,
-      parsed_json: JSON.stringify({ intent: 'sale', items: [{ product: 'চাল', quantity: { value: 2, unit: 'kg' } }] }),
-      edits_json: '["items[0].quantity"]', final_json: '{"credit":true}', intent: 'sale', audio_path: 'file:///x/voice_1.wav', audio_status: 'local',
-      source: 'voice', context_tab: 'sale',
+      ...row('v1'), transcript: 'করিম চাল ২ কেজি বাকি', device_name: 'আব্বু', outcome: 'saved_edited', stt_ok: 1, source: 'voice',
+      parsed_json: JSON.stringify({ intent: 'sale' }), edits_json: '["items[0].quantity"]', final_json: '{"credit":true}', intent: 'sale',
+      audio_path: 'file:///x/voice_1.wav', audio_status: 'local', context_tab: 'sale',
     });
-    insert(old, 'voice_logs', { ...row('v2'), transcript: '', device_name: 'আব্বু', stt_error: 'no-speech', outcome: 'stt_error', source: 'voice' });
     insert(old, 'sales', {
       ...entry('s1'), product_id: 'p1', quantity: 3, sell_price_poisha: 6000, amount_poisha: 18000, cost_price_poisha: 0,
       credit: 1, customer_id: 'c1', voice_log_id: 'v1', basket_id: 'b1', line_no: 1,
     });
     insert(old, 'ledger', { ...entry('l1'), party_id: 'c1', kind: 'baki', amount_poisha: 18000, basket_id: 'b1', voice_log_id: 'v1' });
-    insert(old, 'expenses', { ...entry('e1'), item: 'বিদ্যুৎ বিল', amount_poisha: 50000 });
-    const tables = ['devices', 'products', 'customers', 'voice_logs', 'sales', 'ledger', 'expenses'];
-    const dump = (t: string) => old.prepare(`SELECT * FROM ${t} ORDER BY id`).all() as Record<string, unknown>[];
-    const before = Object.fromEntries(tables.map((t) => [t, dump(t)]));
-
-    await expect(migrate(a)).resolves.toBe(6);
-    expect(old.prepare('PRAGMA user_version').get()).toEqual({ user_version: SCHEMA_VERSION });
-    for (const t of tables) {
-      const after = dump(t);
-      expect(after.map((r, k) => Object.fromEntries(Object.keys(before[t]![k]!).map((c) => [c, r[c]])))).toEqual(before[t]);
+    insert(old, 'ledger', { ...entry('l2'), party_id: 'c2', kind: 'joma', amount_poisha: 5000 });
+    return old;
+  }
+  const TABLES = ['devices', 'products', 'customers', 'voice_logs', 'sales', 'ledger'];
+  const dumpAll = (db: DatabaseSyncT) =>
+    Object.fromEntries(TABLES.map((t) => [t, db.prepare(`SELECT * FROM ${t} ORDER BY id`).all() as Record<string, unknown>[]]));
+  /** Every old column keeps its value; new columns may only be added. */
+  function expectKept(db: DatabaseSyncT, before: ReturnType<typeof dumpAll>) {
+    const after = dumpAll(db);
+    for (const t of TABLES) {
+      expect(after[t]!.map((r, k) => Object.fromEntries(Object.keys(before[t]![k]!).map((c) => [c, r[c]])))).toEqual(before[t]);
     }
-    expect(old.prepare('SELECT engine, parsed_by, android_json, gemini_json, gemini_ms FROM voice_logs WHERE id = ?').get('v1')).toEqual({
-      engine: null, parsed_by: null, android_json: null, gemini_json: null, gemini_ms: null,
-    });
-    // entries are still append-only after the upgrade
-    expect(() => old.exec("UPDATE sales SET quantity = 1 WHERE id = 's1'")).toThrow(/append-only/);
+  }
+  const cols = (db: DatabaseSyncT, t: string) => (db.prepare(`SELECT name FROM pragma_table_info('${t}')`).all() as { name: string }[]).map((c) => c.name);
+  const GEMINI = ['engine', 'parsed_by', 'android_json', 'gemini_json', 'gemini_transcript', 'gemini_error', 'gemini_model', 'gemini_ms',
+    'gemini_prompt_tokens', 'gemini_audio_tokens', 'gemini_output_tokens', 'gemini_thought_tokens'];
+  function expectLatest(db: DatabaseSyncT) {
+    expect(db.prepare('PRAGMA user_version').get()).toEqual({ user_version: SCHEMA_VERSION });
+    expect(cols(db, 'voice_logs')).toEqual(expect.arrayContaining(GEMINI));
+    expect(cols(db, 'customers')).toContain('note');
+    expect(cols(db, 'customer_aliases')).toEqual(expect.arrayContaining(['alias', 'customer_id', 'id', 'device_id', 'created_at', 'updated_at']));
+    // still append-only
+    expect(() => db.exec("UPDATE sales SET quantity = 1 WHERE id = 's1'")).toThrow(/append-only/);
+  }
+
+  it('schema version is 9 on every branch', () => {
+    expect(SCHEMA_VERSION).toBe(9);
+  });
+
+  it('v6 shop phone (main) → v9: data kept, new columns null', async () => {
+    const old = v6Shop();
+    const before = dumpAll(old);
+    await expect(migrate(adapter(old))).resolves.toBe(6);
+    expectLatest(old);
+    expectKept(old, before);
+    expect(old.prepare('SELECT id, phone, note FROM customers ORDER BY id').all()).toEqual([
+      { id: 'c1', phone: '01711123456', note: null },
+      { id: 'c2', phone: null, note: null },
+    ]);
+    expect(old.prepare('SELECT engine, gemini_json FROM voice_logs').get()).toEqual({ engine: null, gemini_json: null });
     old.close();
   });
 
+  it('an early main v7 (customers.note, no Gemini columns) gets the Gemini columns and keeps its notes', async () => {
+    const old = v6Shop();
+    old.exec("ALTER TABLE customers ADD COLUMN note TEXT; PRAGMA user_version = 7;");
+    old.exec("UPDATE customers SET note = 'ভাই · মসজিদের পাশে' WHERE id = 'c1'");
+    insert(old, 'customers', { ...row('c3'), name: 'রহিম', phone: '01811222333', note: 'বাজার রোড' });
+    const before = dumpAll(old);
+    await expect(migrate(adapter(old))).resolves.toBe(7);
+    expectLatest(old);
+    expectKept(old, before);
+    expect(old.prepare('SELECT id, note FROM customers ORDER BY id').all()).toEqual([
+      { id: 'c1', note: 'ভাই · মসজিদের পাশে' },
+      { id: 'c2', note: null },
+      { id: 'c3', note: 'বাজার রোড' },
+    ]);
+    old.close();
+  });
+
+  it('exp v7 (Gemini columns, no note — the test Pixel before the import) → v9', async () => {
+    const old = v6Shop();
+    old.exec(`${MIGRATIONS[6]}\nPRAGMA user_version = 7;`);
+    old.exec("UPDATE voice_logs SET engine = 'both', gemini_json = '{\"intent\":\"sale\"}', gemini_ms = 1800 WHERE id = 'v1'");
+    const before = dumpAll(old);
+    await migrate(adapter(old));
+    expectLatest(old);
+    expectKept(old, before);
+    expect(old.prepare('SELECT engine, gemini_ms FROM voice_logs').get()).toEqual({ engine: 'both', gemini_ms: 1800 });
+    old.close();
+  });
+
+  it('exp v8 (Gemini + note — the test Pixel now) → v9', async () => {
+    const old = v6Shop();
+    old.exec(`${MIGRATIONS[6]}${MIGRATIONS[7]}\nPRAGMA user_version = 8;`);
+    old.exec("UPDATE customers SET note = 'ভাই' WHERE id = 'c1'");
+    const before = dumpAll(old);
+    await expect(migrate(adapter(old))).resolves.toBe(8);
+    expectLatest(old);
+    expectKept(old, before);
+    old.close();
+  });
+
+  it('customer_aliases points at a real customer', () => {
+    insert(raw, 'customers', { ...row('c1'), name: 'করিম' });
+    insert(raw, 'customer_aliases', { ...row('a1'), alias: 'কোরিম', customer_id: 'c1' });
+    expect(() => insert(raw, 'customer_aliases', { ...row('a2'), alias: 'x', customer_id: 'nobody' })).toThrow();
+  });
+});
+
+describe('v7 Gemini columns (used on exp/gemini-audio)', () => {
   it('engine and parsed_by take only known values', () => {
     insert(raw, 'voice_logs', { ...row('v1'), transcript: 'চাল ২ কেজি', device_name: 'আব্বু', engine: 'both', parsed_by: 'android' });
     expect(() => insert(raw, 'voice_logs', { ...row('v2'), transcript: 'x', device_name: 'আব্বু', engine: 'openai' })).toThrow();
     expect(() => insert(raw, 'voice_logs', { ...row('v3'), transcript: 'x', device_name: 'আব্বু', parsed_by: 'both' })).toThrow();
-  });
-});
-
-describe('v8 (this branch) = main v7: customers.note', () => {
-  it('a v6 shop phone keeps customers, phones and baki; note starts null', async () => {
-    const old = new DatabaseSync(':memory:');
-    const a = adapter(old);
-    await a.execAsync('PRAGMA foreign_keys = ON;');
-    for (const sql of MIGRATIONS.slice(0, 6)) old.exec(sql);
-    old.exec('PRAGMA user_version = 6');
-    insert(old, 'customers', { ...row('c1'), name: 'করিম', phone: '01711123456' });
-    insert(old, 'ledger', { ...entry('l1'), party_id: 'c1', kind: 'baki', amount_poisha: 30000 });
-    await migrate(a);
-    expect(old.prepare('SELECT id, phone, note FROM customers').all()).toEqual([{ id: 'c1', phone: '01711123456', note: null }]);
-    old.close();
-  });
-
-  it('the test Pixel (v7 with Gemini logs) upgrades to v8 and keeps everything', async () => {
-    const old = new DatabaseSync(':memory:');
-    const a = adapter(old);
-    await a.execAsync('PRAGMA foreign_keys = ON;');
-    for (const sql of MIGRATIONS.slice(0, 7)) old.exec(sql);
-    old.exec('PRAGMA user_version = 7');
-    insert(old, 'customers', { ...row('c1'), name: 'করিম', phone: '01711123456' });
-    insert(old, 'voice_logs', {
-      ...row('v1'), transcript: 'চাল ২ কেজি', device_name: 'আব্বু', outcome: 'saved', source: 'voice', engine: 'both', parsed_by: 'android',
-      gemini_json: '{"intent":"sale"}', gemini_transcript: 'চাল দুই কেজি', gemini_ms: 1800, gemini_audio_tokens: 120,
-    });
-    const before = old.prepare('SELECT * FROM voice_logs').all();
-    await expect(migrate(a)).resolves.toBe(7);
-    expect(old.prepare('PRAGMA user_version').get()).toEqual({ user_version: 8 });
-    expect(old.prepare('SELECT * FROM voice_logs').all()).toEqual(before);
-    expect(old.prepare('SELECT name, phone, note FROM customers').all()).toEqual([{ name: 'করিম', phone: '01711123456', note: null }]);
-    old.close();
   });
 });

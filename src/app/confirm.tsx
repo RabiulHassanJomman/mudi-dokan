@@ -29,7 +29,7 @@ import {
   type ItemDraft,
 } from '../domain/basket';
 import { classifyAnswer, heardPrefix } from '../domain/confirmWords';
-import { balanceWords, suggestCustomers } from '../domain/customers';
+import { balanceWords, customerAliasToLearn, resolveCustomerAlias, suggestCustomers } from '../domain/customers';
 import {
   canSaveEntry,
   choosePurchaseProduct,
@@ -43,7 +43,9 @@ import type { PickProduct } from '../domain/pick';
 import { suggestProducts } from '../domain/products';
 import { stockView, stockWords } from '../domain/stock';
 import {
+  addCustomerAlias,
   addProductAlias,
+  customerAliasMap,
   createVoiceLog,
   customerBalances,
   customerByName,
@@ -136,6 +138,10 @@ export default function ConfirmScreen() {
   const firstEntry = useRef<EntryDraft | null>(null);
   const latestEntry = useRef<EntryDraft | null>(null);
   const decided = useRef(false);
+  /** For learning customer aliases: the heard customer, the shop's customers and aliases at load. */
+  const heardCustomer = useRef<string | null>(null);
+  const customersBefore = useRef<string[]>([]);
+  const custAliases = useRef<Record<string, string>>({});
   latest.current = basket;
   latestEntry.current = entry;
 
@@ -184,6 +190,9 @@ export default function ConfirmScreen() {
       let transcript = '';
       let parsed;
       const names = await knownNames(db);
+      const aliasesNow = await customerAliasMap(db);
+      customersBefore.current = names.customers;
+      custAliases.current = aliasesNow;
       const owed = (await customerBalances(db)).map((c) => c.name);
       setKnown(owed);
       const catalogNow = await pickProducts(db);
@@ -215,12 +224,15 @@ export default function ConfirmScreen() {
         const rule = parseCommand(transcript, {
           tab: PARSE_TABS.find((t) => t === tab),
           knownProducts: names.products,
-          knownCustomers: names.customers,
+          // learned spellings help split "কোরিম চাল ২ কেজি"; resolved to the customer below
+          knownCustomers: [...names.customers, ...Object.keys(aliasesNow)],
           productAliases: await productAliasMap(db),
           deviceRole: device.role ?? undefined,
           deviceName: device.name,
         });
         parsed = fromGemini ?? rule;
+        // a learned spelling → the customer (Gemini also gets the aliases, this catches the rest)
+        if (parsed.customer) parsed = { ...parsed, customer: resolveCustomerAlias(parsed.customer, aliasesNow) };
         await setParsed(
           db,
           w,
@@ -231,6 +243,7 @@ export default function ConfirmScreen() {
         // the card shows what Gemini heard
         if (fromGemini) transcript = fromGemini.raw || transcript;
       }
+      heardCustomer.current = parsed.customer ?? null;
       if (!alive) return;
 
       if (parsed.intent === 'stock_query' || parsed.intent === 'balance_query') {
@@ -314,10 +327,22 @@ export default function ConfirmScreen() {
       if (p && a.spoken && a.spoken !== p.name) await addProductAlias(db, writer(), a.spoken, p.id);
       answer = await stockAnswer(name, catalog);
     } else {
+      await learnCustomerAlias(a.spoken, name);
       answer = await balanceAnswer(name, known);
     }
     setState({ ...state, answer });
     void speak(answer.text ?? answerPrompt(answer));
+  }
+
+  /** The heard customer name was corrected to, or picked as, an existing customer: remember the spelling. */
+  async function learnCustomerAlias(heard: string | null, chosen: string | null) {
+    const alias = customerAliasToLearn(heard, chosen, customersBefore.current, custAliases.current);
+    if (!alias || !chosen) return;
+    try {
+      if (await addCustomerAlias(db, writer(), alias, chosen)) custAliases.current = { ...custAliases.current, [alias]: chosen };
+    } catch (e) {
+      console.warn('addCustomerAlias failed', e);
+    }
   }
 
   /** A sale line or purchase whose name matched none: the user chose a known product. */
@@ -363,6 +388,7 @@ export default function ConfirmScreen() {
     decided.current = true;
     try {
       await saveBasket(db, writer(), b, logId.current, first.current ? diffBaskets(first.current, b) : []);
+      await learnCustomerAlias(heardCustomer.current, b.customerName);
       void speak('রাখা হয়েছে।');
       leave();
     } catch (e) {
@@ -384,6 +410,7 @@ export default function ConfirmScreen() {
     decided.current = true;
     try {
       await saveEntry(db, writer(), e, logId.current, firstEntry.current ? diffEntries(firstEntry.current, e) : []);
+      await learnCustomerAlias(heardCustomer.current, e.customerName);
       void speak('রাখা হয়েছে।');
       leave();
     } catch (err) {
