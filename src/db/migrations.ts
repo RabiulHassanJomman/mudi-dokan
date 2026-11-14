@@ -213,12 +213,11 @@ UPDATE voice_logs SET intent = json_extract(parsed_json, '$.intent') WHERE parse
 `;
 
 /**
- * v7: Gemini audio experiment (exp/gemini-audio) next to Android STT + rule parser.
+ * v7: Gemini audio (optional engine) next to Android STT + rule parser.
  * engine = the setting when the command was spoken (null = before v7, android);
  * parsed_by = whose result the confirm card showed (parsed_json stays "what was shown");
  * android_json / gemini_json = each engine's result; Gemini's transcript, error, latency
- * and tokens. All nullable: unused on main (no Gemini there), kept so every branch has
- * the same schema at the same version.
+ * and tokens. All nullable: unused when the build has no Gemini key.
  */
 const V7 = `
 ALTER TABLE voice_logs ADD COLUMN engine TEXT CHECK (engine IS NULL OR engine IN ('android','gemini','both'));
@@ -257,8 +256,7 @@ CREATE INDEX customer_aliases_alias ON customer_aliases(alias);
 
 /**
  * Index i holds the SQL that takes the DB from user_version i to i + 1.
- * Shared by every branch: a schema change lands on main first, then is merged into
- * exp/gemini-audio (CLAUDE.md). Append only; never edit or renumber a shipped one.
+ * Append only; never edit or renumber a shipped one.
  */
 export const MIGRATIONS: readonly string[] = [V1, V2, V3, V4, V5, V6, V7, V8, V9];
 

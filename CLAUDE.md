@@ -1,6 +1,6 @@
 # Mudi Dokan App
 Voice-first Android app for grocery shopkeepers who can't or won't type.
-Input = Bangla voice, output = big icons + TTS. Full plan: @docs/PLAN.md
+Input = Bangla voice, output = big icons + TTS. Full plan: docs/PLAN.md (read only the section you need; Status is at the top)
 
 ## Stack
 - React Native + Expo (dev build, NOT Expo Go), TypeScript strict
@@ -28,10 +28,8 @@ Input = Bangla voice, output = big icons + TTS. Full plan: @docs/PLAN.md
 - Every DB change is a NEW migration (append to MIGRATIONS; never edit a shipped one).
   Never break existing pilot data on the shop phone: add an upgrade test from the
   previous version with real-looking rows.
-- Migrations are append-only and shared across branches: one MIGRATIONS list, same
-  number = same SQL everywhere. Any schema change lands on main first and is then merged
-  into exp/gemini-audio (or any other branch), never the other way. Branches always end at
-  the same schema version.
+- Single branch: main. Migrations are append-only: one MIGRATIONS list, never edit or
+  renumber a shipped one.
 - Release APKs only via `npm run apk` (release key, see Commands). Install as an update
   (`adb install -r`); never uninstall the app on the phone (= data loss) without asking.
 - Bangla UI, big touch targets (≥ 52 px), 🔊 read-aloud on every screen, confirm before
@@ -49,6 +47,7 @@ Decisions log. Read it first.
 - run: npx expo run:android
 - release APK (no Metro, for the shop phone): npm run apk
   → android/app/build/outputs/apk/release/app-release.apk; update with `adb install -r <apk>`
+  It ends by printing whether the Gemini key (EXPO_PUBLIC_GEMINI_KEY, .env) is in the APK.
 - Release signing: dedicated key, NOT the debug key (plugins/withReleaseSigning.js).
   - Keystore: ~/.mudi-dokan/keys/mudi-dokan-release.jks (outside the repo), alias
     mudi-dokan-release, SHA-256 D0:B0:99:12:…:C8:89.
@@ -65,3 +64,8 @@ Decisions log. Read it first.
 - eval (Mac only): npm run eval:gemini [-- --rule-only]; pilot log → fixtures:
   npm run eval:import -- pilot.jsonl
 
+## Small tasks
+If I say "small:" → only edit code + run related tests. No APK, no phone, no Plan.md,
+no branch merge, no summary longer than 5 lines. Commit only; I'll say when to push/build.
+
+Final report: max 10 lines. What changed, what to test, anything blocking. No restating my prompt.

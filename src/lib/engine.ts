@@ -1,6 +1,6 @@
 /**
- * Voice engine setting (experiment exp/gemini-audio, debug only): kept per phone in the
- * kv-store, changed on the pilot log screen.
+ * Voice engine setting (optional Gemini; pilot log screen): kept per phone in the kv-store.
+ * Without EXPO_PUBLIC_GEMINI_KEY at build time Gemini doesn't exist in the app: android only.
  *   android = recognizer + rule parser (as before)
  *   gemini  = the recorded clip to Gemini; Android result only as fallback
  *   both    = Android drives the confirm card; Gemini runs on the same clip in the background
@@ -13,9 +13,10 @@ import { DEFAULT_MODEL } from '../gemini';
 const KEY_ENGINE = 'voice_engine';
 const KEY_MODEL = 'gemini_model';
 
-/** Default on this branch. */
-export const DEFAULT_ENGINE: Engine = 'both';
 export const ENGINES: readonly Engine[] = ['android', 'gemini', 'both'];
+
+/** No setting saved: gemini when this build has a key, else android. */
+export const defaultEngine = (hasKey: boolean): Engine => (hasKey ? 'gemini' : 'android');
 
 /** EXPO_PUBLIC_GEMINI_KEY from .env (gitignored), inlined at build time. Pilot only: anyone with the APK can read it. */
 export const geminiKey = (): string | null => process.env.EXPO_PUBLIC_GEMINI_KEY?.trim() || null;
@@ -24,7 +25,7 @@ export const geminiKey = (): string | null => process.env.EXPO_PUBLIC_GEMINI_KEY
 export function getEngine(): Engine {
   if (!geminiKey()) return 'android';
   const v = Storage.getItemSync(KEY_ENGINE);
-  return ENGINES.includes(v as Engine) ? (v as Engine) : DEFAULT_ENGINE;
+  return ENGINES.includes(v as Engine) ? (v as Engine) : defaultEngine(true);
 }
 export const setEngine = (e: Engine) => Storage.setItemSync(KEY_ENGINE, e);
 

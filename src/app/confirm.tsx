@@ -66,6 +66,7 @@ import { getDevice, writer } from '../device';
 import { UNIT_BN, formatNumber, formatQty, formatTaka, parseTakaInput, toBnDigits } from '../lib/bn';
 import { speak, stopSpeaking } from '../lib/speak';
 import { pickedCommand, pickText, type PickedItem } from '../domain/pick';
+import { shownEngine } from '../gemini/fallback';
 import { parseCommand } from '../parser';
 import type { Intent, ParseContext, ParsedCommand } from '../parser/types';
 import { colors, fonts, fontSize, productTiles, radius, size, spacing } from '../theme/tokens';
@@ -212,8 +213,8 @@ export default function ConfirmScreen() {
           const log = await getVoiceLog(db, params.logId);
           transcript = log?.transcript ?? '';
           const g = log?.engine === 'gemini' && log.gemini_json ? (JSON.parse(log.gemini_json) as ParsedCommand) : null;
-          // Gemini did not understand but the recognizer heard something: fall back to Android
-          if (g && (g.intent !== 'unknown' || !transcript)) {
+          // no result or "unknown" from Gemini: the Android transcript (silent fallback)
+          if (g && shownEngine(g, transcript) === 'gemini') {
             fromGemini = g;
             setByGemini(true);
           }

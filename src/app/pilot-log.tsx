@@ -350,44 +350,49 @@ function EnginePanel(props: {
       <Txt size={fontSize.body} weight="bold">
         শোনার ইঞ্জিন (পরীক্ষা)
       </Txt>
-      <View style={styles.engineRow}>
-        {ENGINES.map((e) => (
-          <Pressable
-            key={e}
-            accessibilityRole="radio"
-            accessibilityState={{ checked: props.engine === e, disabled: !props.hasKey && e !== 'android' }}
-            disabled={!props.hasKey && e !== 'android'}
-            onPress={() => props.onEngine(e)}
-            style={[styles.engineChip, props.engine === e && styles.engineChipOn, !props.hasKey && e !== 'android' && styles.disabled]}
-          >
-            <Txt size={fontSize.body} weight="bold" color={props.engine === e ? colors.onColor : colors.ink}>
-              {ENGINE_BN[e]}
-            </Txt>
-          </Pressable>
-        ))}
-      </View>
-      {!props.hasKey && (
-        <Txt wrap size={fontSize.caption} weight="medium" color={colors.bakiInk}>
-          এই বিল্ডে Gemini key নেই (.env এ EXPO_PUBLIC_GEMINI_KEY)
+      {!props.hasKey ? (
+        // a build without EXPO_PUBLIC_GEMINI_KEY: no Gemini at all
+        <Txt wrap size={fontSize.caption} weight="medium" color={colors.ink2}>
+          Android (এই বিল্ডে Gemini নেই)
+        </Txt>
+      ) : (
+        <>
+          <View style={styles.engineRow}>
+            {ENGINES.map((e) => (
+              <Pressable
+                key={e}
+                accessibilityRole="radio"
+                accessibilityState={{ checked: props.engine === e }}
+                onPress={() => props.onEngine(e)}
+                style={[styles.engineChip, props.engine === e && styles.engineChipOn]}
+              >
+                <Txt size={fontSize.body} weight="bold" color={props.engine === e ? colors.onColor : colors.ink}>
+                  {ENGINE_BN[e]}
+                </Txt>
+              </Pressable>
+            ))}
+          </View>
+          <TextInput
+            value={props.model}
+            onChangeText={props.onModel}
+            onEndEditing={props.onModelDone}
+            autoCapitalize="none"
+            autoCorrect={false}
+            accessibilityLabel="Gemini মডেল"
+            style={styles.modelInput}
+          />
+        </>
+      )}
+      {props.hasKey && (
+        <Txt wrap size={fontSize.caption} weight="medium" color={colors.ink2}>
+          {t && t.asked
+            ? `আজ: Gemini ${formatNumber(t.asked)} বার (ব্যর্থ ${formatNumber(t.geminiFailed)}) · মিল Android–Gemini ${pctText(t.agreed, t.compared)}` +
+              ` · ✅ Gemini ${pctText(t.geminiRight, t.geminiScored)} · ✅ Android ${pctText(t.androidRight, t.androidScored)}` +
+              ` · গড় ${t.avgMs === null ? '—' : `${formatNumber(t.avgMs)} ms`}` +
+              ` · টোকেন prompt ${formatNumber(t.avgPromptTokens ?? 0)} / audio ${formatNumber(t.avgAudioTokens ?? 0)} / out ${formatNumber(t.avgOutputTokens ?? 0)} / think ${formatNumber(t.avgThoughtTokens ?? 0)}`
+            : 'আজ Gemini এখনো কিছু শোনেনি।'}
         </Txt>
       )}
-      <TextInput
-        value={props.model}
-        onChangeText={props.onModel}
-        onEndEditing={props.onModelDone}
-        autoCapitalize="none"
-        autoCorrect={false}
-        accessibilityLabel="Gemini মডেল"
-        style={styles.modelInput}
-      />
-      <Txt wrap size={fontSize.caption} weight="medium" color={colors.ink2}>
-        {t && t.asked
-          ? `আজ: Gemini ${formatNumber(t.asked)} বার (ব্যর্থ ${formatNumber(t.geminiFailed)}) · মিল Android–Gemini ${pctText(t.agreed, t.compared)}` +
-            ` · ✅ Gemini ${pctText(t.geminiRight, t.geminiScored)} · ✅ Android ${pctText(t.androidRight, t.androidScored)}` +
-            ` · গড় ${t.avgMs === null ? '—' : `${formatNumber(t.avgMs)} ms`}` +
-            ` · টোকেন prompt ${formatNumber(t.avgPromptTokens ?? 0)} / audio ${formatNumber(t.avgAudioTokens ?? 0)} / out ${formatNumber(t.avgOutputTokens ?? 0)} / think ${formatNumber(t.avgThoughtTokens ?? 0)}`
-          : 'আজ Gemini এখনো কিছু শোনেনি।'}
-      </Txt>
     </View>
   );
 }

@@ -6,7 +6,7 @@
   "scripts": {
     "start": "expo start --dev-client",
     "android": "expo run:android",
-    "apk": "expo prebuild -p android --no-install && cd android && ANDROID_HOME=${ANDROID_HOME:-$HOME/Library/Android/sdk} ./gradlew assembleRelease && echo android/app/build/outputs/apk/release/app-release.apk",
+    "apk": "expo prebuild -p android --no-install && (cd android && ANDROID_HOME=${ANDROID_HOME:-$HOME/Library/Android/sdk} ./gradlew assembleRelease) && node scripts/apk-gemini-check.mjs",
     "test": "jest",
     "typecheck": "tsc --noEmit",
     "doctor": "expo-doctor",

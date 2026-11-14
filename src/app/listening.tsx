@@ -13,6 +13,7 @@ import { Txt } from '../components/Txt';
 import { createVoiceLog, setOutcome } from '../db/repo';
 import { writer } from '../device';
 import { getEngine } from '../lib/engine';
+import { shownEngine } from '../gemini/fallback';
 import { GEMINI_WAIT_MS, runGemini } from '../lib/gemini';
 import { colors, fontSize, radius, spacing } from '../theme/tokens';
 
@@ -203,7 +204,7 @@ export default function ListeningScreen() {
       await setOutcome(db, w, logId, g.ok || got ? 'cancelled' : 'stt_error');
       return;
     }
-    if ((g.ok && g.parsed?.intent !== 'unknown') || got) {
+    if (shownEngine(g.ok ? g.parsed : null, got ?? '') !== 'none') {
       router.replace({ pathname: '/confirm', params: { logId, tab, ...carry } });
       return;
     }
