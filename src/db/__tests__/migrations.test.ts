@@ -373,3 +373,11 @@ describe('v7–v9 (shared by main and exp/gemini-audio)', () => {
     expect(() => insert(raw, 'customer_aliases', { ...row('a2'), alias: 'x', customer_id: 'nobody' })).toThrow();
   });
 });
+
+describe('v7 Gemini columns (used on exp/gemini-audio)', () => {
+  it('engine and parsed_by take only known values', () => {
+    insert(raw, 'voice_logs', { ...row('v1'), transcript: 'চাল ২ কেজি', device_name: 'আব্বু', engine: 'both', parsed_by: 'android' });
+    expect(() => insert(raw, 'voice_logs', { ...row('v2'), transcript: 'x', device_name: 'আব্বু', engine: 'openai' })).toThrow();
+    expect(() => insert(raw, 'voice_logs', { ...row('v3'), transcript: 'x', device_name: 'আব্বু', parsed_by: 'both' })).toThrow();
+  });
+});

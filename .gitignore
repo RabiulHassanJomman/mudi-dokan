@@ -34,3 +34,6 @@ coverage/
 # eval (scripts/eval-gemini.ts) output
 eval/results/
 .env
+
+# eval --audio clips (pulled off the phone; real shop voices)
+eval/clips/

@@ -67,7 +67,7 @@ import { UNIT_BN, formatNumber, formatQty, formatTaka, parseTakaInput, toBnDigit
 import { speak, stopSpeaking } from '../lib/speak';
 import { pickedCommand, pickText, type PickedItem } from '../domain/pick';
 import { parseCommand } from '../parser';
-import type { Intent, ParseContext } from '../parser/types';
+import type { Intent, ParseContext, ParsedCommand } from '../parser/types';
 import { colors, fonts, fontSize, productTiles, radius, size, spacing } from '../theme/tokens';
 
 type How = 'voice' | 'typed' | 'pick';
@@ -130,6 +130,8 @@ export default function ConfirmScreen() {
   const how: How = params.pick ? 'pick' : params.logId ? 'voice' : 'typed';
   const [answering, setAnswering] = useState(false);
   const [saving, setSaving] = useState(false);
+  /** Experiment: the card shows Gemini's result (gemini mode). */
+  const [byGemini, setByGemini] = useState(false);
 
   const logId = useRef<string | null>(null);
   const first = useRef<BasketDraft | null>(null);
@@ -203,15 +205,24 @@ export default function ConfirmScreen() {
         parsed = pickedCommand(pick);
         logId.current = await createVoiceLog(db, w, { transcript, source: 'typed', contextTab: tab, parsed, via: 'pick' });
       } else {
+        /** gemini mode: Gemini's checked result drives the card; Android's rule parse is kept for the log. */
+        let fromGemini: ParsedCommand | null = null;
         if (params.logId) {
           logId.current = params.logId;
-          transcript = (await getVoiceLog(db, params.logId))?.transcript ?? '';
+          const log = await getVoiceLog(db, params.logId);
+          transcript = log?.transcript ?? '';
+          const g = log?.engine === 'gemini' && log.gemini_json ? (JSON.parse(log.gemini_json) as ParsedCommand) : null;
+          // Gemini did not understand but the recognizer heard something: fall back to Android
+          if (g && (g.intent !== 'unknown' || !transcript)) {
+            fromGemini = g;
+            setByGemini(true);
+          }
         } else {
           transcript = params.text ?? '';
           // empty = the number-pad fallback (voice failed): nothing to parse, keep it out of the accuracy
           logId.current = await createVoiceLog(db, w, { transcript, source: 'typed', contextTab: tab, ...(transcript ? {} : { via: 'pick' as const }) });
         }
-        parsed = parseCommand(transcript, {
+        const rule = parseCommand(transcript, {
           tab: PARSE_TABS.find((t) => t === tab),
           knownProducts: names.products,
           // learned spellings help split "কোরিম চাল ২ কেজি"; resolved to the customer below
@@ -222,8 +233,18 @@ export default function ConfirmScreen() {
           // "রফিক ৫০০ নিল" = owner withdrawal when রফিক's phone is মালিক; "মালিক" is built in
           ownerNames: await ownerNames(db),
         });
+        parsed = fromGemini ?? rule;
+        // a learned spelling → the customer (Gemini also gets the aliases, this catches the rest)
         if (parsed.customer) parsed = { ...parsed, customer: resolveCustomerAlias(parsed.customer, aliasesNow) };
-        await setParsed(db, w, logId.current, parsed);
+        await setParsed(
+          db,
+          w,
+          logId.current,
+          parsed,
+          params.logId ? { by: fromGemini ? 'gemini' : 'android', android: transcript ? rule : null } : {},
+        );
+        // the card shows what Gemini heard
+        if (fromGemini) transcript = fromGemini.raw || transcript;
       }
       heardCustomer.current = parsed.customer ?? null;
       if (!alive) return;
@@ -506,7 +527,7 @@ export default function ConfirmScreen() {
 
       {state.kind === 'answer' && (
         <ScrollView contentContainerStyle={styles.body}>
-          <Heard text={state.transcript} how={how} />
+          <Heard text={state.transcript} how={how} gemini={byGemini} />
           <View style={styles.card}>
             {state.answer.text !== null ? (
               <Txt wrap size={fontSize.headingLg} weight="bold" style={styles.center}>
@@ -550,7 +571,7 @@ export default function ConfirmScreen() {
       {state.kind === 'ready' && basket && (
         <>
           <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
-            <Heard text={state.transcript} how={how} />
+            <Heard text={state.transcript} how={how} gemini={byGemini} />
             {basket.items.length === 0 ? (
               <View style={styles.card}>
                 <Txt wrap size={fontSize.headingLg} weight="bold" style={styles.center}>
@@ -628,7 +649,7 @@ export default function ConfirmScreen() {
       {state.kind === 'entry' && entry && (
         <>
           <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
-            {!!state.transcript && <Heard text={state.transcript} how={how} />}
+            {!!state.transcript && <Heard text={state.transcript} how={how} gemini={byGemini} />}
             {entry.purchase && !entry.purchase.product && entry.purchase.productName && (
               <ProductSuggest
                 spoken={entry.purchase.productName}
@@ -646,10 +667,11 @@ export default function ConfirmScreen() {
 }
 
 /** "শুনেছি" (voice), "লিখেছি" (typed), "বেছে নিয়েছি" (ছবি দেখে). */
-function Heard({ text, how }: { text: string; how: How }) {
+function Heard({ text, how, gemini }: { text: string; how: How; gemini?: boolean }) {
   return (
     <Txt wrap size={fontSize.captionLg} weight="medium" color={colors.muted} style={styles.center}>
-      {heardPrefix(how)}: “{text}”
+      {heardPrefix(how)}
+      {gemini ? ' (Gemini)' : ''}: “{text}”
     </Txt>
   );
 }

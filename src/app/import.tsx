@@ -25,6 +25,9 @@ import {
 } from '../domain/importer';
 import type { MatchHow } from '../domain/names';
 import { writer } from '../device';
+import { applyTidyHints, tidyRows, type TidyLine } from '../gemini/tidy';
+import { geminiKey } from '../lib/engine';
+import { tidyCustomerLines } from '../lib/gemini';
 import { formatNumber, toBnDigits } from '../lib/bn';
 import { speak } from '../lib/speak';
 import { colors, fonts, fontSize, radius, size, spacing } from '../theme/tokens';
@@ -69,6 +72,7 @@ const HOW: Record<MatchHow, string> = {
   phone: 'একই ফোন',
   phonetic: 'শুনতে একই',
   fuzzy: 'কাছাকাছি নাম',
+  ai: 'Gemini বলছে',
 };
 
 /** Settings → "ক্রেতার তালিকা আনুন": a .txt file → preview → হ্যাঁ → saved. */
@@ -82,6 +86,10 @@ export default function ImportScreen() {
   const [editing, setEditing] = useState<ImportRow<CustomerLine> | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [saving, setSaving] = useState(false);
+  /** exp/gemini-audio: the file's own lines (what Gemini gets) and Gemini's hints after a tidy-up. */
+  const [rawLines, setRawLines] = useState<string[]>([]);
+  const [tidy, setTidy] = useState<TidyLine[] | null>(null);
+  const [tidying, setTidying] = useState(false);
 
   const counts = useMemo(() => (rows ? importCounts(rows) : null), [rows]);
 
@@ -108,12 +116,36 @@ export default function ImportScreen() {
     const cands = await kind.candidates(db);
     const next = classifyRows(parseImportText(text, kind.spec), cands, kind.spec);
     setExisting(cands);
+    setRawLines(next.map((r) => r.raw));
+    setTidy(null);
     setFileName(asset.name);
     // a non-UTF-8 file (e.g. ANSI/Bijoy) decodes into replacement characters
     setWarning(text.includes('�') ? 'কিছু লেখা ভাঙা দেখাচ্ছে — ফাইলটি UTF-8 এ সেভ করুন।' : next.length ? null : 'ফাইলে কোনো নাম নেই।');
     setRows(next);
     const c = importCounts(next);
     void speak(`${formatNumber(next.length)}টি লাইন পেয়েছি। নতুন ${formatNumber(c.new)} জন।`);
+  }
+
+  /** Gemini rewrites the rows (Bangla spelling, typos, phones); the same check runs again, still editable. */
+  async function geminiTidy() {
+    if (tidying || !rawLines.length) return;
+    setTidying(true);
+    void speak('Gemini দিয়ে গুছাচ্ছি।');
+    // candidates carry the learned spellings (customer_aliases)
+    const r = await tidyCustomerLines(rawLines, existing);
+    setTidying(false);
+    if (!r.ok) {
+      setWarning(`Gemini পারল না (${r.error.slice(0, 80)}) — আগের তালিকা রইল।`);
+      void speak('Gemini পারল না। আগের তালিকা রইল।');
+      return;
+    }
+    const next = applyTidyHints(classifyRows(tidyRows(r.rows), existing, kind.spec), r.rows, existing);
+    setTidy(r.rows);
+    setRows(next);
+    setFileName((f) => (f.endsWith(' · Gemini') ? f : `${f} · Gemini`));
+    setWarning(null);
+    const c = importCounts(next);
+    void speak(`Gemini গুছিয়েছে। ${formatNumber(next.length)} জন, নতুন ${formatNumber(c.new)}।`);
   }
 
   async function save() {
@@ -229,6 +261,22 @@ export default function ImportScreen() {
               </View>
             )}
           />
+          {geminiKey() && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ disabled: tidying }}
+              disabled={tidying}
+              onPress={() => void geminiTidy()}
+              style={({ pressed }) => [styles.tidyButton, tidying && styles.disabled, pressed && styles.pressed]}
+            >
+              <Txt size={fontSize.label} weight="bold" color={colors.stock}>
+                {tidying ? 'গুছাচ্ছি…' : 'Gemini দিয়ে গুছিয়ে নিন'}
+              </Txt>
+              <Txt size={fontSize.caption} weight="medium" color={colors.muted}>
+                নাম আর ফোন Google এ যাবে · পরীক্ষা
+              </Txt>
+            </Pressable>
+          )}
           <Pressable
             accessibilityRole="button"
             accessibilityState={{ disabled: !counts!.included }}
@@ -248,7 +296,10 @@ export default function ImportScreen() {
         row={editing}
         onClose={() => setEditing(null)}
         onDone={(value) => {
-          if (rows && editing) setRows(editRow(rows, editing.line, value, existing, kind.spec));
+          if (rows && editing) {
+            const next = editRow(rows, editing.line, value, existing, kind.spec);
+            setRows(tidy ? applyTidyHints(next, tidy, existing) : next);
+          }
           setEditing(null);
         }}
       />
@@ -343,6 +394,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
   },
   pressed: { opacity: 0.85 },
+  tidyButton: {
+    minHeight: 64,
+    borderRadius: radius.card,
+    borderWidth: 2,
+    borderColor: colors.stock,
+    backgroundColor: colors.stockTint,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: spacing.xs,
+  },
   disabled: { opacity: 0.4 },
   summary: { backgroundColor: colors.surface, borderRadius: radius.card, padding: spacing.md, gap: 2 },
   list: { gap: spacing.xs, paddingBottom: spacing.md },

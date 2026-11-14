@@ -1,13 +1,26 @@
 import { useCallback, useState } from 'react';
-import { Alert, FlatList, Pressable, Share, StyleSheet, View } from 'react-native';
-import { File } from 'expo-file-system';
+import { Alert, FlatList, Pressable, Share, StyleSheet, TextInput, View } from 'react-native';
+import { Directory, File } from 'expo-file-system';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useFocusEffect } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 
 import { Icon } from '../components/Icon';
 import { Txt } from '../components/Txt';
-import { pilotLog, pilotStats, setSttOk, wipePilotData, type Outcome, type PilotStats, type VoiceLogRow } from '../db/repo';
+import {
+  engineLogs,
+  pilotLog,
+  pilotStats,
+  setSttOk,
+  wipePilotData,
+  type Engine,
+  type Outcome,
+  type PilotStats,
+  type VoiceLogRow,
+} from '../db/repo';
+import { audioMime } from '../gemini/audio';
+import { engineMatch, engineStats, pct, type EngineStats } from '../gemini/stats';
+import { ENGINES, geminiKey, getEngine, getGeminiModel, setEngine, setGeminiModel } from '../lib/engine';
 import { getDevice, writer } from '../device';
 import { BUILD, buildLabel } from '../lib/buildInfo';
 import { formatNumber, toBnDigits } from '../lib/bn';
@@ -38,11 +51,46 @@ export default function PilotLogScreen() {
   const play = useClipPlayer();
   const [stats, setStats] = useState<PilotStats | null>(null);
   const [rows, setRows] = useState<VoiceLogRow[]>([]);
+  const [engine, setEngineState] = useState<Engine>(getEngine());
+  const [model, setModel] = useState(getGeminiModel());
+  const [today, setToday] = useState<EngineStats | null>(null);
 
   const load = useCallback(async () => {
     setStats(await pilotStats(db));
     setRows(await pilotLog(db, 300));
+    const midnight = new Date();
+    midnight.setHours(0, 0, 0, 0);
+    setToday(engineStats(await engineLogs(db, midnight.getTime())));
   }, [db]);
+
+  const chooseEngine = (e: Engine) => {
+    setEngine(e);
+    setEngineState(getEngine());
+  };
+
+  /**
+   * For `npm run eval:gemini -- --audio`: copy every clip into a folder the user picks
+   * (e.g. Download/mudi-clips), then `adb pull` it to eval/clips/ on the Mac.
+   */
+  const saveClips = async () => {
+    try {
+      const dir = await Directory.pickDirectoryAsync();
+      const all = await pilotLog(db, 5000);
+      let n = 0;
+      for (const r of all) {
+        if (!r.audio_path) continue;
+        const src = new File(r.audio_path);
+        if (!src.exists) continue;
+        const name = r.audio_path.split('/').pop()!;
+        const dest = dir.createFile(name, audioMime(name) ?? 'application/octet-stream');
+        await dest.write(await src.bytes());
+        n++;
+      }
+      Alert.alert('অডিও রাখা হয়েছে', `${formatNumber(n)}টি রেকর্ড`);
+    } catch (e) {
+      Alert.alert('অডিও রাখা গেল না', e instanceof Error ? e.message : String(e));
+    }
+  };
   useFocusEffect(
     useCallback(() => {
       void load();
@@ -90,6 +138,7 @@ export default function PilotLogScreen() {
       device: { name: device.name, role: device.role },
       build: BUILD,
       stats: await pilotStats(db),
+      engine_stats_all: engineStats(all.filter((r) => r.engine && r.source === 'voice')),
       logs: all.map((r) => ({
         id: r.id,
         at: new Date(r.created_at).toISOString(),
@@ -106,6 +155,24 @@ export default function PilotLogScreen() {
         stt_ok: r.stt_ok === null ? undefined : r.stt_ok === 1,
         via: r.via ?? undefined,
         has_audio: !!r.audio_path,
+        // the clip's file name: npm run eval:gemini -- --audio finds it in eval/clips/
+        audio_file: r.audio_path ? r.audio_path.split('/').pop() : undefined,
+        // Gemini experiment (v7): engine setting, whose result `parsed` is, both results, which matched
+        engine: r.engine ?? undefined,
+        parsed_by: r.parsed_by ?? undefined,
+        android: r.android_json ? (JSON.parse(r.android_json) as unknown) : undefined,
+        gemini:
+          r.gemini_json || r.gemini_error
+            ? {
+                model: r.gemini_model,
+                parsed: r.gemini_json ? (JSON.parse(r.gemini_json) as unknown) : undefined,
+                transcript: r.gemini_transcript ?? undefined,
+                error: r.gemini_error ?? undefined,
+                ms: r.gemini_ms,
+                tokens: { prompt: r.gemini_prompt_tokens, audio: r.gemini_audio_tokens, output: r.gemini_output_tokens, thought: r.gemini_thought_tokens },
+              }
+            : undefined,
+        match: r.engine ? engineMatch(r) : undefined,
       })),
     };
     await Share.share({ title: 'মুদি দোকান পাইলট লগ', message: JSON.stringify(payload, null, 1) });
@@ -126,7 +193,10 @@ export default function PilotLogScreen() {
           onPress={() =>
             void speak(
               stats
-                ? `পাইলট লগ। মোট ${formatNumber(stats.total)}টি কমান্ড। ${stats.accuracy === null ? '' : `ঠিক বুঝেছে ${formatNumber(stats.accuracy)} শতাংশ।`}`
+                ? `পাইলট লগ। মোট ${formatNumber(stats.total)}টি কমান্ড। ${stats.accuracy === null ? '' : `ঠিক বুঝেছে ${formatNumber(stats.accuracy)} শতাংশ।`}` +
+                  (today && today.geminiScored
+                    ? ` আজ জেমিনাই ঠিক ${formatNumber(pct(today.geminiRight, today.geminiScored)!)} শতাংশ, অ্যান্ড্রয়েড ${formatNumber(pct(today.androidRight, today.androidScored) ?? 0)} শতাংশ।`
+                    : '')
                 : 'পাইলট লগ।',
             )
           }
@@ -159,6 +229,19 @@ export default function PilotLogScreen() {
         </View>
       )}
 
+      <EnginePanel
+        engine={engine}
+        hasKey={!!geminiKey()}
+        model={model}
+        onEngine={chooseEngine}
+        onModel={setModel}
+        onModelDone={() => {
+          setGeminiModel(model);
+          setModel(getGeminiModel());
+        }}
+        today={today}
+      />
+
       <FlatList
         data={rows}
         keyExtractor={(r) => r.id}
@@ -182,6 +265,11 @@ export default function PilotLogScreen() {
             <Txt size={fontSize.caption} weight="medium" color={colors.muted} style={styles.center}>
               ৩ সেকেন্ড চেপে ধরে রাখুন
             </Txt>
+            <Pressable accessibilityRole="button" onPress={() => void saveClips()} style={styles.clips}>
+              <Txt size={fontSize.body} weight="bold" color={colors.stock}>
+                অডিও ফোল্ডারে রাখুন (eval)
+              </Txt>
+            </Pressable>
             <Txt size={fontSize.caption} weight="medium" color={colors.muted} style={styles.center}>
               {buildLabel()}
             </Txt>
@@ -215,6 +303,7 @@ export default function PilotLogScreen() {
                   {item.intent ?? parsed?.intent ? ` · ${item.intent ?? parsed?.intent}` : ''}
                   {item.edits_json ? ` · বদল: ${(JSON.parse(item.edits_json) as string[]).join(', ')}` : ''}
                 </Txt>
+                {item.engine && item.engine !== 'android' && <GeminiLine row={item} />}
                 {item.source === 'voice' && !!item.transcript && (
                   <View style={styles.sttRow}>
                     <Txt size={fontSize.caption} weight="semibold" color={colors.muted}>
@@ -235,6 +324,87 @@ export default function PilotLogScreen() {
         }}
       />
     </SafeAreaView>
+  );
+}
+
+const ENGINE_BN: Record<Engine, string> = { android: 'Android', gemini: 'Gemini', both: 'দুটোই' };
+const mark = (b: boolean | null) => (b === null ? '–' : b ? '✓' : '✗');
+const pctText = (n: number, of: number) => {
+  const p = pct(n, of);
+  return p === null ? '—' : `${toBnDigits(p)}% (${formatNumber(n)}/${formatNumber(of)})`;
+};
+
+/** Debug: which engine understands the command (experiment exp/gemini-audio). */
+function EnginePanel(props: {
+  engine: Engine;
+  hasKey: boolean;
+  model: string;
+  onEngine: (e: Engine) => void;
+  onModel: (m: string) => void;
+  onModelDone: () => void;
+  today: EngineStats | null;
+}) {
+  const t = props.today;
+  return (
+    <View style={styles.engineCard}>
+      <Txt size={fontSize.body} weight="bold">
+        শোনার ইঞ্জিন (পরীক্ষা)
+      </Txt>
+      <View style={styles.engineRow}>
+        {ENGINES.map((e) => (
+          <Pressable
+            key={e}
+            accessibilityRole="radio"
+            accessibilityState={{ checked: props.engine === e, disabled: !props.hasKey && e !== 'android' }}
+            disabled={!props.hasKey && e !== 'android'}
+            onPress={() => props.onEngine(e)}
+            style={[styles.engineChip, props.engine === e && styles.engineChipOn, !props.hasKey && e !== 'android' && styles.disabled]}
+          >
+            <Txt size={fontSize.body} weight="bold" color={props.engine === e ? colors.onColor : colors.ink}>
+              {ENGINE_BN[e]}
+            </Txt>
+          </Pressable>
+        ))}
+      </View>
+      {!props.hasKey && (
+        <Txt wrap size={fontSize.caption} weight="medium" color={colors.bakiInk}>
+          এই বিল্ডে Gemini key নেই (.env এ EXPO_PUBLIC_GEMINI_KEY)
+        </Txt>
+      )}
+      <TextInput
+        value={props.model}
+        onChangeText={props.onModel}
+        onEndEditing={props.onModelDone}
+        autoCapitalize="none"
+        autoCorrect={false}
+        accessibilityLabel="Gemini মডেল"
+        style={styles.modelInput}
+      />
+      <Txt wrap size={fontSize.caption} weight="medium" color={colors.ink2}>
+        {t && t.asked
+          ? `আজ: Gemini ${formatNumber(t.asked)} বার (ব্যর্থ ${formatNumber(t.geminiFailed)}) · মিল Android–Gemini ${pctText(t.agreed, t.compared)}` +
+            ` · ✅ Gemini ${pctText(t.geminiRight, t.geminiScored)} · ✅ Android ${pctText(t.androidRight, t.androidScored)}` +
+            ` · গড় ${t.avgMs === null ? '—' : `${formatNumber(t.avgMs)} ms`}` +
+            ` · টোকেন prompt ${formatNumber(t.avgPromptTokens ?? 0)} / audio ${formatNumber(t.avgAudioTokens ?? 0)} / out ${formatNumber(t.avgOutputTokens ?? 0)} / think ${formatNumber(t.avgThoughtTokens ?? 0)}`
+          : 'আজ Gemini এখনো কিছু শোনেনি।'}
+      </Txt>
+    </View>
+  );
+}
+
+/** One log row: what Gemini heard and which engine matched the confirmed entry. */
+function GeminiLine({ row }: { row: VoiceLogRow }) {
+  const m = engineMatch(row);
+  const text = row.gemini_error
+    ? `Gemini ভুল: ${row.gemini_error.slice(0, 80)}`
+    : row.gemini_json
+      ? `Gemini: “${row.gemini_transcript ?? ''}” · ${formatNumber(row.gemini_ms ?? 0)} ms`
+      : 'Gemini: অপেক্ষা…';
+  return (
+    <Txt wrap size={fontSize.caption} weight="medium" color={colors.stock}>
+      {ENGINE_BN[row.engine ?? 'android']} · {text} · মিলেছে A {mark(m.android)} G {mark(m.gemini)}
+      {row.parsed_by === 'gemini' ? ' · কার্ডে Gemini' : ''}
+    </Txt>
   );
 }
 
@@ -326,4 +496,35 @@ const styles = StyleSheet.create({
   },
   wipeHeld: { backgroundColor: colors.baki },
   badge: { borderRadius: radius.pill, paddingHorizontal: 10, paddingVertical: 4 },
+  engineCard: { backgroundColor: colors.surface, borderRadius: radius.section, padding: spacing.md, gap: spacing.xs },
+  engineRow: { flexDirection: 'row', gap: spacing.xs },
+  engineChip: {
+    flex: 1,
+    minHeight: size.iconButton,
+    borderRadius: radius.sm,
+    borderWidth: 2,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  engineChipOn: { backgroundColor: colors.stock, borderColor: colors.stock },
+  modelInput: {
+    minHeight: size.iconButton,
+    borderRadius: radius.icon,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: 12,
+    paddingVertical: 0,
+    fontSize: fontSize.caption,
+    color: colors.ink,
+  },
+  clips: {
+    minHeight: size.iconButton,
+    paddingHorizontal: 20,
+    borderRadius: radius.pill,
+    borderWidth: 2,
+    borderColor: colors.stock,
+    backgroundColor: colors.stockTint,
+    justifyContent: 'center',
+  },
 });

@@ -1,5 +1,5 @@
-import { parseCommand } from '../../src/parser';
-import { fixtureKey, type Seed } from '../eval-types';
+import { parseCommand } from '../../parser';
+import { fixtureKey, type Seed } from '../types';
 import { fixtureFromLog, readPilotLogs, seedAdditions, type PilotLog, type SavedItem } from '../pilot-fixtures';
 
 const line = (product: string, quantity: number, unit: SavedItem['unit'], pricePoisha: number, extra: Partial<SavedItem> = {}): SavedItem => ({

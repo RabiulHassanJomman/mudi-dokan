@@ -15,8 +15,8 @@ import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { fixtureKey, type Fixture, type Seed } from './eval-types';
-import { fixtureFromLog, readPilotLogs, seedAdditions, type SkipReason } from './pilot-fixtures';
+import { fixtureKey, type Fixture, type Seed } from '../src/eval/types';
+import { fixtureFromLog, readPilotLogs, seedAdditions, type SkipReason } from '../src/eval/pilot-fixtures';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const FIXTURES = join(ROOT, 'eval/fixtures.jsonl');
