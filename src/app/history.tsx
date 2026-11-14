@@ -14,6 +14,7 @@ import { speak, stopSpeaking } from '../lib/speak';
 import { useClipPlayer } from '../lib/useClipPlayer';
 import { colors, fontSize, productTiles, radius, size, spacing } from '../theme/tokens';
 import { nav } from '../lib/nav';
+import { useDataVersion } from '../sync/app';
 
 const FILTER_LOOK: Record<HistoryFilter, { bg: string; ink: string }> = {
   all: { bg: colors.neutralTint, ink: colors.ink2 },
@@ -52,6 +53,8 @@ const isOut = (i: HistoryItem) => i.kind === 'expense' || i.kind === 'owner_with
  */
 export default function HistoryScreen() {
   const db = useSQLiteContext();
+  /** Rows from another phone came in: reload. */
+  const synced = useDataVersion();
   const play = useClipPlayer();
   const params = useLocalSearchParams<{ filter?: string; date?: string }>();
   const [date, setDate] = useState(params.date ?? today());
@@ -71,7 +74,7 @@ export default function HistoryScreen() {
         alive = false;
         stopSpeaking();
       };
-    }, [db, date]),
+    }, [db, date, synced]),
   );
 
   const shown = items.filter((i) => matchesFilter(i, filter));

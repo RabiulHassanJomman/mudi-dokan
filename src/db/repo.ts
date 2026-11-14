@@ -9,6 +9,7 @@ import type { StoredEntry, StoredSaleLine } from '../domain/fix';
 import type { EntryTable, RawEntry } from '../domain/history';
 import { entrySummary, type EntryDraft } from '../domain/entry';
 import type { CustomerLine } from '../domain/customerImport';
+import type { MergeItem, MergeKind } from '../domain/merge';
 import type { Candidate } from '../domain/names';
 import type { PickProduct } from '../domain/pick';
 import type { RecentEntry } from '../domain/recent';
@@ -754,7 +755,8 @@ export async function cashFlows(db: Db, start: number, end: number): Promise<Cas
 /** Setup's opening cash and every counted close (effective rows). */
 export async function cashAnchors(db: Db): Promise<CashAnchor[]> {
   const rows = await db.getAllAsync<{ business_date: string; kind: 'opening' | 'close'; opening_cash_poisha: number; counted_cash_poisha: number | null }>(
-    'SELECT business_date, kind, opening_cash_poisha, counted_cash_poisha FROM v_day_close',
+    // latest first: of two phones' closes (or openings) for the same day, the later one counts
+    'SELECT business_date, kind, opening_cash_poisha, counted_cash_poisha FROM v_day_close ORDER BY created_at DESC, id DESC',
   );
   return rows.map((r) => ({
     date: r.business_date,
@@ -778,6 +780,8 @@ export interface CashDay {
   expectedPoisha: number;
   /** দিন শেষ করুন was done for this day (the latest count). */
   close: DayClose | null;
+  /** Two phones closed this day without seeing each other's count (sync): both kept, the latest shown. */
+  closedOnTwoPhones: boolean;
 }
 
 /**
@@ -795,10 +799,14 @@ export async function cashDay(db: Db, date: string): Promise<CashDay> {
   const flows = await cashFlows(db, dayStart(date), dayStart(nextDate(date)));
   const close = await db.getFirstAsync<DayClose>(
     `SELECT id, counted_cash_poisha, expected_cash_poisha, note_counts_json FROM v_day_close
-     WHERE kind = 'close' AND business_date = ? ORDER BY created_at DESC LIMIT 1`,
+     WHERE kind = 'close' AND business_date = ? ORDER BY created_at DESC, id DESC LIMIT 1`,
     date,
   );
-  return { date, openingPoisha, source, flows, expectedPoisha: openingPoisha + netCash(flows), close };
+  const phones = await db.getFirstAsync<{ n: number }>(
+    "SELECT COUNT(DISTINCT device_id) AS n FROM v_day_close WHERE kind = 'close' AND business_date = ?",
+    date,
+  );
+  return { date, openingPoisha, source, flows, expectedPoisha: openingPoisha + netCash(flows), close, closedOnTwoPhones: (phones?.n ?? 0) > 1 };
 }
 
 const nextDate = (date: string) => {
@@ -821,10 +829,13 @@ export async function saveDayClose(
 ): Promise<string> {
   const id = w.newId();
   await db.withTransactionAsync(async () => {
-    const prev = await db.getFirstAsync<{ id: string }>(
-      "SELECT id FROM v_day_close WHERE kind = 'close' AND business_date = ? ORDER BY created_at DESC LIMIT 1",
+    const closes = await db.getAllAsync<{ id: string }>(
+      "SELECT id FROM v_day_close WHERE kind = 'close' AND business_date = ? ORDER BY created_at DESC, id DESC",
       day.date,
     );
+    const prev = closes[0];
+    // another phone's close of the same day (synced): this count replaces it too
+    for (const other of closes.slice(1)) await correct(db, w, 'day_close', other.id, {}, true);
     await insert(db, 'day_close', {
       id,
       business_date: day.date,
@@ -902,7 +913,7 @@ type Row = Record<string, Bind>;
  * A correction of `oldId`: a copy of its row with `changes`, corrects_id = oldId and the
  * original time (entry_at). voided = the entry is cancelled from now on.
  */
-async function correct(db: Db, w: Writer, table: EntryTable, oldId: string, changes: Row, voided = false): Promise<string> {
+async function correct(db: Db, w: Writer, table: EntryTable | 'day_close', oldId: string, changes: Row, voided = false): Promise<string> {
   const old = await db.getFirstAsync<Row>(`SELECT * FROM ${table} WHERE id = ?`, oldId);
   if (!old) throw new Error(`${table} ${oldId} not found`);
   const id = w.newId();
@@ -914,6 +925,9 @@ async function correct(db: Db, w: Writer, table: EntryTable, oldId: string, chan
     voided: voided ? 1 : 0,
     entry_at: (old.entry_at as number | null) ?? (old.created_at as number),
     device_name: w.deviceName,
+    // filled by the {table}_root trigger from corrects_id (never copied)
+    root_id: null,
+    rev: null,
     ...rowCols(w),
   });
   return id;
@@ -1214,6 +1228,126 @@ export async function wipePilotData(db: Db): Promise<string[]> {
       await db.runAsync(`DELETE FROM ${t}`);
     }
     for (const t of ENTRY_TABLES) await db.runAsync(noDeleteTrigger(t));
+    await db.runAsync('DELETE FROM sync_state');
+    await db.runAsync('DELETE FROM sync_inbox');
   });
   return audio.map((a) => a.audio_path);
+}
+
+// ── merge (এই দুইটা কি একই?) — step 7 ─────────────────────────
+
+/** Products and customers in use, for domain/merge.duplicatePairs. */
+export async function mergeItems(db: Db): Promise<{ products: MergeItem[]; customers: MergeItem[] }> {
+  const products = await db.getAllAsync<MergeItem>(
+    `SELECT p.id, p.name, p.created_at AS createdAt, p.unit AS detail,
+       (SELECT COUNT(*) FROM v_sales WHERE product_id = p.id) + (SELECT COUNT(*) FROM v_purchases WHERE product_id = p.id) AS uses
+     FROM products p WHERE p.archived = 0 AND p.merged_into IS NULL`,
+  );
+  const customers = await db.getAllAsync<MergeItem>(
+    `SELECT c.id, c.name, c.created_at AS createdAt, c.phone AS detail,
+       (SELECT COUNT(*) FROM v_ledger WHERE party_id = c.id) + (SELECT COUNT(*) FROM v_sales WHERE customer_id = c.id) AS uses
+     FROM customers c WHERE c.archived = 0 AND c.merged_into IS NULL AND c.party_type = 'customer'`,
+  );
+  return { products, customers };
+}
+
+const MERGE_NO = 'merge_no';
+
+/** Pairs the user said "না" to (kept on this phone). */
+export async function dismissedMerges(db: Db): Promise<Set<string>> {
+  const r = await db.getFirstAsync<{ value: string | null }>('SELECT value FROM sync_meta WHERE key = ?', MERGE_NO);
+  return new Set(r?.value ? (JSON.parse(r.value) as string[]) : []);
+}
+
+export async function dismissMerge(db: Db, key: string): Promise<void> {
+  const keys = await dismissedMerges(db);
+  keys.add(key);
+  await db.runAsync(
+    'INSERT INTO sync_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+    MERGE_NO,
+    JSON.stringify([...keys]),
+  );
+}
+
+/**
+ * "হ্যাঁ, একই": the duplicate is archived and points at the one kept (merged_into), its
+ * name becomes an alias of it, its aliases move over, and its entries are re-pointed by
+ * correction rows. No entry is deleted. Returns how many entries were re-pointed.
+ */
+export async function mergeRecords(db: Db, w: Writer, kind: MergeKind, keepId: string, dupId: string): Promise<number> {
+  if (keepId === dupId) return 0;
+  const table = kind === 'product' ? 'products' : 'customers';
+  const aliases = kind === 'product' ? 'product_aliases' : 'customer_aliases';
+  const fk = kind === 'product' ? 'product_id' : 'customer_id';
+  let moved = 0;
+  await db.withTransactionAsync(async () => {
+    const dup = await db.getFirstAsync<{ name: string }>(`SELECT name FROM ${table} WHERE id = ?`, dupId);
+    if (!dup) throw new Error(`${table} ${dupId} not found`);
+    // updated_at moves forward even if this phone's clock is behind the row's last writer (LWW)
+    const t = w.now();
+    const later = 'MAX(?, updated_at + 1)';
+    await db.runAsync(`UPDATE ${table} SET archived = 1, merged_into = ?, updated_at = ${later} WHERE id = ?`, keepId, t, dupId);
+    await db.runAsync(`UPDATE ${table} SET merged_into = ?, updated_at = ${later} WHERE merged_into = ?`, keepId, t, dupId);
+    await db.runAsync(`UPDATE ${aliases} SET ${fk} = ?, updated_at = ${later} WHERE ${fk} = ?`, keepId, t, dupId);
+    const alias = dup.name.normalize('NFC').replace(/\s+/g, ' ').trim();
+    const taken = await db.getFirstAsync<{ n: number }>(
+      `SELECT (SELECT COUNT(*) FROM ${table} WHERE name = ? AND archived = 0) + (SELECT COUNT(*) FROM ${aliases} WHERE alias = ?) AS n`,
+      alias,
+      alias,
+    );
+    if (alias && !taken?.n) await insert(db, aliases, { id: w.newId(), alias, [fk]: keepId, ...rowCols(w) });
+    moved = await repointInTx(db, w);
+  });
+  return moved;
+}
+
+/**
+ * Entries still pointing at a merged product/customer get a correction to the kept one.
+ * Runs after a merge and after every pull (another phone may have used the old one while
+ * offline). Returns how many entries were re-pointed.
+ */
+export async function repointMerged(db: Db, w: Writer): Promise<number> {
+  const any = await db.getFirstAsync<{ n: number }>(
+    'SELECT (SELECT COUNT(*) FROM products WHERE merged_into IS NOT NULL) + (SELECT COUNT(*) FROM customers WHERE merged_into IS NOT NULL) AS n',
+  );
+  if (!any?.n) return 0;
+  let n = 0;
+  await db.withTransactionAsync(async () => {
+    n = await repointInTx(db, w);
+  });
+  return n;
+}
+
+async function repointInTx(db: Db, w: Writer): Promise<number> {
+  const target = async (table: 'products' | 'customers', id: string | null): Promise<string | null> => {
+    let cur = id;
+    for (let i = 0; cur && i < 20; i++) {
+      const r = await db.getFirstAsync<{ m: string | null }>(`SELECT merged_into AS m FROM ${table} WHERE id = ?`, cur);
+      if (!r?.m) return cur;
+      cur = r.m;
+    }
+    return cur;
+  };
+  const mp = "(SELECT id FROM products WHERE merged_into IS NOT NULL)";
+  const mc = "(SELECT id FROM customers WHERE merged_into IS NOT NULL)";
+  const jobs: { table: EntryTable; sql: string; cols: { col: string; of: 'products' | 'customers' }[] }[] = [
+    { table: 'sales', sql: `SELECT * FROM v_sales WHERE product_id IN ${mp} OR customer_id IN ${mc}`, cols: [{ col: 'product_id', of: 'products' }, { col: 'customer_id', of: 'customers' }] },
+    { table: 'purchases', sql: `SELECT * FROM v_purchases WHERE product_id IN ${mp} OR party_id IN ${mc}`, cols: [{ col: 'product_id', of: 'products' }, { col: 'party_id', of: 'customers' }] },
+    { table: 'ledger', sql: `SELECT * FROM v_ledger WHERE party_id IN ${mc}`, cols: [{ col: 'party_id', of: 'customers' }] },
+  ];
+  let n = 0;
+  for (const job of jobs) {
+    for (const r of await db.getAllAsync<Row & { id: string }>(job.sql)) {
+      const changes: Row = {};
+      for (const { col, of } of job.cols) {
+        const to = await target(of, r[col] as string | null);
+        if (to !== r[col]) changes[col] = to;
+      }
+      if (Object.keys(changes).length) {
+        await correct(db, w, job.table, r.id, changes);
+        n++;
+      }
+    }
+  }
+  return n;
 }

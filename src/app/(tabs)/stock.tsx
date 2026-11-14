@@ -13,6 +13,7 @@ import { formatQty, formatTaka } from '../../lib/bn';
 import { speak, stopSpeaking } from '../../lib/speak';
 import { colors, fontSize, productTiles, radius, spacing } from '../../theme/tokens';
 import { nav } from '../../lib/nav';
+import { useDataVersion } from '../../sync/app';
 
 /**
  * মাল (Stock.dc.html): every product with its stock (kena − becha, never stored) and
@@ -21,13 +22,15 @@ import { nav } from '../../lib/nav';
  */
 export default function StockScreen() {
   const db = useSQLiteContext();
+  /** Rows from another phone came in: reload. */
+  const synced = useDataVersion();
   const [list, setList] = useState<StockView[]>([]);
 
   useFocusEffect(
     useCallback(() => {
       void (async () => setList((await stockList(db)).map(stockView)))();
       return () => stopSpeaking();
-    }, [db]),
+    }, [db, synced]),
   );
 
   return (

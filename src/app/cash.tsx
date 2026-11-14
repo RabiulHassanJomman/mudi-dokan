@@ -14,6 +14,7 @@ import { speak, stopSpeaking } from '../lib/speak';
 import { useClipPlayer } from '../lib/useClipPlayer';
 import { colors, fontSize, radius, size, spacing } from '../theme/tokens';
 import { nav } from '../lib/nav';
+import { useDataVersion } from '../sync/app';
 
 const ROW_LOOK: Record<string, { icon: IconName; tile: string; ink: string }> = {
   opening: { icon: 'wallet', tile: colors.neutralTint, ink: colors.ink },
@@ -31,6 +32,8 @@ const ROW_LOOK: Record<string, { icon: IconName; tile: string; ink: string }> = 
  */
 export default function CashScreen() {
   const db = useSQLiteContext();
+  /** Rows from another phone came in: reload. */
+  const synced = useDataVersion();
   const play = useClipPlayer();
   const [day, setDay] = useState<CashDay | null>(null);
   const [outs, setOuts] = useState<HistoryItem[]>([]);
@@ -50,7 +53,7 @@ export default function CashScreen() {
         alive = false;
         stopSpeaking();
       };
-    }, [db]),
+    }, [db, synced]),
   );
 
   const rows = day ? cashRows(day.openingPoisha, day.source, day.flows) : [];
@@ -59,6 +62,7 @@ export default function CashScreen() {
     if (!day) return;
     let s = cashWords(day.openingPoisha, day.source, day.flows);
     if (day.close) s += ` দিন শেষ করা হয়েছে, গুনে পেলাম ${formatTaka(day.close.counted_cash_poisha).replace('৳ ', '')} টাকা।`;
+    if (day.closedOnTwoPhones) s += ' দুইটা ফোন থেকে দিন শেষ করা হয়েছে।';
     void speak(`${s} খরচ বলতে বা নোট গুনে মিলাতে নিচের বোতাম চাপুন।`);
   };
   const go = (to: () => void) => {
@@ -126,6 +130,14 @@ export default function CashScreen() {
             <Icon name="check" size={24} color={gap.kind === 'ok' ? colors.saleDark : colors.bakiInk} strokeWidth={2.6} />
             <Txt wrap size={fontSize.body} weight="bold" color={gap.kind === 'ok' ? colors.saleDark : colors.bakiInk} style={styles.flex}>
               {`দিন শেষ: গুনে পেলাম ${formatTaka(day.close.counted_cash_poisha)} · ${gap.text}`}
+            </Txt>
+          </View>
+        )}
+        {day?.closedOnTwoPhones && (
+          <View style={[styles.closed, styles.closedGap]}>
+            <Icon name="alert" size={24} color={colors.bakiInk} strokeWidth={2.6} />
+            <Txt wrap size={fontSize.body} weight="bold" color={colors.bakiInk} style={styles.flex}>
+              দুইটা ফোন থেকে দিন শেষ করা হয়েছে। শেষেরটা দেখানো হচ্ছে।
             </Txt>
           </View>
         )}

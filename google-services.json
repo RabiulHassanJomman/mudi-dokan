@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "398520217760",
+    "project_id": "mudi-dokan-3f06b",
+    "storage_bucket": "mudi-dokan-3f06b.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:398520217760:android:83e14113606383485219c5",
+        "android_client_info": {
+          "package_name": "com.mudidokan.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "398520217760-kf924sb2u8gu3g3ao90fe123gn1ddb5v.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.mudidokan.app",
+            "certificate_hash": "65cc27a7ad3f84e6a38fffebe8ab6fe8e6ecba3f"
+          }
+        },
+        {
+          "client_id": "398520217760-auhbfh64oppah7b9gouj102ibv5kqd9c.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDJj_JQxIU-GTge0-02yO_1v9oFa_3dMHg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "398520217760-auhbfh64oppah7b9gouj102ibv5kqd9c.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

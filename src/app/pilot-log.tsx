@@ -28,6 +28,7 @@ import { speak } from '../lib/speak';
 import { useClipPlayer } from '../lib/useClipPlayer';
 import { colors, fontSize, radius, size, spacing } from '../theme/tokens';
 import { nav } from '../lib/nav';
+import { useSyncStatus } from '../sync/app';
 
 const OUTCOME: Record<Outcome, { label: string; bg: string; ink: string }> = {
   saved: { label: 'ঠিক', bg: colors.saleTint, ink: colors.saleDark },
@@ -49,6 +50,8 @@ const time = (ms: number) => {
 /** Pilot debug log: every command, what happened, ▶️ the clip, share as JSON. */
 export default function PilotLogScreen() {
   const db = useSQLiteContext();
+  /** Signed in: a wipe would only delete this phone's copy (the cloud and other phones keep it), so it is hidden. */
+  const signedIn = !!useSyncStatus()?.email;
   const play = useClipPlayer();
   const [stats, setStats] = useState<PilotStats | null>(null);
   const [rows, setRows] = useState<VoiceLogRow[]>([]);
@@ -250,6 +253,7 @@ export default function PilotLogScreen() {
         ListFooterComponent={
           <View style={styles.footer}>
             {/* 3 s hold, then the confirm dialog: a tap while scrolling must not get near a wipe */}
+            {!signedIn && (
             <Pressable
               accessibilityRole="button"
               accessibilityHint="৩ সেকেন্ড চেপে ধরে রাখুন"
@@ -263,8 +267,9 @@ export default function PilotLogScreen() {
                 </Txt>
               )}
             </Pressable>
+            )}
             <Txt size={fontSize.caption} weight="medium" color={colors.muted} style={styles.center}>
-              ৩ সেকেন্ড চেপে ধরে রাখুন
+              {signedIn ? 'সিঙ্ক চালু: পাইলট ডাটা মোছা বন্ধ' : '৩ সেকেন্ড চেপে ধরে রাখুন'}
             </Txt>
             <Pressable accessibilityRole="button" onPress={() => void saveClips()} style={styles.clips}>
               <Txt size={fontSize.body} weight="bold" color={colors.stock}>

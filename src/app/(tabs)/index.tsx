@@ -17,6 +17,7 @@ import { speak } from '../../lib/speak';
 import { useClipPlayer } from '../../lib/useClipPlayer';
 import { colors, fontSize, productTiles, radius, size, spacing } from '../../theme/tokens';
 import { nav } from '../../lib/nav';
+import { useDataVersion } from '../../sync/app';
 
 /** Tile picture and colours per entry type (sale lines keep their product picture). */
 function entryLook(e: RecentEntry): { icon: IconName; tile: string; ink: string; border: string } {
@@ -50,6 +51,8 @@ const startOfToday = () => {
 /** বিক্রি (home): big mic, today's numbers, last entries. */
 export default function SaleScreen() {
   const db = useSQLiteContext();
+  /** Rows from another phone came in: reload. */
+  const synced = useDataVersion();
   const play = useClipPlayer();
   const [shopName, setShopName] = useState<string | null>(null);
   const [today, setToday] = useState({ sales: 0, baki: 0 });
@@ -67,7 +70,7 @@ export default function SaleScreen() {
         setStats(await pilotStats(db));
         setShopName((await getSetup(db, getDevice().id)).shopName);
       })();
-    }, [db]),
+    }, [db, synced]),
   );
 
   const readScreen = () => {

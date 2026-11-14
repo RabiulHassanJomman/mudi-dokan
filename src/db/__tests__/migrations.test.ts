@@ -83,6 +83,7 @@ describe('migrate', () => {
   it('gives every table id, device_id, created_at, updated_at', () => {
     const tables = raw.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as { name: string }[];
     for (const { name } of tables) {
+      if (name.startsWith('sync_')) continue; // local sync bookkeeping, never synced
       const cols = (raw.prepare(`PRAGMA table_info(${name})`).all() as { name: string }[]).map((c) => c.name);
       expect({ name, cols }).toEqual({ name, cols: expect.arrayContaining(['id', 'device_id', 'created_at', 'updated_at']) });
     }
@@ -120,7 +121,7 @@ describe('entries are append-only', () => {
     const triggers = (
       raw.prepare("SELECT name FROM sqlite_master WHERE type = 'trigger' AND tbl_name = ?").all(t) as { name: string }[]
     ).map((r) => r.name);
-    expect(triggers.sort()).toEqual([`${t}_no_delete`, `${t}_no_update`]);
+    expect(triggers.sort()).toEqual([`${t}_no_delete`, `${t}_no_update`, `${t}_root`]);
     expect(raw.prepare("SELECT name FROM sqlite_master WHERE type = 'view' AND name = ?").get(`v_${t}`)).toBeTruthy();
   });
 
@@ -309,8 +310,8 @@ describe('v7–v9 (shared by main and exp/gemini-audio)', () => {
     expect(() => db.exec("UPDATE sales SET quantity = 1 WHERE id = 's1'")).toThrow(/append-only/);
   }
 
-  it('v7–v9 are shared by every branch (the latest is now 10)', () => {
-    expect(SCHEMA_VERSION).toBe(10);
+  it('v7–v9 are shared by every branch (the latest is now 11)', () => {
+    expect(SCHEMA_VERSION).toBe(11);
   });
 
   it('v6 shop phone (main) → v9: data kept, new columns null', async () => {
@@ -427,7 +428,7 @@ describe('v10: voided + entry_at (corrections and undo)', () => {
       ledger: old.prepare('SELECT id, amount_poisha FROM v_ledger').all(),
     };
     await expect(migrate(adapter(old))).resolves.toBe(9);
-    expect(old.prepare('PRAGMA user_version').get()).toEqual({ user_version: 10 });
+    expect(old.prepare('PRAGMA user_version').get()).toEqual({ user_version: SCHEMA_VERSION });
     const after = dumpAll(old);
     for (const t of TABLES) {
       expect(after[t]!.map((r, k) => Object.fromEntries(Object.keys(before[t]![k]!).map((c) => [c, r[c]])))).toEqual(before[t]);
@@ -464,5 +465,67 @@ describe('v10: voided + entry_at (corrections and undo)', () => {
     insert(raw, 'expenses', { ...entry('e1'), item: 'বিল', amount_poisha: 50000 });
     insert(raw, 'expenses', { ...entry('e2'), item: 'বিল', amount_poisha: 45000, corrects_id: 'e1', entry_at: now - 86_400_000, created_at: now + 5 });
     expect(raw.prepare('SELECT id, at FROM v_expenses').all()).toEqual([{ id: 'e2', at: now - 86_400_000 }]);
+  });
+
+  it('v10 shop phone → v11: every row kept, chains get root_id/rev, views the same, sync tables empty', async () => {
+    const old = v9Shop();
+    old.exec(`${MIGRATIONS[9]}\nPRAGMA user_version = 10;`);
+    // step 5 rows: a voided expense and a 3-deep correction chain on the sale
+    insert(old, 'expenses', { ...entry('e1x'), item: 'বিদ্যুৎ বিল', amount_poisha: 50000, corrects_id: 'e1', voided: 1, entry_at: now });
+    insert(old, 'sales', {
+      ...entry('s3'), product_id: 'p1', quantity: 4, sell_price_poisha: 6000, amount_poisha: 24000, cost_price_poisha: 5500,
+      credit: 1, customer_id: 'c1', voice_log_id: 'v1', basket_id: 'b1', line_no: 1, corrects_id: 's2', entry_at: now,
+    });
+    const before = dumpAll(old);
+    const views = () => ({
+      stock: old.prepare('SELECT * FROM v_stock').all(),
+      sales: old.prepare('SELECT id, quantity, at FROM v_sales').all(),
+      expenses: old.prepare('SELECT id FROM v_expenses').all(),
+      ledger: old.prepare('SELECT id, amount_poisha FROM v_ledger').all(),
+      day: old.prepare('SELECT id FROM v_day_close').all(),
+    });
+    const viewsBefore = views();
+    await expect(migrate(adapter(old))).resolves.toBe(10);
+    expect(old.prepare('PRAGMA user_version').get()).toEqual({ user_version: 11 });
+    const after = dumpAll(old);
+    for (const t of TABLES) {
+      expect(after[t]!.map((r, k) => Object.fromEntries(Object.keys(before[t]![k]!).map((c) => [c, r[c]])))).toEqual(before[t]);
+    }
+    expect(views()).toEqual(viewsBefore);
+    expect(old.prepare('SELECT id, root_id, rev FROM sales ORDER BY id').all()).toEqual([
+      { id: 's1', root_id: 's1', rev: 0 },
+      { id: 's2', root_id: 's1', rev: 1 },
+      { id: 's3', root_id: 's1', rev: 2 },
+    ]);
+    expect(old.prepare("SELECT root_id, rev FROM expenses WHERE id = 'e1x'").get()).toEqual({ root_id: 'e1', rev: 1 });
+    expect(old.prepare('SELECT merged_into FROM products').get()).toEqual({ merged_into: null });
+    for (const t of ['sync_state', 'sync_meta', 'sync_inbox']) expect(old.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get()).toEqual({ n: 0 });
+    expect(() => old.exec("UPDATE sales SET quantity = 1 WHERE id = 's3'")).toThrow(/append-only/);
+    expect(() => old.exec("DELETE FROM sales WHERE id = 's3'")).toThrow(/append-only/);
+    // new rows still get root/rev
+    insert(old, 'sales', {
+      ...entry('s4'), product_id: 'p1', quantity: 5, sell_price_poisha: 6000, amount_poisha: 30000, cost_price_poisha: 5500,
+      credit: 1, customer_id: 'c1', corrects_id: 's3', created_at: now + 9,
+    });
+    expect(old.prepare("SELECT root_id, rev FROM sales WHERE id = 's4'").get()).toEqual({ root_id: 's1', rev: 3 });
+    expect(old.prepare('SELECT id FROM v_sales').all()).toEqual([{ id: 's4' }]);
+    old.close();
+  });
+
+  it('two phones correcting the same entry: both kept, the later one counts', () => {
+    insert(raw, 'expenses', { ...entry('e1'), item: 'বিল', amount_poisha: 50000 });
+    insert(raw, 'expenses', { ...entry('eA'), item: 'বিল', amount_poisha: 45000, corrects_id: 'e1', created_at: now + 20, device_id: 'phoneA' });
+    insert(raw, 'expenses', { ...entry('eB'), item: 'বিল', amount_poisha: 40000, corrects_id: 'e1', created_at: now + 10, device_id: 'phoneB' });
+    expect(raw.prepare('SELECT id, amount_poisha FROM v_expenses').all()).toEqual([{ id: 'eA', amount_poisha: 45000 }]);
+    expect(raw.prepare('SELECT COUNT(*) AS n FROM expenses').get()).toEqual({ n: 3 });
+    // B then corrects its own (deeper) → B's chain wins, A's stays in history
+    insert(raw, 'expenses', { ...entry('eB2'), item: 'বিল', amount_poisha: 41000, corrects_id: 'eB', created_at: now + 15 });
+    expect(raw.prepare('SELECT id FROM v_expenses').all()).toEqual([{ id: 'eB2' }]);
+  });
+
+  it('the update guard only lets the root fill through', () => {
+    insert(raw, 'expenses', { ...entry('e1'), item: 'বিল', amount_poisha: 50000 });
+    expect(raw.prepare("SELECT root_id, rev FROM expenses WHERE id = 'e1'").get()).toEqual({ root_id: 'e1', rev: 0 });
+    expect(() => raw.exec("UPDATE expenses SET root_id = 'x' WHERE id = 'e1'")).toThrow(/append-only/);
   });
 });

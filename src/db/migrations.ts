@@ -288,10 +288,91 @@ ${V_STOCK}
 `;
 
 /**
+ * From v11: the effective version of an entry. Rows of one correction chain share root_id;
+ * rev = depth in the chain. The winner is the deepest row (latest created on a tie, then id),
+ * so two phones correcting the same entry offline (two rows with the same corrects_id) keep
+ * both rows in history but count once: the later correction. Rows nothing corrects and with
+ * no newer row in their chain; voided = cancelled.
+ */
+const forkSafeView = (table: string) => `
+CREATE VIEW v_${table} AS
+  SELECT t.*, COALESCE(t.entry_at, t.created_at) AS at FROM ${table} t
+  WHERE t.voided = 0
+    AND NOT EXISTS (SELECT 1 FROM ${table} c WHERE c.corrects_id = t.id)
+    AND NOT EXISTS (SELECT 1 FROM ${table} c WHERE c.root_id = t.root_id AND c.id <> t.id
+      AND (c.rev > t.rev OR (c.rev = t.rev AND (c.created_at > t.created_at OR (c.created_at = t.created_at AND c.id > t.id)))));`;
+
+/**
+ * root_id / rev are filled by an AFTER INSERT trigger (local rows and rows pulled from other
+ * phones alike, so they are never synced). The append-only UPDATE guard lets exactly that one
+ * fill through (root_id still null) and blocks every other update.
+ */
+const rootFill = (table: string) => `
+CREATE TRIGGER ${table}_root AFTER INSERT ON ${table} WHEN NEW.root_id IS NULL
+BEGIN
+  UPDATE ${table} SET
+    root_id = COALESCE((SELECT p.root_id FROM ${table} p WHERE p.id = NEW.corrects_id), NEW.id),
+    rev = COALESCE((SELECT p.rev + 1 FROM ${table} p WHERE p.id = NEW.corrects_id), 0)
+  WHERE id = NEW.id;
+END;
+CREATE TRIGGER ${table}_no_update BEFORE UPDATE ON ${table} WHEN OLD.root_id IS NOT NULL
+BEGIN SELECT RAISE(ABORT, '${table} is append-only: insert a correction row with corrects_id'); END;
+CREATE INDEX ${table}_root ON ${table}(root_id);`;
+
+const backfillRoot = (table: string) => `
+ALTER TABLE ${table} ADD COLUMN root_id TEXT;
+ALTER TABLE ${table} ADD COLUMN rev INTEGER;
+UPDATE ${table} SET root_id = ch.root, rev = ch.depth FROM (
+  WITH RECURSIVE chain(id, root, depth) AS (
+    SELECT id, id, 0 FROM ${table} WHERE corrects_id IS NULL
+    UNION ALL
+    SELECT c.id, chain.root, chain.depth + 1 FROM ${table} c JOIN chain ON c.corrects_id = chain.id
+  ) SELECT * FROM chain
+) ch WHERE ${table}.id = ch.id;`;
+
+/**
+ * v11 (build step 7): multi-phone sync.
+ * - root_id / rev on entries + fork-safe v_ views (see forkSafeView).
+ * - products / customers.merged_into: "এই দুইটা কি একই?" merge. The duplicate is archived
+ *   and points at the one kept; its entries are re-pointed by correction rows.
+ * - sync bookkeeping, local only (never synced): sync_state = what this phone last pushed of
+ *   each row (an entry can't take an UPDATE, so "synced_at" lives here, not on the row);
+ *   sync_meta = cursors, account, counters; sync_inbox = pulled rows waiting to be applied
+ *   (e.g. a sale whose product hasn't arrived yet).
+ */
+const V11 = `
+DROP VIEW v_stock;
+${ENTRY_TABLES.map((t) => `DROP VIEW v_${t};\nDROP TRIGGER ${t}_no_update;`).join('\n')}
+${ENTRY_TABLES.map(backfillRoot).join('\n')}
+${ENTRY_TABLES.map(rootFill).join('\n')}
+${ENTRY_TABLES.map(forkSafeView).join('\n')}
+${V_STOCK}
+ALTER TABLE products ADD COLUMN merged_into TEXT REFERENCES products(id);
+ALTER TABLE customers ADD COLUMN merged_into TEXT REFERENCES customers(id);
+CREATE TABLE sync_state (
+  tbl TEXT NOT NULL,
+  row_id TEXT NOT NULL,
+  pushed_at INTEGER NOT NULL,                 -- the row's updated_at when last pushed / pulled
+  PRIMARY KEY (tbl, row_id)
+) WITHOUT ROWID;
+CREATE TABLE sync_meta (
+  key TEXT PRIMARY KEY NOT NULL,
+  value TEXT
+) WITHOUT ROWID;
+CREATE TABLE sync_inbox (
+  tbl TEXT NOT NULL,
+  row_id TEXT NOT NULL,
+  data_json TEXT NOT NULL,
+  server_at INTEGER NOT NULL,
+  PRIMARY KEY (tbl, row_id)
+) WITHOUT ROWID;
+`;
+
+/**
  * Index i holds the SQL that takes the DB from user_version i to i + 1.
  * Append only; never edit or renumber a shipped one.
  */
-export const MIGRATIONS: readonly string[] = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10];
+export const MIGRATIONS: readonly string[] = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11];
 
 /**
  * Nov 14 fork: an early main build shipped v7 = customers.note (no Gemini columns) while

@@ -16,6 +16,7 @@ import { speak } from '../../lib/speak';
 import { useClipPlayer } from '../../lib/useClipPlayer';
 import { colors, fontSize, radius, size, spacing } from '../../theme/tokens';
 import { nav } from '../../lib/nav';
+import { useDataVersion } from '../../sync/app';
 
 const what = (l: LedgerLine) => (l.kind === 'joma' ? 'জমা দিল' : l.products ?? 'বাকি');
 
@@ -25,6 +26,8 @@ const what = (l: LedgerLine) => (l.kind === 'joma' ? 'জমা দিল' : l.p
  */
 export default function CustomerScreen() {
   const db = useSQLiteContext();
+  /** Rows from another phone came in: reload. */
+  const synced = useDataVersion();
   const play = useClipPlayer();
   const { id } = useLocalSearchParams<{ id: string }>();
   const [c, setC] = useState<CustomerBalance | null>(null);
@@ -38,7 +41,7 @@ export default function CustomerScreen() {
   useFocusEffect(
     useCallback(() => {
       void load();
-    }, [load]),
+    }, [load, synced]),
   );
 
   if (!c) return <SafeAreaView style={styles.screen} />;

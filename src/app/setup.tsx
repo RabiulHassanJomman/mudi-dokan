@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 
+import { AccountCard } from '../components/AccountCard';
 import { ConfirmSheet } from '../components/ConfirmSheet';
 import { Icon } from '../components/Icon';
 import { NumberPadSheet } from '../components/NumberPadSheet';
@@ -26,6 +27,7 @@ import {
 import { formatNumber, formatTaka, toBnDigits } from '../lib/bn';
 import { speak, stopSpeaking } from '../lib/speak';
 import { useVoiceOnce } from '../lib/useVoiceOnce';
+import { useDataVersion, useSyncStatus } from '../sync/app';
 import { parseSpokenAmount } from '../parser';
 import { colors, fonts, fontSize, radius, size, spacing } from '../theme/tokens';
 import { nav } from '../lib/nav';
@@ -40,7 +42,8 @@ const PROBLEM_TEXT: Record<SetupProblem, string> = {
 };
 
 /**
- * প্রথমবার চালু: shop name, whose phone (+ role), opening cash. Runs once (first launch);
+ * প্রথমবার চালু: the shop's Google account (sync; optional), shop name, whose phone (+ role),
+ * opening cash. Runs once (first launch);
  * ?edit=1 opens it from ⚙ on the home screen with the saved values. Nothing is saved
  * before the ঠিক আছে? sheet's হ্যাঁ.
  */
@@ -48,6 +51,8 @@ export default function SetupScreen() {
   const db = useSQLiteContext();
   const editing = useLocalSearchParams<{ edit?: string }>().edit === '1';
   const voice = useVoiceOnce();
+  const synced = useDataVersion();
+  const email = useSyncStatus()?.email ?? null;
 
   const [draft, setDraft] = useState<SetupDraft>(newSetupDraft());
   /** Which 🎤 is listening: the name or the cash. */
@@ -75,6 +80,19 @@ export default function SetupScreen() {
       stopSpeaking();
     };
   }, [db]);
+
+  // another phone's shop came in by sync: fill what is still empty (shop name, opening cash)
+  useEffect(() => {
+    if (!synced) return;
+    void (async () => {
+      const s = await getSetup(db, getDevice().id);
+      setDraft((d) => ({
+        ...d,
+        shopName: d.shopName.trim() ? d.shopName : (s.shopName ?? ''),
+        openingCashPoisha: d.openingCashPoisha ?? s.openingCashPoisha,
+      }));
+    })();
+  }, [db, synced]);
 
   const set = (patch: Partial<SetupDraft>) => {
     setDraft((d) => ({ ...d, ...patch }));
@@ -130,9 +148,10 @@ export default function SetupScreen() {
   const readScreen = () => {
     const parts = [
       editing ? 'দোকানের তথ্য।' : 'দোকান চালু করুন।',
-      `এক, দোকানের নাম। ${draft.shopName.trim() || 'লেখা হয়নি।'}`,
-      `দুই, আপনার নাম। ${draft.deviceName.trim() ? `${draft.deviceName.trim()}, ${draft.role ? ROLE_BN[draft.role] : 'মালিক না কর্মচারী বেছে নিন'}।` : 'লিখুন, না হলে মাইক চেপে বলুন। তারপর মালিক না কর্মচারী।'}`,
-      `তিন, এখন ক্যাশে কত টাকা? ${draft.openingCashPoisha === null ? 'মাইক চেপে বলুন।' : `${formatNumber(draft.openingCashPoisha / 100)} টাকা।`}`,
+      `এক, দোকানের Google অ্যাকাউন্ট। ${email ? `${email}, ঢোকা আছে।` : 'ঢুকুন চাপুন। দোকানের সব ফোনে একই অ্যাকাউন্ট।'}`,
+      `দুই, দোকানের নাম। ${draft.shopName.trim() || 'লেখা হয়নি।'}`,
+      `তিন, আপনার নাম। ${draft.deviceName.trim() ? `${draft.deviceName.trim()}, ${draft.role ? ROLE_BN[draft.role] : 'মালিক না কর্মচারী বেছে নিন'}।` : 'লিখুন, না হলে মাইক চেপে বলুন। তারপর মালিক না কর্মচারী।'}`,
+      `চার, এখন ক্যাশে কত টাকা? ${draft.openingCashPoisha === null ? 'মাইক চেপে বলুন।' : `${formatNumber(draft.openingCashPoisha / 100)} টাকা।`}`,
       editing ? 'শেষে রাখুন চাপুন।' : 'শেষে শুরু করুন চাপুন।',
     ];
     void speak(parts.join(' '));
@@ -188,7 +207,11 @@ export default function SetupScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
-        <Section n={1} title="দোকানের নাম" bad={bad('shop_name')}>
+        <Section n={1} title="দোকানের Google অ্যাকাউন্ট" bad={false}>
+          <AccountCard showSync={editing} />
+        </Section>
+
+        <Section n={2} title="দোকানের নাম" bad={bad('shop_name')}>
           <TextInput
             value={draft.shopName}
             onChangeText={(t) => set({ shopName: t })}
@@ -200,7 +223,7 @@ export default function SetupScreen() {
           />
         </Section>
 
-        <Section n={2} title="আপনার নাম" bad={bad('device_name') || bad('role')}>
+        <Section n={3} title="আপনার নাম" bad={bad('device_name') || bad('role')}>
           <View style={styles.cashRow}>
             <TextInput
               value={draft.deviceName}
@@ -251,7 +274,7 @@ export default function SetupScreen() {
           </View>
         </Section>
 
-        <Section n={3} title="এখন ক্যাশে কত টাকা?" bad={bad('opening_cash')}>
+        <Section n={4} title="এখন ক্যাশে কত টাকা?" bad={bad('opening_cash')}>
           <View style={styles.cashRow}>
             <Pressable
               accessibilityRole="button"

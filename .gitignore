@@ -37,3 +37,6 @@ eval/results/
 
 # eval --audio clips (pulled off the phone; real shop voices)
 eval/clips/
+
+# Firebase CLI deploy cache
+.firebase/

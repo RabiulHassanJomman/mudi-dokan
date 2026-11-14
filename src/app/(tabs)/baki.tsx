@@ -14,6 +14,7 @@ import { formatNumber, formatTaka } from '../../lib/bn';
 import { speak } from '../../lib/speak';
 import { colors, fontSize, radius, size, spacing } from '../../theme/tokens';
 import { nav } from '../../lib/nav';
+import { useDataVersion } from '../../sync/app';
 
 const balanceWords = (c: CustomerBalance) => words(c.name, c.balance_poisha);
 
@@ -23,12 +24,14 @@ const balanceWords = (c: CustomerBalance) => words(c.name, c.balance_poisha);
  */
 export default function BakiScreen() {
   const db = useSQLiteContext();
+  /** Rows from another phone came in: reload. */
+  const synced = useDataVersion();
   const [list, setList] = useState<CustomerBalance[]>([]);
 
   useFocusEffect(
     useCallback(() => {
       void (async () => setList(await customerBalances(db)))();
-    }, [db]),
+    }, [db, synced]),
   );
 
   const total = list.reduce((t, c) => t + Math.max(0, c.balance_poisha), 0);

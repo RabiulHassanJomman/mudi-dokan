@@ -1,17 +1,25 @@
 import { useEffect } from 'react';
 import { Stack, useRootNavigationState } from 'expo-router';
-import { SQLiteProvider } from 'expo-sqlite';
+import { SQLiteProvider, useSQLiteContext } from 'expo-sqlite';
 import { StatusBar } from 'expo-status-bar';
 
 import { DATABASE_NAME, initDatabase } from '../db/client';
 import { nav } from '../lib/nav';
+import { mergePairs, onFirstSync, startSync } from '../sync/app';
 import { colors } from '../theme/tokens';
+
+/**
+ * Must be one constant object: SQLiteProvider reopens the DB (and re-runs onInit, i.e. the
+ * migration) whenever `options` changes identity — an inline {} did that on every render.
+ */
+const DB_OPTIONS = { enableChangeListener: true } as const;
 
 export default function RootLayout() {
   return (
-    <SQLiteProvider databaseName={DATABASE_NAME} onInit={initDatabase}>
+    <SQLiteProvider databaseName={DATABASE_NAME} onInit={initDatabase} options={DB_OPTIONS}>
       <StatusBar style="dark" />
       <NavReady />
+      <SyncBoot />
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.bg } }}>
         <Stack.Screen name="(tabs)" />
         <Stack.Screen
@@ -27,6 +35,8 @@ export default function RootLayout() {
         <Stack.Screen name="cash" />
         <Stack.Screen name="cash-count" />
         <Stack.Screen name="history" />
+        <Stack.Screen name="sync" />
+        <Stack.Screen name="merge" options={{ animation: 'slide_from_bottom' }} />
       </Stack>
     </SQLiteProvider>
   );
@@ -36,5 +46,23 @@ export default function RootLayout() {
 function NavReady() {
   const key = useRootNavigationState()?.key;
   useEffect(() => nav.setReady(!!key), [key]);
+  return null;
+}
+
+/**
+ * Starts sync once the DB is migrated (SQLiteProvider renders children after onInit).
+ * After the first pull from the shop account: "এই দুইটা কি একই?" if the two phones made the
+ * same product/customer.
+ */
+function SyncBoot() {
+  const db = useSQLiteContext();
+  useEffect(() => {
+    void startSync().catch((e) => console.warn('sync start failed', e));
+    return onFirstSync(() => {
+      void mergePairs(db).then((p) => {
+        if (p.length) nav.push('/merge');
+      });
+    });
+  }, [db]);
   return null;
 }

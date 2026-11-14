@@ -74,8 +74,9 @@ export function openingAnchor(
   for (const a of anchors) {
     const from = a.kind === 'close' ? addDays(a.date, 1) : a.date;
     if (from > date) continue;
-    // later wins; on the same day an explicit opening wins over the previous close
-    if (!best || from > best.from || (from === best.from && a.kind === 'opening')) best = { from, amountPoisha: a.amountPoisha, kind: a.kind };
+    // later wins; on the same day an explicit opening wins over the previous close.
+    // Same day and kind (two phones): the first listed (cashAnchors: latest first) stays.
+    if (!best || from > best.from || (from === best.from && a.kind === 'opening' && best.kind !== 'opening')) best = { from, amountPoisha: a.amountPoisha, kind: a.kind };
   }
   if (!best) return null;
   const source = best.from !== date ? 'carry' : best.kind === 'opening' ? 'setup' : 'close';
