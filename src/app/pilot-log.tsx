@@ -2,7 +2,7 @@ import { useCallback, useState } from 'react';
 import { Alert, FlatList, Pressable, Share, StyleSheet, TextInput, View } from 'react-native';
 import { Directory, File } from 'expo-file-system';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router, useFocusEffect } from 'expo-router';
+import { useFocusEffect } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 
 import { Icon } from '../components/Icon';
@@ -27,6 +27,7 @@ import { formatNumber, toBnDigits } from '../lib/bn';
 import { speak } from '../lib/speak';
 import { useClipPlayer } from '../lib/useClipPlayer';
 import { colors, fontSize, radius, size, spacing } from '../theme/tokens';
+import { nav } from '../lib/nav';
 
 const OUTCOME: Record<Outcome, { label: string; bg: string; ink: string }> = {
   saved: { label: 'ঠিক', bg: colors.saleTint, ink: colors.saleDark },
@@ -181,7 +182,7 @@ export default function PilotLogScreen() {
   return (
     <SafeAreaView style={styles.screen}>
       <View style={styles.top}>
-        <Pressable accessibilityRole="button" accessibilityLabel="ফিরে যান" onPress={() => router.back()} style={styles.back}>
+        <Pressable accessibilityRole="button" accessibilityLabel="ফিরে যান" onPress={() => nav.back()} style={styles.back}>
           <Icon name="back" size={26} color={colors.ink} strokeWidth={2.2} />
         </Pressable>
         <Txt accessibilityRole="header" size={fontSize.heading} weight="bold" style={styles.flex}>

@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import { Keyboard, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 
 import { Icon, productIcon } from '../components/Icon';
@@ -24,6 +24,7 @@ import { UNIT_BN, formatNumber } from '../lib/bn';
 import { speak, stopSpeaking } from '../lib/speak';
 import { parseCommand } from '../parser';
 import { colors, fonts, fontSize, productTiles, radius, size, spacing } from '../theme/tokens';
+import { nav } from '../lib/nav';
 
 /** A product picked from the grid, or a new name typed in the search box. */
 type Chosen = { name: string; product: PickProduct | null };
@@ -111,7 +112,7 @@ export default function PickScreen() {
   const done = () => {
     if (!chosen) return void speak('আগে মাল বেছে নিন।');
     if (!value) return void speak('কতটুকু, নম্বর চাপুন।');
-    router.replace({ pathname: '/confirm', params: { pick: JSON.stringify(pick), tab: buying ? 'purchase' : 'sale' } });
+    nav.replace({ pathname: '/confirm', params: { pick: JSON.stringify(pick), tab: buying ? 'purchase' : 'sale' } });
   };
 
   /** Keyboard ✓: a whole command ("চাল ২ কেজি") goes to the confirm card; a name just searches. */
@@ -120,7 +121,7 @@ export default function PickScreen() {
     const t = buying ? 'purchase' : 'sale';
     const p = parseCommand(q, { tab: t, knownProducts: names.products, knownCustomers: names.customers, productAliases: aliases });
     const isCommand = p.intent !== t || (p.items ?? []).some((i) => i.quantity || i.total !== undefined) || (buying && !!p.quantity);
-    if (isCommand) router.replace({ pathname: '/confirm', params: { text: q, tab: t } });
+    if (isCommand) nav.replace({ pathname: '/confirm', params: { text: q, tab: t } });
     else if (shown.length === 1) choose({ name: shown[0]!.name, product: shown[0]! });
     else Keyboard.dismiss();
   };
@@ -128,7 +129,7 @@ export default function PickScreen() {
   return (
     <SafeAreaView style={styles.screen}>
       <View style={styles.top}>
-        <Pressable accessibilityRole="button" accessibilityLabel="ফিরে যান" onPress={() => router.back()} style={styles.back}>
+        <Pressable accessibilityRole="button" accessibilityLabel="ফিরে যান" onPress={() => nav.back()} style={styles.back}>
           <Icon name="back" size={26} color={colors.ink} strokeWidth={2.2} />
         </Pressable>
         <TextInput

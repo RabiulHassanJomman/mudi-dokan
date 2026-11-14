@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router, useFocusEffect } from 'expo-router';
+import { useFocusEffect } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 
 import { Avatar } from '../../components/Avatar';
@@ -13,6 +13,7 @@ import { balanceWords as words } from '../../domain/customers';
 import { formatNumber, formatTaka } from '../../lib/bn';
 import { speak } from '../../lib/speak';
 import { colors, fontSize, radius, size, spacing } from '../../theme/tokens';
+import { nav } from '../../lib/nav';
 
 const balanceWords = (c: CustomerBalance) => words(c.name, c.balance_poisha);
 
@@ -69,7 +70,7 @@ export default function BakiScreen() {
             onPress={() => {
               // tap = hear it, and open their হিসাব
               void speak(balanceWords(c));
-              router.push({ pathname: '/customer/[id]', params: { id: c.id } });
+              nav.push({ pathname: '/customer/[id]', params: { id: c.id } });
             }}
             style={({ pressed }) => [styles.row, pressed && styles.pressed]}
           >
@@ -97,7 +98,7 @@ export default function BakiScreen() {
       <View style={styles.bottom}>
         <Pressable
           accessibilityRole="button"
-          onPress={() => router.push({ pathname: '/listening', params: { tab: 'ledger' } })}
+          onPress={() => nav.push({ pathname: '/listening', params: { tab: 'ledger' } })}
           style={({ pressed }) => [styles.say, pressed && styles.pressed]}
         >
           <Icon name="mic" size={32} color={colors.onColor} />

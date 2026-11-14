@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 import { FlatList, Linking, Pressable, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 
 import { Avatar } from '../../components/Avatar';
@@ -15,6 +15,7 @@ import { dayLabel, formatNumber, formatTaka, toBnDigits } from '../../lib/bn';
 import { speak } from '../../lib/speak';
 import { useClipPlayer } from '../../lib/useClipPlayer';
 import { colors, fontSize, radius, size, spacing } from '../../theme/tokens';
+import { nav } from '../../lib/nav';
 
 const what = (l: LedgerLine) => (l.kind === 'joma' ? 'জমা দিল' : l.products ?? 'বাকি');
 
@@ -53,7 +54,7 @@ export default function CustomerScreen() {
     );
 
   const say = (kind: 'joma' | 'baki') =>
-    router.push({ pathname: '/listening', params: { tab: 'ledger', customer: c.name, kind } });
+    nav.push({ pathname: '/listening', params: { tab: 'ledger', customer: c.name, kind } });
 
   const call = () => {
     if (c.phone) void Linking.openURL(`tel:${c.phone}`);
@@ -66,7 +67,7 @@ export default function CustomerScreen() {
   return (
     <SafeAreaView style={styles.screen}>
       <View style={styles.top}>
-        <Pressable accessibilityRole="button" accessibilityLabel="ফিরে যান" onPress={() => router.back()} style={styles.back}>
+        <Pressable accessibilityRole="button" accessibilityLabel="ফিরে যান" onPress={() => nav.back()} style={styles.back}>
           <Icon name="back" size={26} color={colors.ink} strokeWidth={2.2} />
         </Pressable>
         <View style={styles.flex} />

@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router, useFocusEffect } from 'expo-router';
+import { useFocusEffect } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 
 import { Icon, type IconName } from '../components/Icon';
@@ -13,6 +13,7 @@ import { formatTaka } from '../lib/bn';
 import { speak, stopSpeaking } from '../lib/speak';
 import { useClipPlayer } from '../lib/useClipPlayer';
 import { colors, fontSize, radius, size, spacing } from '../theme/tokens';
+import { nav } from '../lib/nav';
 
 const ROW_LOOK: Record<string, { icon: IconName; tile: string; ink: string }> = {
   opening: { icon: 'wallet', tile: colors.neutralTint, ink: colors.ink },
@@ -68,7 +69,7 @@ export default function CashScreen() {
   return (
     <SafeAreaView style={styles.screen}>
       <View style={styles.top}>
-        <Pressable accessibilityRole="button" accessibilityLabel="ফিরে যান" onPress={() => router.back()} style={styles.square}>
+        <Pressable accessibilityRole="button" accessibilityLabel="ফিরে যান" onPress={() => nav.back()} style={styles.square}>
           <Icon name="back" size={26} color={colors.ink} strokeWidth={2.2} />
         </Pressable>
         <Txt accessibilityRole="header" size={fontSize.heading} weight="bold" style={styles.flex}>
@@ -171,7 +172,7 @@ export default function CashScreen() {
 
         <Pressable
           accessibilityRole="button"
-          onPress={() => go(() => router.push('/history'))}
+          onPress={() => go(() => nav.push('/history'))}
           style={({ pressed }) => [styles.historyLink, pressed && styles.pressed]}
         >
           <Icon name="list" size={26} color={colors.stock} />
@@ -185,7 +186,7 @@ export default function CashScreen() {
       <View style={styles.actions}>
         <Pressable
           accessibilityRole="button"
-          onPress={() => go(() => router.push({ pathname: '/listening', params: { tab: 'expense' } }))}
+          onPress={() => go(() => nav.push({ pathname: '/listening', params: { tab: 'expense' } }))}
           style={({ pressed }) => [styles.action, { backgroundColor: colors.baki }, pressed && styles.pressed]}
         >
           <Icon name="mic" size={30} color={colors.onColor} />
@@ -195,7 +196,7 @@ export default function CashScreen() {
         </Pressable>
         <Pressable
           accessibilityRole="button"
-          onPress={() => go(() => router.push('/cash-count'))}
+          onPress={() => go(() => nav.push('/cash-count'))}
           style={({ pressed }) => [styles.action, { backgroundColor: colors.sale }, pressed && styles.pressed]}
         >
           <Icon name="check" size={30} color={colors.onColor} strokeWidth={2.4} />

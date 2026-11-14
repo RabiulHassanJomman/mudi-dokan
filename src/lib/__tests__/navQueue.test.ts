@@ -1,0 +1,84 @@
+import { createNavQueue, isNotReadyError } from '../navQueue';
+
+const notReady = () => {
+  throw new Error('The imperative router is unavailable before the first render has finished.');
+};
+
+function fakeRouter() {
+  const calls: string[] = [];
+  let bound = false;
+  const r = {
+    push: (h: never) => (bound ? calls.push(`push ${String(h)}`) : notReady()),
+    replace: (h: never) => (bound ? calls.push(`replace ${String(h)}`) : notReady()),
+    back: () => (bound ? calls.push('back') : notReady()),
+    canGoBack: () => (bound ? true : notReady()),
+  };
+  return { r, calls, bind: (b: boolean) => (bound = b) };
+}
+
+function clock() {
+  let t = 0;
+  const timers: { fn: () => void; at: number }[] = [];
+  return {
+    now: () => t,
+    setTimer: (fn: () => void, ms: number) => timers.push({ fn, at: t + ms }),
+    advance(ms: number) {
+      t += ms;
+      for (const x of timers.splice(0).filter((x) => x.at <= t)) x.fn();
+    },
+  };
+}
+
+describe('navQueue: no crash before the navigator is mounted', () => {
+  it('a ready router navigates at once', () => {
+    const f = fakeRouter();
+    f.bind(true);
+    const nav = createNavQueue(f.r);
+    nav.push('/cash' as never);
+    expect(f.calls).toEqual(['push /cash']);
+  });
+
+  it('not ready: the tap is queued (no throw) and runs, in order, when ready', () => {
+    const f = fakeRouter();
+    const c = clock();
+    const nav = createNavQueue(f.r, { now: c.now, setTimer: c.setTimer });
+    expect(() => nav.push('/cash' as never)).not.toThrow();
+    nav.replace('/history' as never);
+    expect(nav.pending).toBe(2);
+    expect(nav.canGoBack()).toBe(false);
+    f.bind(true);
+    nav.setReady(true);
+    expect(f.calls).toEqual(['push /cash', 'replace /history']);
+    expect(nav.pending).toBe(0);
+  });
+
+  it('the retry timer runs it even without setReady', () => {
+    const f = fakeRouter();
+    const c = clock();
+    const nav = createNavQueue(f.r, { now: c.now, setTimer: c.setTimer, retryMs: 100 });
+    nav.back();
+    c.advance(100);
+    expect(f.calls).toEqual([]);
+    f.bind(true);
+    c.advance(100);
+    expect(f.calls).toEqual(['back']);
+  });
+
+  it('a stale tap is dropped after maxWaitMs', () => {
+    const f = fakeRouter();
+    const c = clock();
+    const nav = createNavQueue(f.r, { now: c.now, setTimer: c.setTimer, retryMs: 100, maxWaitMs: 300 });
+    nav.push('/cash' as never);
+    for (let i = 0; i < 5; i++) c.advance(100);
+    f.bind(true);
+    nav.setReady(true);
+    expect(f.calls).toEqual([]);
+    expect(nav.pending).toBe(0);
+  });
+
+  it('other errors are not swallowed', () => {
+    const nav = createNavQueue({ push: () => { throw new Error('bad href'); }, replace: () => {}, back: () => {}, canGoBack: () => true });
+    expect(() => nav.push('/x' as never)).toThrow('bad href');
+    expect(isNotReadyError(new Error('bad href'))).toBe(false);
+  });
+});

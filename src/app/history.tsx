@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 
 import { Icon, productIcon, type IconName } from '../components/Icon';
@@ -13,6 +13,7 @@ import { dayLabel, formatTaka } from '../lib/bn';
 import { speak, stopSpeaking } from '../lib/speak';
 import { useClipPlayer } from '../lib/useClipPlayer';
 import { colors, fontSize, productTiles, radius, size, spacing } from '../theme/tokens';
+import { nav } from '../lib/nav';
 
 const FILTER_LOOK: Record<HistoryFilter, { bg: string; ink: string }> = {
   all: { bg: colors.neutralTint, ink: colors.ink2 },
@@ -82,13 +83,13 @@ export default function HistoryScreen() {
   };
   const fix = (i: HistoryItem) => {
     stopSpeaking();
-    router.push({ pathname: '/confirm', params: { fix: `${i.table}:${i.id}` } });
+    nav.push({ pathname: '/confirm', params: { fix: `${i.table}:${i.id}` } });
   };
 
   return (
     <SafeAreaView style={styles.screen}>
       <View style={styles.top}>
-        <Pressable accessibilityRole="button" accessibilityLabel="ফিরে যান" onPress={() => router.back()} style={styles.square}>
+        <Pressable accessibilityRole="button" accessibilityLabel="ফিরে যান" onPress={() => nav.back()} style={styles.square}>
           <Icon name="back" size={26} color={colors.ink} strokeWidth={2.2} />
         </Pressable>
         <Txt accessibilityRole="header" size={fontSize.heading} weight="bold" style={styles.flex}>

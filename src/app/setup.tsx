@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router, useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 
 import { ConfirmSheet } from '../components/ConfirmSheet';
@@ -28,6 +28,7 @@ import { speak, stopSpeaking } from '../lib/speak';
 import { useVoiceOnce } from '../lib/useVoiceOnce';
 import { parseSpokenAmount } from '../parser';
 import { colors, fonts, fontSize, radius, size, spacing } from '../theme/tokens';
+import { nav } from '../lib/nav';
 
 const PLACEHOLDER_DEVICE = 'এই ফোন';
 
@@ -158,8 +159,8 @@ export default function SetupScreen() {
       markSetupDone();
       setConfirming(false);
       void speak(editing ? 'রাখা হয়েছে।' : 'দোকান চালু হয়েছে।');
-      if (editing && router.canGoBack()) router.back();
-      else router.replace('/');
+      if (editing && nav.canGoBack()) nav.back();
+      else nav.replace('/');
     } catch (e) {
       setSaving(false);
       setConfirming(false);
@@ -174,7 +175,7 @@ export default function SetupScreen() {
     <SafeAreaView style={styles.screen}>
       <View style={styles.header}>
         {editing && (
-          <Pressable accessibilityRole="button" accessibilityLabel="ফিরে যান" onPress={() => router.back()} style={styles.back}>
+          <Pressable accessibilityRole="button" accessibilityLabel="ফিরে যান" onPress={() => nav.back()} style={styles.back}>
             <Icon name="back" size={26} color={colors.ink} strokeWidth={2.2} />
           </Pressable>
         )}
@@ -289,7 +290,7 @@ export default function SetupScreen() {
         {editing && (
           <Pressable
             accessibilityRole="button"
-            onPress={() => router.push({ pathname: '/import', params: { kind: 'customers' } })}
+            onPress={() => nav.push({ pathname: '/import', params: { kind: 'customers' } })}
             style={({ pressed }) => [styles.importButton, pressed && styles.pressed]}
           >
             <Icon name="list" size={28} color={colors.baki} />

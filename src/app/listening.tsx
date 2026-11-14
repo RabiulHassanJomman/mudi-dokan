@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Platform, Pressable, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router, useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import { Paths } from 'expo-file-system';
 import { useSQLiteContext } from 'expo-sqlite';
 import { AudioModule, setAudioModeAsync, useAudioRecorder, type RecordingOptions } from 'expo-audio';
@@ -16,6 +16,7 @@ import { getEngine } from '../lib/engine';
 import { shownEngine } from '../gemini/fallback';
 import { GEMINI_WAIT_MS, runGemini } from '../lib/gemini';
 import { colors, fontSize, radius, spacing } from '../theme/tokens';
+import { nav } from '../lib/nav';
 
 type Phase = 'starting' | 'listening' | 'thinking' | 'error';
 
@@ -173,7 +174,7 @@ export default function ListeningScreen() {
       });
       // both: Gemini hears the same clip in the background; the card uses Android's result
       if (engine === 'both' && clip) void runGemini(db, logId, clip, { tab, hint: got });
-      router.replace({ pathname: '/confirm', params: { logId, tab, ...carry } });
+      nav.replace({ pathname: '/confirm', params: { logId, tab, ...carry } });
       return;
     }
     const logId = await createVoiceLog(db, w, { transcript: '', source: 'voice', contextTab: tab, sttError: code, audioPath: clip, engine });
@@ -206,7 +207,7 @@ export default function ListeningScreen() {
       return;
     }
     if (shownEngine(g.ok ? g.parsed : null, got ?? '') !== 'none') {
-      router.replace({ pathname: '/confirm', params: { logId, tab, ...carry } });
+      nav.replace({ pathname: '/confirm', params: { logId, tab, ...carry } });
       return;
     }
     await setOutcome(db, w, logId, 'stt_error');
@@ -220,7 +221,7 @@ export default function ListeningScreen() {
     left.current = true;
     if (useRecorder) void recorder.stop().catch(() => undefined);
     else ExpoSpeechRecognitionModule.abort();
-    router.back();
+    nav.back();
   };
 
   return (
@@ -269,8 +270,8 @@ export default function ListeningScreen() {
             accessibilityRole="button"
             onPress={() => {
               closing.current = true;
-              if (byPad) router.replace({ pathname: '/confirm', params: { text: '', tab, ...carry } });
-              else router.replace({ pathname: '/pick', params: { tab: tab === 'purchase' ? 'purchase' : 'sale' } });
+              if (byPad) nav.replace({ pathname: '/confirm', params: { text: '', tab, ...carry } });
+              else nav.replace({ pathname: '/pick', params: { tab: tab === 'purchase' ? 'purchase' : 'sale' } });
             }}
             style={[styles.action, styles.actionAlt]}
           >

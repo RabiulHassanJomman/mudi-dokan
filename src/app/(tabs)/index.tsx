@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router, useFocusEffect } from 'expo-router';
+import { useFocusEffect } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 
 import { Icon, productIcon, type IconName } from '../../components/Icon';
@@ -16,6 +16,7 @@ import { formatNumber, formatTaka, toBnDigits } from '../../lib/bn';
 import { speak } from '../../lib/speak';
 import { useClipPlayer } from '../../lib/useClipPlayer';
 import { colors, fontSize, productTiles, radius, size, spacing } from '../../theme/tokens';
+import { nav } from '../../lib/nav';
 
 /** Tile picture and colours per entry type (sale lines keep their product picture). */
 function entryLook(e: RecentEntry): { icon: IconName; tile: string; ink: string; border: string } {
@@ -84,13 +85,13 @@ export default function SaleScreen() {
       <ScreenHeader
         title={shopName ?? 'আমার দোকান'}
         onListen={readScreen}
-        onSettings={() => router.push({ pathname: '/setup', params: { edit: '1' } })}
+        onSettings={() => nav.push({ pathname: '/setup', params: { edit: '1' } })}
       />
       <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={`হাতে ক্যাশ ${cash !== null ? formatTaka(cash) : ''}, আজকের ক্যাশ দেখুন`}
-          onPress={() => router.push('/cash')}
+          onPress={() => nav.push('/cash')}
           style={({ pressed }) => [styles.cashCard, pressed && styles.pressed]}
         >
           <View style={styles.cashTile}>
@@ -110,7 +111,7 @@ export default function SaleScreen() {
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={`আজ বিক্রি ${formatTaka(today.sales)}, আজকের খাতা দেখুন`}
-            onPress={() => router.push({ pathname: '/history', params: { filter: 'sale' } })}
+            onPress={() => nav.push({ pathname: '/history', params: { filter: 'sale' } })}
             style={({ pressed }) => [styles.tile, { backgroundColor: colors.sale }, pressed && styles.pressed]}
           >
             <Icon name="cash" size={30} color={colors.onColor} />
@@ -140,7 +141,7 @@ export default function SaleScreen() {
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="বলতে চাপুন"
-            onPress={() => router.push({ pathname: '/listening', params: { tab: 'sale' } })}
+            onPress={() => nav.push({ pathname: '/listening', params: { tab: 'sale' } })}
             style={({ pressed }) => [styles.mic, pressed && { transform: [{ scale: 0.96 }] }]}
           >
             <Icon name="mic" size={84} color={colors.onColor} />
@@ -149,7 +150,7 @@ export default function SaleScreen() {
             চাপুন, বলুন
           </Txt>
           {/* লিখুন = type or choose by picture (Pick) */}
-          <Pressable accessibilityRole="button" onPress={() => router.push('/pick')} style={styles.typeButton}>
+          <Pressable accessibilityRole="button" onPress={() => nav.push('/pick')} style={styles.typeButton}>
             <Icon name="keyboard" size={24} color={colors.ink2} />
             <Txt size={17} weight="semibold" color={colors.ink2}>
               লিখুন
@@ -202,7 +203,7 @@ export default function SaleScreen() {
           );
         })}
 
-        <Pressable accessibilityRole="button" onPress={() => router.push('/pilot-log')} style={styles.logLink}>
+        <Pressable accessibilityRole="button" onPress={() => nav.push('/pilot-log')} style={styles.logLink}>
           <Icon name="list" size={20} color={colors.muted} />
           <Txt size={fontSize.captionLg} weight="semibold" color={colors.muted}>
             পাইলট লগ

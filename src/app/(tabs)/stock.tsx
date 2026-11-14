@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router, useFocusEffect } from 'expo-router';
+import { useFocusEffect } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 
 import { Icon, productIcon } from '../../components/Icon';
@@ -12,6 +12,7 @@ import { stockScreenWords, stockView, stockWords, type StockView } from '../../d
 import { formatQty, formatTaka } from '../../lib/bn';
 import { speak, stopSpeaking } from '../../lib/speak';
 import { colors, fontSize, productTiles, radius, spacing } from '../../theme/tokens';
+import { nav } from '../../lib/nav';
 
 /**
  * মাল (Stock.dc.html): every product with its stock (kena − becha, never stored) and
@@ -48,7 +49,7 @@ export default function StockScreen() {
       <View style={styles.bottom}>
         <Pressable
           accessibilityRole="button"
-          onPress={() => router.push({ pathname: '/listening', params: { tab: 'purchase' } })}
+          onPress={() => nav.push({ pathname: '/listening', params: { tab: 'purchase' } })}
           style={({ pressed }) => [styles.say, pressed && styles.pressed]}
         >
           <Icon name="mic" size={32} color={colors.onColor} />

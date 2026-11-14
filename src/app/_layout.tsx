@@ -1,14 +1,17 @@
-import { Stack } from 'expo-router';
+import { useEffect } from 'react';
+import { Stack, useRootNavigationState } from 'expo-router';
 import { SQLiteProvider } from 'expo-sqlite';
 import { StatusBar } from 'expo-status-bar';
 
 import { DATABASE_NAME, initDatabase } from '../db/client';
+import { nav } from '../lib/nav';
 import { colors } from '../theme/tokens';
 
 export default function RootLayout() {
   return (
     <SQLiteProvider databaseName={DATABASE_NAME} onInit={initDatabase}>
       <StatusBar style="dark" />
+      <NavReady />
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.bg } }}>
         <Stack.Screen name="(tabs)" />
         <Stack.Screen
@@ -27,4 +30,11 @@ export default function RootLayout() {
       </Stack>
     </SQLiteProvider>
   );
+}
+
+/** Tells the nav queue when the root navigator is mounted: taps made before that run then. */
+function NavReady() {
+  const key = useRootNavigationState()?.key;
+  useEffect(() => nav.setReady(!!key), [key]);
+  return null;
 }

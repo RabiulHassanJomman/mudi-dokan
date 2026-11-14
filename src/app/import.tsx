@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import { FlatList, Modal, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router, useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import * as DocumentPicker from 'expo-document-picker';
 import { File } from 'expo-file-system';
@@ -31,6 +31,7 @@ import { tidyCustomerLines } from '../lib/gemini';
 import { formatNumber, toBnDigits } from '../lib/bn';
 import { speak } from '../lib/speak';
 import { colors, fonts, fontSize, radius, size, spacing } from '../theme/tokens';
+import { nav } from '../lib/nav';
 
 /**
  * What can be imported. Customers now; products later get their own spec (name, unit,
@@ -154,7 +155,7 @@ export default function ImportScreen() {
     try {
       const n = await kind.save(db, includedRows(rows).map((r) => r.value));
       void speak(`${formatNumber(n)} জন ${kind.what} যোগ হয়েছে।`);
-      router.back();
+      nav.back();
     } catch (e) {
       setSaving(false);
       setConfirming(false);
@@ -172,7 +173,7 @@ export default function ImportScreen() {
   return (
     <SafeAreaView style={styles.screen}>
       <View style={styles.top}>
-        <Pressable accessibilityRole="button" accessibilityLabel="ফিরে যান" onPress={() => router.back()} style={styles.back}>
+        <Pressable accessibilityRole="button" accessibilityLabel="ফিরে যান" onPress={() => nav.back()} style={styles.back}>
           <Icon name="back" size={26} color={colors.ink} strokeWidth={2.2} />
         </Pressable>
         <Txt accessibilityRole="header" size={fontSize.heading} weight="bold" style={styles.flex}>

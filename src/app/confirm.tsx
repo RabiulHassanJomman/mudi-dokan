@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router, useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-speech-recognition';
 
@@ -89,6 +89,7 @@ import { shownEngine } from '../gemini/fallback';
 import { parseCommand } from '../parser';
 import type { Intent, ParseContext, ParsedCommand } from '../parser/types';
 import { colors, fonts, fontSize, productTiles, radius, size, spacing } from '../theme/tokens';
+import { nav } from '../lib/nav';
 
 type How = 'voice' | 'typed' | 'pick';
 
@@ -452,7 +453,7 @@ export default function ConfirmScreen() {
   async function openHistory(c: { id: string; name: string; balance_poisha: number }) {
     keepSpeaking.current = true; // leaving this screen must not cut the TTS
     void speak(historyWords(c.name, c.balance_poisha, await customerHistory(db, c.id)));
-    router.replace({ pathname: '/customer/[id]', params: { id: c.id } });
+    nav.replace({ pathname: '/customer/[id]', params: { id: c.id } });
   }
 
   /** ✏️: the saved entry → the same card (basket or entry form); nothing is logged. */
@@ -629,7 +630,7 @@ export default function ConfirmScreen() {
   );
 
   // ── actions ────────────────────────────────────────────────────
-  const leave = () => (router.canGoBack() ? router.back() : router.replace('/'));
+  const leave = () => (nav.canGoBack() ? nav.back() : nav.replace('/'));
 
   async function onYes() {
     if (fixRef.current) return saveFix();
@@ -709,7 +710,7 @@ export default function ConfirmScreen() {
   const again = () => {
     decided.current = true;
     if (logId.current) void setOutcome(db, writer(), logId.current, 'cancelled');
-    router.replace({
+    nav.replace({
       pathname: '/listening',
       params: { tab, ...(params.customer ? { customer: params.customer } : {}), ...(defaultKind ? { kind: defaultKind } : {}) },
     });
@@ -719,7 +720,7 @@ export default function ConfirmScreen() {
   const pickInstead = () => {
     decided.current = true;
     if (logId.current) void setOutcome(db, writer(), logId.current, 'cancelled');
-    router.replace({ pathname: '/pick', params: { tab: tab === 'purchase' ? 'purchase' : 'sale' } });
+    nav.replace({ pathname: '/pick', params: { tab: tab === 'purchase' ? 'purchase' : 'sale' } });
   };
 
   // ── render ─────────────────────────────────────────────────────
@@ -839,7 +840,7 @@ export default function ConfirmScreen() {
               ink={colors.bakiInk}
               onPress={() => {
                 stopSpeaking();
-                router.push({ pathname: '/customer/[id]', params: { id: state.answer.customerId! } });
+                nav.push({ pathname: '/customer/[id]', params: { id: state.answer.customerId! } });
               }}
             />
           )}
@@ -850,7 +851,7 @@ export default function ConfirmScreen() {
               accessibilityLabel={`${c.name}, ${formatTaka(c.balance_poisha)}, হিসাব দেখুন`}
               onPress={() => {
                 stopSpeaking();
-                router.push({ pathname: '/customer/[id]', params: { id: c.id } });
+                nav.push({ pathname: '/customer/[id]', params: { id: c.id } });
               }}
               style={({ pressed }) => [styles.listRow, pressed && styles.pressed]}
             >
@@ -902,7 +903,7 @@ export default function ConfirmScreen() {
                 ink={colors.onColor}
                 onPress={() => {
                   stopSpeaking();
-                  router.replace('/cash');
+                  nav.replace('/cash');
                 }}
               />
               <BigButton
@@ -912,7 +913,7 @@ export default function ConfirmScreen() {
                 ink={colors.stock}
                 onPress={() => {
                   stopSpeaking();
-                  router.replace('/history');
+                  nav.replace('/history');
                 }}
               />
             </View>

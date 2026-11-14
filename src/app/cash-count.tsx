@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router, useFocusEffect } from 'expo-router';
+import { useFocusEffect } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 
 import { ConfirmSheet } from '../components/ConfirmSheet';
@@ -14,6 +14,7 @@ import { writer } from '../device';
 import { formatNumber, formatTaka, toBnDigits } from '../lib/bn';
 import { speak, stopSpeaking } from '../lib/speak';
 import { colors, fontSize, noteChips, radius, size, spacing } from '../theme/tokens';
+import { nav } from '../lib/nav';
 
 const CHIP = new Map(noteChips.map(([face, bg, edge]) => [face, { bg, edge }]));
 const say = (poisha: number) => toBnDigits(Math.round(poisha) / 100);
@@ -72,7 +73,7 @@ export default function CashCountScreen() {
       await saveDayClose(db, writer(), day, counts, counted);
       setAsking(false);
       await speak(`দিন শেষ হয়েছে। কাল শুরুর ক্যাশ ${say(counted)} টাকা।`);
-      router.back();
+      nav.back();
     } catch (e) {
       setSaving(false);
       void speak('রাখা গেল না।');
@@ -83,7 +84,7 @@ export default function CashCountScreen() {
   return (
     <SafeAreaView style={styles.screen}>
       <View style={styles.top}>
-        <Pressable accessibilityRole="button" accessibilityLabel="ফিরে যান" onPress={() => router.back()} style={styles.square}>
+        <Pressable accessibilityRole="button" accessibilityLabel="ফিরে যান" onPress={() => nav.back()} style={styles.square}>
           <Icon name="back" size={26} color={colors.ink} strokeWidth={2.2} />
         </Pressable>
         <Txt accessibilityRole="header" size={fontSize.heading} weight="bold" style={styles.flex}>
