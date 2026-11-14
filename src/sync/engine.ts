@@ -8,7 +8,7 @@
  *   (foreign key) waits in the inbox for the next round.
  * Apply: entries = insert if new (union by UUID); mutable rows = last write wins.
  */
-import type { Db } from '../db/repo';
+import { wipeAllData, type Db } from '../db/repo';
 import { businessDate } from '../domain/cash';
 import { BATCH_SIZE, DAILY_WRITE_BUDGET, PULL_OVERLAP_MS, SYNC_TABLES, type SyncTable, tableSpec } from './tables';
 
@@ -30,6 +30,18 @@ export interface Remote {
   fetchSince(table: string, since: number): Promise<RemoteDoc[]>;
   /** Realtime: documents stamped after `since`, now and whenever they change. Returns unsubscribe. */
   listen(table: string, since: number, onDocs: (docs: RemoteDoc[]) => void, onError: (e: unknown) => void): () => void;
+  /** "সব তথ্য মুছুন" for all phones: deletes every document of every table, in batches. Returns how many. */
+  deleteAll(): Promise<number>;
+  readWipe(): Promise<Tombstone | null>;
+  writeWipe(t: Tombstone): Promise<void>;
+  /** The tombstone appears (or changes): other phones hear of the wipe at once. */
+  listenWipe(onChange: (t: Tombstone | null) => void, onError: (e: unknown) => void): () => void;
+}
+
+/** shops/{uid}/meta/wipe: "everything was erased at wiped_at, by this phone". Never deleted. */
+export interface Tombstone {
+  wiped_at: number;
+  by: string;
 }
 
 export interface SyncStats {
@@ -57,6 +69,10 @@ const META_DAY = 'count_day';
 const META_WRITES = 'writes_n';
 const META_READS = 'reads_n';
 const META_CLOUD_SHOP = 'cloud_shop';
+/** The newest wipe this phone has dealt with (wiped_at). */
+export const META_WIPE_SEEN = 'wipe_seen';
+/** A wipe by another phone this phone hasn't answered: nothing is sent or fetched until it is. */
+export const META_WIPE_PENDING = 'wipe_pending';
 const cursorKey = (t: string) => `pull:${t}`;
 
 export class SyncEngine {
@@ -153,6 +169,89 @@ export class SyncEngine {
 
   async markSynced(): Promise<void> {
     await this.setMeta(META_LAST, this.now());
+  }
+
+  // ── "সব তথ্য মুছুন" ──────────────────────────────────────────
+
+  /** The wipe (wiped_at) waiting for this phone's answer, or null. */
+  async wipePending(): Promise<number | null> {
+    const v = await this.getMeta(META_WIPE_PENDING);
+    return v ? Number(v) : null;
+  }
+
+  /**
+   * Before every sync: did another phone erase the shop? If so, and this phone still has
+   * anything from before that, it must not send it up again: the wipe waits for the user's
+   * answer (acceptWipe / resumeUpload). A phone with nothing older (new, or started over after
+   * the wipe) just notes it. Returns wiped_at while one is waiting.
+   */
+  checkWipe(): Promise<number | null> {
+    return this.exclusive(async () => {
+      const pending = await this.wipePending();
+      if (pending !== null) return pending;
+      const t = await this.need().readWipe();
+      await this.bump(META_READS, 1);
+      if (!t) return null;
+      const seen = Number((await this.getMeta(META_WIPE_SEEN)) ?? 0);
+      if (t.wiped_at <= seen) return null;
+      let older = 0;
+      for (const tbl of SYNC_TABLES) {
+        if (tbl.name === 'shop' || tbl.name === 'devices') continue;
+        older += (await this.db.getFirstAsync<{ n: number }>(`SELECT COUNT(*) AS n FROM ${tbl.name} WHERE created_at <= ?`, t.wiped_at))?.n ?? 0;
+      }
+      if (!older) {
+        await this.setMeta(META_WIPE_SEEN, t.wiped_at);
+        return null;
+      }
+      await this.setMeta(META_WIPE_PENDING, t.wiped_at);
+      return t.wiped_at;
+    });
+  }
+
+  /** The answer is given (this phone erased itself, or chose to send its data again): sync goes on. */
+  async acknowledgeWipe(wipedAt?: number): Promise<void> {
+    const at = wipedAt ?? (await this.wipePending());
+    if (at !== null) await this.setMeta(META_WIPE_SEEN, at);
+    await this.db.runAsync('DELETE FROM sync_meta WHERE key = ?', META_WIPE_PENDING);
+  }
+
+  /** Forget what was pushed and pulled: the next sync sends everything and fetches everything. */
+  forgetSyncState(): Promise<void> {
+    return this.exclusive(async () => {
+      await this.db.withTransactionAsync(async () => {
+        await this.db.runAsync('DELETE FROM sync_state');
+        await this.db.runAsync('DELETE FROM sync_inbox');
+        await this.db.runAsync("DELETE FROM sync_meta WHERE key LIKE 'pull:%' OR key IN (?, ?)", META_LAST, META_CLOUD_SHOP);
+      });
+    });
+  }
+
+  /** Erases this phone (not the cloud): the account and the wipe already seen stay. */
+  wipeLocal(keepDeviceId: string | null): Promise<string[]> {
+    return this.exclusive(() => wipeAllData(this.db, keepDeviceId, ['uid', META_WIPE_SEEN]));
+  }
+
+  /**
+   * Erases the shop for every phone, and this phone with it, as one step nothing can push into:
+   * first the tombstone (so no phone sends anything up from now on), then every document,
+   * twice over (a push already in flight can land after the first sweep), then `between`
+   * (the Drive folder), then this phone. Throws if the network fails before the cloud is
+   * clean: nothing local has changed then. Returns wiped_at and the audio files to delete.
+   */
+  wipeEverywhere(by: string, keepDeviceId: string | null, between?: () => Promise<void>): Promise<{ at: number; files: string[] }> {
+    return this.exclusive(async () => {
+      const remote = this.need();
+      const at = this.now();
+      await remote.writeWipe({ wiped_at: at, by });
+      let deleted = await remote.deleteAll();
+      deleted += await remote.deleteAll();
+      await this.bump(META_WRITES, deleted + 1);
+      await between?.().catch(() => undefined); // Drive trouble doesn't stop the wipe: the data is the point
+      // this phone knows about this wipe already: it is the one that made it
+      await this.setMeta(META_WIPE_SEEN, at);
+      const files = await wipeAllData(this.db, keepDeviceId, ['uid', META_WIPE_SEEN]);
+      return { at, files };
+    });
   }
 
   // ── columns ──────────────────────────────────────────────────

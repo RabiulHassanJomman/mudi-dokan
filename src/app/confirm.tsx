@@ -33,6 +33,7 @@ import {
   type ItemDraft,
 } from '../domain/basket';
 import { classifyAnswer, heardPrefix } from '../domain/confirmWords';
+import { nextReady, queuedAtOf } from '../queue/understand';
 import { balanceWords, customerAliasToLearn, historyWords, owedList, resolveCustomerAlias, suggestCustomers, totalBakiWords } from '../domain/customers';
 import {
   canSaveEntry,
@@ -85,7 +86,6 @@ import { getDevice, writer } from '../device';
 import { UNIT_BN, formatNumber, formatQty, formatTaka, parseTakaInput, toBnDigits } from '../lib/bn';
 import { speak, stopSpeaking } from '../lib/speak';
 import { pickedCommand, pickText, type PickedItem } from '../domain/pick';
-import { shownEngine } from '../gemini/fallback';
 import { parseCommand } from '../parser';
 import type { Intent, ParseContext, ParsedCommand } from '../parser/types';
 import { colors, fonts, fontSize, productTiles, radius, size, spacing } from '../theme/tokens';
@@ -149,7 +149,9 @@ export default function ConfirmScreen() {
    * logId = voice (from Listening); text = typed; pick = chosen on ছবি দেখে (JSON PickedItem).
    * customer / kind: from the customer screen (জমা নিন / বাকি দিন), used when not said.
    */
-  const params = useLocalSearchParams<{ logId?: string; text?: string; tab?: string; pick?: string; customer?: string; kind?: string; fix?: string }>();
+  const params = useLocalSearchParams<{ logId?: string; text?: string; tab?: string; pick?: string; customer?: string; kind?: string; fix?: string; review?: string }>();
+  /** From "অপেক্ষার হিসাব মিলিয়ে নিন": after হ্যাঁ/না the next waiting one opens; backing out keeps it waiting. */
+  const review = params.review === '1';
   /** ✏️ from History: "sales:<basket id>" or "<table>:<row id>" — the card edits a saved entry. */
   const fixing = !!params.fix;
   const tab = params.tab ?? 'sale';
@@ -186,6 +188,8 @@ export default function ConfirmScreen() {
   const firstEntry = useRef<EntryDraft | null>(null);
   const latestEntry = useRef<EntryDraft | null>(null);
   const decided = useRef(false);
+  /** When it was said, if that was before now (the queue): the saved entry's time. */
+  const entryAt = useRef<number | null>(null);
   /** For learning customer aliases: the heard customer, the shop's customers and aliases at load. */
   const heardCustomer = useRef<string | null>(null);
   const customersBefore = useRef<string[]>([]);
@@ -266,24 +270,22 @@ export default function ConfirmScreen() {
         parsed = pickedCommand(pick);
         logId.current = await createVoiceLog(db, w, { transcript, source: 'typed', contextTab: tab, parsed, via: 'pick' });
       } else {
-        /** gemini mode: Gemini's checked result drives the card; Android's rule parse is kept for the log. */
+        /** A voice command: Gemini's checked answer (stored on the log) is the card. Typed text: the rule parser. */
         let fromGemini: ParsedCommand | null = null;
         if (params.logId) {
           logId.current = params.logId;
           const log = await getVoiceLog(db, params.logId);
-          transcript = log?.transcript ?? '';
-          const g = log?.engine === 'gemini' && log.gemini_json ? (JSON.parse(log.gemini_json) as ParsedCommand) : null;
-          // no result or "unknown" from Gemini: the Android transcript (silent fallback)
-          if (g && shownEngine(g, transcript) === 'gemini') {
-            fromGemini = g;
-            setByGemini(true);
-          }
+          fromGemini = log?.gemini_json ? (JSON.parse(log.gemini_json) as ParsedCommand) : null;
+          transcript = fromGemini?.raw ?? log?.gemini_transcript ?? log?.transcript ?? '';
+          setByGemini(!!fromGemini);
+          // said earlier (waited in the queue): the entry keeps that time
+          entryAt.current = await queuedAtOf(db, params.logId);
         } else {
           transcript = params.text ?? '';
-          // empty = the number-pad fallback (voice failed): nothing to parse, keep it out of the accuracy
+          // empty = the number-pad fallback (voice failed): nothing to parse
           logId.current = await createVoiceLog(db, w, { transcript, source: 'typed', contextTab: tab, ...(transcript ? {} : { via: 'pick' as const }) });
         }
-        const rule = parseCommand(transcript, {
+        const rule = fromGemini ? null : parseCommand(transcript, {
           tab: PARSE_TABS.find((t) => t === tab),
           knownProducts: names.products,
           // learned spellings help split "কোরিম চাল ২ কেজি"; resolved to the customer below
@@ -294,18 +296,10 @@ export default function ConfirmScreen() {
           // "রফিক ৫০০ নিল" = owner withdrawal when রফিক's phone is মালিক; "মালিক" is built in
           ownerNames: await ownerNames(db),
         });
-        parsed = fromGemini ?? rule;
+        parsed = (fromGemini ?? rule)!;
         // a learned spelling → the customer (Gemini also gets the aliases, this catches the rest)
         if (parsed.customer) parsed = { ...parsed, customer: resolveCustomerAlias(parsed.customer, aliasesNow) };
-        await setParsed(
-          db,
-          w,
-          logId.current,
-          parsed,
-          params.logId ? { by: fromGemini ? 'gemini' : 'android', android: transcript ? rule : null } : {},
-        );
-        // the card shows what Gemini heard
-        if (fromGemini) transcript = fromGemini.raw || transcript;
+        await setParsed(db, w, logId.current, parsed, params.logId ? { by: 'gemini' } : {});
       }
       heardCustomer.current = parsed.customer ?? null;
       if (!alive) return;
@@ -624,13 +618,25 @@ export default function ConfirmScreen() {
     () => () => {
       if (!keepSpeaking.current) stopSpeaking();
       ExpoSpeechRecognitionModule.abort();
-      if (!decided.current && logId.current) void setOutcome(db, writer(), logId.current, 'cancelled');
+      // backing out of a waiting one keeps it waiting; every other card counts as না
+      if (!decided.current && logId.current && !review) void setOutcome(db, writer(), logId.current, 'cancelled');
     },
-    [db],
+    [db, review],
   );
 
   // ── actions ────────────────────────────────────────────────────
-  const leave = () => (nav.canGoBack() ? nav.back() : nav.replace('/'));
+  const leave = () => {
+    if (review) {
+      // the next waiting answer, else back home
+      void nextReady(db).then((n) => {
+        if (n) nav.replace({ pathname: '/confirm', params: { logId: n.id, tab: n.tab, review: '1' } });
+        else nav.replace('/');
+      });
+      return;
+    }
+    if (nav.canGoBack()) nav.back();
+    else nav.replace('/');
+  };
 
   async function onYes() {
     if (fixRef.current) return saveFix();
@@ -647,7 +653,7 @@ export default function ConfirmScreen() {
     setSaving(true);
     decided.current = true;
     try {
-      await saveBasket(db, writer(), b, logId.current, first.current ? diffBaskets(first.current, b) : []);
+      await saveBasket(db, writer(), b, logId.current, first.current ? diffBaskets(first.current, b) : [], entryAt.current);
       await learnCustomerAlias(heardCustomer.current, b.customerName);
       void speak('রাখা হয়েছে।');
       leave();
@@ -669,7 +675,7 @@ export default function ConfirmScreen() {
     setSaving(true);
     decided.current = true;
     try {
-      await saveEntry(db, writer(), e, logId.current, firstEntry.current ? diffEntries(firstEntry.current, e) : []);
+      await saveEntry(db, writer(), e, logId.current, firstEntry.current ? diffEntries(firstEntry.current, e) : [], entryAt.current);
       await learnCustomerAlias(heardCustomer.current, e.customerName);
       void speak('রাখা হয়েছে।');
       leave();

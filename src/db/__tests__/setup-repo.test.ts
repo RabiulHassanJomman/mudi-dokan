@@ -1,4 +1,4 @@
-import { createVoiceLog, ensureDevice, getSetup, pickProducts, pilotStats, saveSetup, setOutcome, type Writer } from '../repo';
+import { createVoiceLog, ensureDevice, getSetup, pickProducts, saveSetup, setOutcome, type Writer } from '../repo';
 import { migratedDb, testWriter } from './nodeDb';
 
 const draft = { shopName: 'রহমান স্টোর', deviceName: 'আব্বু', role: 'owner' as const, openingCashPoisha: 500000 };
@@ -84,19 +84,6 @@ describe('pickProducts', () => {
       { id: 'p1', name: 'চাল', unit: 'kg', sellPricePoisha: 6000, aliases: ['চাউল'] },
       { id: 'p4', name: 'তেল', unit: 'litre', sellPricePoisha: null, aliases: [] },
     ]);
-  });
-});
-
-describe('picked entries in the pilot stats', () => {
-  it('are counted apart, not in the parser accuracy', async () => {
-    const { db, w } = await setup();
-    const voice = await createVoiceLog(db, w, { transcript: 'চাল ২ কেজি', source: 'voice', contextTab: 'sale' });
-    await setOutcome(db, w, voice, 'cancelled');
-    const picked = await createVoiceLog(db, w, { transcript: 'চাল ২ কেজি', source: 'typed', contextTab: 'sale', via: 'pick' });
-    await setOutcome(db, w, picked, 'saved');
-    expect(db.raw.prepare('SELECT via FROM voice_logs WHERE id = ?').get(picked)).toEqual({ via: 'pick' });
-    const s = await pilotStats(db);
-    expect(s).toMatchObject({ total: 1, saved: 0, cancelled: 1, picked: 1, accuracy: 0 });
   });
 });
 

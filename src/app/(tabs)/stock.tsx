@@ -8,6 +8,7 @@ import { Icon, productIcon } from '../../components/Icon';
 import { ScreenHeader } from '../../components/ScreenHeader';
 import { Txt } from '../../components/Txt';
 import { stockList } from '../../db/repo';
+import { usePartyDelete } from '../../components/DeleteEntry';
 import { stockScreenWords, stockView, stockWords, type StockView } from '../../domain/stock';
 import { formatQty, formatTaka } from '../../lib/bn';
 import { speak, stopSpeaking } from '../../lib/speak';
@@ -25,12 +26,14 @@ export default function StockScreen() {
   /** Rows from another phone came in: reload. */
   const synced = useDataVersion();
   const [list, setList] = useState<StockView[]>([]);
+  const [reload, setReload] = useState(0);
+  const del = usePartyDelete('product', () => setReload((n) => n + 1));
 
   useFocusEffect(
     useCallback(() => {
       void (async () => setList((await stockList(db)).map(stockView)))();
       return () => stopSpeaking();
-    }, [db, synced]),
+    }, [db, synced, reload]),
   );
 
   return (
@@ -47,7 +50,7 @@ export default function StockScreen() {
             এখনো কোনো মাল নেই। নিচের বোতাম চেপে বলুন, যেমন “নতুন চাল ৫০ কেজি কেনা ৫৫ বেচা ৬০”।
           </Txt>
         }
-        renderItem={({ item: v }) => <StockCard v={v} />}
+        renderItem={({ item: v }) => <StockCard v={v} onDelete={() => void del.ask(v.id, v.name)} />}
       />
       <View style={styles.bottom}>
         <Pressable
@@ -61,11 +64,12 @@ export default function StockScreen() {
           </Txt>
         </Pressable>
       </View>
+      {del.sheet}
     </SafeAreaView>
   );
 }
 
-function StockCard({ v }: { v: StockView }) {
+function StockCard({ v, onDelete }: { v: StockView; onDelete: () => void }) {
   const words = stockWords(v);
   return (
     <Pressable
@@ -74,6 +78,9 @@ function StockCard({ v }: { v: StockView }) {
       onPress={() => void speak(words)}
       style={({ pressed }) => [styles.card, v.low && styles.cardLow, pressed && styles.pressed]}
     >
+      <Pressable accessibilityRole="button" accessibilityLabel={`${v.name} মুছুন`} onPress={onDelete} style={styles.trash}>
+        <Icon name="trash" size={20} color={colors.muted} />
+      </Pressable>
       {v.low && (
         <View style={styles.badge}>
           <Icon name="alert" size={18} color={colors.onColor} strokeWidth={2.4} />
@@ -131,6 +138,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  trash: { position: 'absolute', top: 4, left: 4, width: 44, height: 44, alignItems: 'center', justifyContent: 'center', zIndex: 1 },
   tile: { width: 64, height: 64, borderRadius: radius.card, alignItems: 'center', justifyContent: 'center' },
   bottom: { paddingHorizontal: spacing.screen, paddingVertical: 10 },
   say: {

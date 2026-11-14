@@ -7,6 +7,8 @@ import { DATABASE_NAME, initDatabase } from '../db/client';
 import { nav } from '../lib/nav';
 import { mergePairs, onFirstSync, startSync } from '../sync/app';
 import { startDrive } from '../drive/app';
+import { WipeNotice } from '../components/WipeNotice';
+import { startUnderstanding } from '../lib/understand';
 import { registerDriveTask } from '../drive/background';
 import { colors } from '../theme/tokens';
 
@@ -22,6 +24,7 @@ export default function RootLayout() {
       <StatusBar style="dark" />
       <NavReady />
       <SyncBoot />
+      <WipeNotice />
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.bg } }}>
         <Stack.Screen name="(tabs)" />
         <Stack.Screen
@@ -29,7 +32,10 @@ export default function RootLayout() {
           options={{ presentation: 'fullScreenModal', animation: 'fade', contentStyle: { backgroundColor: colors.listening.bg } }}
         />
         <Stack.Screen name="confirm" options={{ animation: 'slide_from_bottom' }} />
-        <Stack.Screen name="pilot-log" />
+        <Stack.Screen name="review" />
+        <Stack.Screen name="debug-log" />
+        <Stack.Screen name="font-test" />
+        <Stack.Screen name="wipe" />
         <Stack.Screen name="setup" options={{ animation: 'fade' }} />
         <Stack.Screen name="pick" options={{ animation: 'slide_from_bottom' }} />
         <Stack.Screen name="customer/[id]" />
@@ -64,6 +70,8 @@ function SyncBoot() {
     void startSync().catch((e) => console.warn('sync start failed', e));
     // step 8: voice clips to Drive, nightly backup, 90-day audio retention
     startDrive();
+    // Gemini only: what was said offline is understood when it can be
+    startUnderstanding();
     void registerDriveTask();
     return onFirstSync(() => {
       void mergePairs(db).then((p) => {

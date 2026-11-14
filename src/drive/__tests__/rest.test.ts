@@ -109,4 +109,24 @@ describe('Drive REST client', () => {
   it("escapes quotes in queries", () => {
     expect(q("Rahim's")).toBe("'Rahim\\'s'");
   });
+
+  it('removeFolder: finds the folder by path without creating it, deletes it (and any second one); none → false', async () => {
+    const deleted: string[] = [];
+    let calls = 0;
+    const h = fakeHttp((r) => {
+      if (r.method === 'DELETE') {
+        deleted.push(r.url.split('/files/')[1]!);
+        return { status: 204 };
+      }
+      const query = decodeURIComponent(r.url.split('q=')[1]!.split('&')[0]!);
+      if (query.includes("'Mudi Dokan'")) return { status: 200, body: { files: ++calls <= 2 ? [{ id: `md-${calls}` }] : [] } };
+      return { status: 200, body: { files: [] } };
+    });
+    h.cache.set('Mudi Dokan', 'md-1');
+    expect(await restDrive(h.deps).removeFolder(['Mudi Dokan'])).toBe(true);
+    expect(deleted).toEqual(['md-1', 'md-2']);
+    expect(h.reqs.some((r) => r.method === 'POST')).toBe(false); // nothing was created to be deleted
+    expect(h.cache.size).toBe(0);
+    expect(await restDrive(fakeHttp(() => ({ status: 200, body: { files: [] } })).deps).removeFolder(['Mudi Dokan'])).toBe(false);
+  });
 });

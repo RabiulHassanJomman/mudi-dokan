@@ -8,6 +8,8 @@ import { Avatar } from '../../components/Avatar';
 import { Icon } from '../../components/Icon';
 import { PhoneSheet } from '../../components/PhoneSheet';
 import { Txt } from '../../components/Txt';
+import { useDeleteEntry, usePartyDelete } from '../../components/DeleteEntry';
+import { deleteWords } from '../../domain/delete';
 import { customerHistory, getCustomer, setCustomerPhone, type CustomerBalance, type LedgerLine } from '../../db/repo';
 import { writer } from '../../device';
 import { balanceWords } from '../../domain/customers';
@@ -33,6 +35,9 @@ export default function CustomerScreen() {
   const [c, setC] = useState<CustomerBalance | null>(null);
   const [rows, setRows] = useState<LedgerLine[]>([]);
   const [phoneOpen, setPhoneOpen] = useState(false);
+  const [reload, setReload] = useState(0);
+  const del = useDeleteEntry(() => setReload((n) => n + 1));
+  const delCustomer = usePartyDelete('customer', () => nav.back());
 
   const load = useCallback(async () => {
     setC(await getCustomer(db, id));
@@ -41,7 +46,7 @@ export default function CustomerScreen() {
   useFocusEffect(
     useCallback(() => {
       void load();
-    }, [load, synced]),
+    }, [load, synced, reload]),
   );
 
   if (!c) return <SafeAreaView style={styles.screen} />;
@@ -74,6 +79,14 @@ export default function CustomerScreen() {
           <Icon name="back" size={26} color={colors.ink} strokeWidth={2.2} />
         </Pressable>
         <View style={styles.flex} />
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`${c.name} মুছুন`}
+          onPress={() => void delCustomer.ask(c.id, c.name)}
+          style={[styles.round, { backgroundColor: colors.bakiTint }]}
+        >
+          <Icon name="trash" size={24} color={colors.bakiInk} strokeWidth={2} />
+        </Pressable>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={c.phone ? `${c.name}কে ফোন করুন` : 'ফোন নম্বর দিন'}
@@ -166,6 +179,20 @@ export default function CustomerScreen() {
               </Txt>
               <Pressable
                 accessibilityRole="button"
+                accessibilityLabel={`${what(r)} মুছুন`}
+                onPress={() =>
+                  del.ask({
+                    table: r.basket_id ? 'sales' : 'ledger',
+                    id: r.basket_id ?? r.id,
+                    text: deleteWords(`${c.name}, ${what(r)}, ${formatNumber(r.amount_poisha / 100)} টাকা।`),
+                  })
+                }
+                style={styles.trash}
+              >
+                <Icon name="trash" size={20} color={colors.bakiInk} />
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
                 accessibilityLabel={`${what(r)} শুনুন`}
                 accessibilityState={{ disabled: !r.audio_path }}
                 onPress={() => (r.audio_path ? play(r.audio_path) : void speak(`${what(r)}, ${formatNumber(r.amount_poisha / 100)} টাকা`))}
@@ -178,6 +205,8 @@ export default function CustomerScreen() {
         }}
       />
 
+      {del.sheet}
+      {delCustomer.sheet}
       <PhoneSheet
         visible={phoneOpen}
         title={`${c.name} এর ফোন নম্বর`}
@@ -197,6 +226,7 @@ export default function CustomerScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg, paddingHorizontal: spacing.screen, paddingTop: spacing.screenTop, gap: spacing.md },
+  trash: { width: 40, height: 52, alignItems: 'center', justifyContent: 'center' },
   top: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   flex: { flex: 1 },
   center: { textAlign: 'center', padding: spacing.lg },

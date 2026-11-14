@@ -31,6 +31,9 @@ import { useDataVersion, useSyncStatus } from '../sync/app';
 import { parseSpokenAmount } from '../parser';
 import { colors, fonts, fontSize, radius, size, spacing } from '../theme/tokens';
 import { nav } from '../lib/nav';
+import { buildLabel } from '../lib/buildInfo';
+
+const DANGER_INK = '#B3261E';
 
 const PLACEHOLDER_DEVICE = 'এই ফোন';
 
@@ -385,6 +388,28 @@ export default function SetupScreen() {
           </View>
         )}
 
+        {/* settings only: danger zone (সব তথ্য মুছুন) and the hidden debug log (long-press the version) */}
+        {editing && (
+          <>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => nav.push('/wipe')}
+              style={({ pressed }) => [styles.dangerButton, pressed && styles.pressed]}
+            >
+              <Icon name="trash" size={26} color={DANGER_INK} />
+              <Txt size={fontSize.label} weight="bold" color={DANGER_INK} style={styles.flex}>
+                সব তথ্য মুছুন
+              </Txt>
+              <Icon name="arrow" size={24} color={DANGER_INK} />
+            </Pressable>
+            <Pressable accessibilityRole="button" accessibilityLabel="অ্যাপের সংস্করণ" onLongPress={() => nav.push('/debug-log')} delayLongPress={1500} style={styles.versionBox}>
+              <Txt size={fontSize.caption} weight="medium" color={colors.muted}>
+                {buildLabel()}
+              </Txt>
+            </Pressable>
+          </>
+        )}
+
         {/* settings only: bring in an existing customer list (.txt) */}
         {editing && (
           <Pressable
@@ -479,6 +504,18 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: spacing.xs,
   },
+  dangerButton: {
+    minHeight: 64,
+    borderRadius: radius.card,
+    borderWidth: 2,
+    borderColor: DANGER_INK,
+    backgroundColor: '#FBE9E7',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.lg,
+  },
+  versionBox: { alignItems: 'center', justifyContent: 'center', minHeight: size.minTouch },
   importButton: {
     minHeight: 64,
     borderRadius: radius.card,

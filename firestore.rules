@@ -1,8 +1,10 @@
 rules_version = '2';
 
 // Mudi Dokan sync: shops/{uid}/{table}/{rowId}. Only the shop's Google account (uid) can
-// read or write its shop. Rows are never deleted (entries are append-only; corrections are
-// new rows), so delete is denied for everyone.
+// read or write its shop. Entries are append-only (corrections are new rows), so the app
+// never deletes a row in normal use; delete is allowed only so that "সব তথ্য মুছুন → সব ফোন
+// + Google থেকে" can erase the whole shop, and meta/wipe is the tombstone it leaves behind
+// (the other phones read it and ask before they send anything again).
 service cloud.firestore {
   match /databases/{database}/documents {
     match /shops/{uid}/{table}/{rowId} {
@@ -12,13 +14,13 @@ service cloud.firestore {
       function knownTable() {
         return table in ['shop', 'devices', 'products', 'customers', 'product_aliases',
           'customer_aliases', 'voice_logs', 'purchases', 'sales', 'ledger', 'expenses',
-          'owner_withdrawals', 'day_close'];
+          'owner_withdrawals', 'day_close', 'meta'];
       }
       allow read: if isShop();
       allow create, update: if isShop() && knownTable()
         && request.resource.data.id == rowId
         && request.resource.data._at == request.time;
-      allow delete: if false;
+      allow delete: if isShop() && knownTable() && table != 'meta';
     }
   }
 }

@@ -1,5 +1,5 @@
 import { parseCommand } from '../../parser';
-import { createVoiceLog, engineLogs, getVoiceLog, setGeminiResult, setOutcome, setParsed } from '../repo';
+import { createVoiceLog, debugLog, getVoiceLog, setGeminiResult, setOutcome, setParsed } from '../repo';
 import { migratedDb, testWriter } from './nodeDb';
 
 const android = parseCommand('চাল ২ কেজি', { tab: 'sale', knownProducts: ['চাল'] });
@@ -43,12 +43,15 @@ describe('voice log: Android vs Gemini (v7)', () => {
     expect(await getVoiceLog(db, plain)).toMatchObject({ outcome: 'stt_error', engine: null });
   });
 
-  it('engineLogs: voice logs with an engine since a time', async () => {
+  it('debugLog: the last voice commands, newest first, at most 200', async () => {
     const db = await migratedDb();
     const w = testWriter();
-    await createVoiceLog(db, w, { transcript: 'পুরনো', source: 'voice', contextTab: 'sale' });
     await createVoiceLog(db, w, { transcript: 'লেখা', source: 'typed', contextTab: 'sale' });
-    await createVoiceLog(db, w, { transcript: 'চাল', source: 'voice', contextTab: 'sale', engine: 'both' });
-    expect((await engineLogs(db, 0)).map((r) => r.transcript)).toEqual(['চাল']);
+    for (let i = 0; i < 205; i++) await createVoiceLog(db, w, { transcript: `কথা ${i}`, source: 'voice', contextTab: 'sale', engine: 'gemini' });
+    const rows = await debugLog(db);
+    expect(rows).toHaveLength(200);
+    expect(rows[0]!.transcript).toBe('কথা 204');
+    expect(rows.every((r) => r.source === 'voice')).toBe(true);
+    expect(await debugLog(db, 3)).toHaveLength(3);
   });
 });

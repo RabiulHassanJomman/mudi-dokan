@@ -55,13 +55,13 @@ describe('customer aliases', () => {
     expect((await cands(db)).find((c) => c.name === 'করিম')!.aliases).toEqual(['কোরিম']);
   });
 
-  it('the pilot wipe clears aliases with the customers', async () => {
-    const { addCustomerAlias, wipePilotData } = await import('../repo');
+  it('the wipe clears aliases with the customers', async () => {
+    const { addCustomerAlias, wipeAllData } = await import('../repo');
     const db = await migratedDb();
     const w = testWriter();
     await importCustomers(db, w, [{ name: 'করিম', phone: null, note: null }]);
     await addCustomerAlias(db, w, 'কোরিম', 'করিম');
-    await wipePilotData(db);
+    await wipeAllData(db, null);
     expect(await db.getAllAsync('SELECT * FROM customer_aliases')).toEqual([]);
   });
 });

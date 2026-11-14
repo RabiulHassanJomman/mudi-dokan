@@ -5,6 +5,7 @@ import { useFocusEffect } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 
 import { AccountCard } from '../components/AccountCard';
+import { ConfirmSheet } from '../components/ConfirmSheet';
 import { Icon } from '../components/Icon';
 import { Txt } from '../components/Txt';
 import { formatNumber } from '../lib/bn';
@@ -25,6 +26,7 @@ export default function SyncScreen() {
   const version = useDataVersion();
   const [dupes, setDupes] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [askResume, setAskResume] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -100,6 +102,32 @@ export default function SyncScreen() {
           )}
         </View>
 
+        {status?.phase === 'wiped' && (
+          <View style={styles.wiped}>
+            <Txt wrap size={fontSize.label} weight="bold" color={colors.bakiInk}>
+              দোকানের সব তথ্য মোছা হয়েছে। এই ফোনের তথ্য ফোনেই আছে, কিছু পাঠানো হচ্ছে না।
+            </Txt>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => void startSync().then((c) => c.acceptWipe())}
+              style={({ pressed }) => [styles.wipedButton, { backgroundColor: colors.baki }, pressed && styles.pressed]}
+            >
+              <Txt size={fontSize.label} weight="bold" color={colors.onColor}>
+                এই ফোনেও মুছুন
+              </Txt>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => setAskResume(true)}
+              style={({ pressed }) => [styles.wipedButton, { backgroundColor: colors.stock }, pressed && styles.pressed]}
+            >
+              <Txt size={fontSize.label} weight="bold" color={colors.onColor}>
+                এই ফোনের তথ্য আবার পাঠান
+              </Txt>
+            </Pressable>
+          </View>
+        )}
+
         {dupes > 0 && (
           <Pressable
             accessibilityRole="button"
@@ -114,6 +142,16 @@ export default function SyncScreen() {
           </Pressable>
         )}
       </ScrollView>
+
+      <ConfirmSheet
+        visible={askResume}
+        text="এই ফোনের সব হিসাব আবার দোকানের Google অ্যাকাউন্টে পাঠাবেন? অন্য ফোনেও যাবে।"
+        onYes={() => {
+          setAskResume(false);
+          void startSync().then((c) => c.resumeUpload());
+        }}
+        onNo={() => setAskResume(false)}
+      />
 
       <Pressable
         accessibilityRole="button"
@@ -140,6 +178,8 @@ const styles = StyleSheet.create({
   card: { backgroundColor: colors.surface, borderRadius: radius.section, padding: spacing.lg, gap: spacing.xs },
   row: { flexDirection: 'row', alignItems: 'center', minHeight: 52, gap: spacing.sm },
   divider: { borderBottomWidth: 1, borderBottomColor: colors.dividerSoft },
+  wiped: { backgroundColor: colors.bakiTint, borderRadius: radius.card, borderWidth: 2, borderColor: colors.bakiBorder, padding: spacing.lg, gap: spacing.sm },
+  wipedButton: { minHeight: 64, borderRadius: radius.card, alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.lg },
   dupes: {
     minHeight: 72,
     borderRadius: radius.card,

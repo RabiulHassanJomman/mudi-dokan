@@ -389,10 +389,30 @@ INSERT INTO audio_queue (voice_log_id, queued_at)
 `;
 
 /**
+ * v13: Gemini only. understand_queue = what was said while Gemini couldn't answer (no
+ * internet, 429, error): the clip waits here (voice_logs has the audio_path, tab, time).
+ * waiting → ready (Gemini's answer is in voice_logs.gemini_json, to be confirmed on
+ * "অপেক্ষার হিসাব মিলিয়ে নিন") or unclear (Gemini answered but understood nothing).
+ * Leaves the queue when the log's outcome is decided (confirmed or discarded).
+ * Local only: never synced, not in backups.
+ */
+const V13 = `
+CREATE TABLE understand_queue (
+  voice_log_id TEXT PRIMARY KEY NOT NULL,
+  tab TEXT NOT NULL,
+  state TEXT NOT NULL DEFAULT 'waiting' CHECK (state IN ('waiting','ready','unclear')),
+  attempts INTEGER NOT NULL DEFAULT 0,
+  next_at INTEGER NOT NULL DEFAULT 0,         -- not before this (ms): backoff / 429 retryDelay
+  last_error TEXT,
+  queued_at INTEGER NOT NULL                  -- when it was said: the entry's time (entry_at)
+) WITHOUT ROWID;
+`;
+
+/**
  * Index i holds the SQL that takes the DB from user_version i to i + 1.
  * Append only; never edit or renumber a shipped one.
  */
-export const MIGRATIONS: readonly string[] = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12];
+export const MIGRATIONS: readonly string[] = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13];
 
 /**
  * Nov 14 fork: an early main build shipped v7 = customers.note (no Gemini columns) while

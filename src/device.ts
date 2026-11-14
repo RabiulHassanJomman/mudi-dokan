@@ -48,3 +48,6 @@ export function setDevice(name: string, role: DeviceRole): void {
 /** প্রথমবার চালু runs until this phone has saved Setup once. */
 export const isSetupDone = () => Storage.getItemSync(KEY_SETUP) === '1';
 export const markSetupDone = () => Storage.setItemSync(KEY_SETUP, '1');
+
+/** After a wipe: প্রথমবার চালু runs again (the name and role stay filled in). */
+export const clearSetupDone = () => Storage.removeItemSync(KEY_SETUP);

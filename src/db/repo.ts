@@ -1,5 +1,5 @@
 /**
- * Reads and writes for build step 2 (sale + pilot log). Pure TS against a
+ * Reads and writes (sales, entries, the debug log, Drive/queue bookkeeping). Pure TS against a
  * small DB interface that expo-sqlite's SQLiteDatabase satisfies, so it is
  * tested on node:sqlite.
  */
@@ -7,6 +7,7 @@ import { basketSummary, storedLine, type BasketDraft, type ProductInfo } from '.
 import { ZERO_FLOWS, dayStart, netCash, openingAnchor, type CashAnchor, type CashFlows, type NoteCounts, type OpeningSource, type ProfitInput } from '../domain/cash';
 import type { StoredEntry, StoredSaleLine } from '../domain/fix';
 import type { EntryTable, RawEntry } from '../domain/history';
+import { customerPlan, productPlan, type DeleteCheck, type DeletePlan } from '../domain/delete';
 import { entrySummary, type EntryDraft } from '../domain/entry';
 import type { CustomerLine } from '../domain/customerImport';
 import type { MergeItem, MergeKind } from '../domain/merge';
@@ -244,7 +245,7 @@ async function findOrCreateCustomer(db: Db, w: Writer, name: string): Promise<st
   return id;
 }
 
-// ── voice log (pilot debug log) ────────────────────────────────
+// ── voice log (debug log) ────────────────────────────────
 
 export type Outcome = 'pending' | 'saved' | 'saved_edited' | 'cancelled' | 'unsupported' | 'stt_error';
 
@@ -382,17 +383,6 @@ export async function setGeminiResult(db: Db, w: Writer, id: string, g: GeminiLo
   );
 }
 
-/** Voice logs since `since` (ms) that Gemini was asked about or could have been (engine set). */
-export const engineLogs = (db: Db, since: number) =>
-  db.getAllAsync<VoiceLogRow>(
-    "SELECT * FROM voice_logs WHERE created_at >= ? AND source = 'voice' AND engine IS NOT NULL ORDER BY created_at",
-    since,
-  );
-
-export async function setSttOk(db: Db, w: Writer, id: string, ok: boolean | null): Promise<void> {
-  await db.runAsync('UPDATE voice_logs SET stt_ok = ?, updated_at = ? WHERE id = ?', ok === null ? null : ok ? 1 : 0, w.now(), id);
-}
-
 /** Only a pending log changes outcome (a saved entry is never "un-saved" by leaving the screen). */
 export async function setOutcome(
   db: Db,
@@ -414,6 +404,8 @@ export async function setOutcome(
     w.now(),
     id,
   );
+  // decided (saved or discarded): no longer waiting to be understood / confirmed
+  await db.runAsync('DELETE FROM understand_queue WHERE voice_log_id = ?', id);
 }
 
 /**
@@ -437,6 +429,8 @@ export async function saveBasket(
   b: BasketDraft,
   voiceLogId: string,
   edits: string[],
+  /** The time it happened, when that isn't now (a clip understood later: when it was said). */
+  entryAt: number | null = null,
 ): Promise<string> {
   if (b.problems.length || b.totalPoisha === null) {
     throw new Error(`basket is not complete: ${b.problems.join(', ')}`);
@@ -446,7 +440,7 @@ export async function saveBasket(
     const created = new Map<string, string>();
     // credit: who owes; cash: who bought, if a name was confirmed
     const customerId = b.customerName ? await findOrCreateCustomer(db, w, b.customerName) : null;
-    const entry = () => ({ voice_log_id: voiceLogId, device_name: w.deviceName, ...rowCols(w) });
+    const entry = () => ({ voice_log_id: voiceLogId, device_name: w.deviceName, ...rowCols(w), ...(entryAt ? { entry_at: entryAt } : {}) });
     let firstSaleId: string | null = null;
 
     for (const [n, it] of b.items.entries()) {
@@ -519,14 +513,14 @@ const ENTRY_TABLE = { baki: 'ledger', joma: 'ledger', expense: 'expenses', owner
  * a said/typed sell price becomes the product's selling price; the average cost is
  * always worked out from purchases (findProduct). Returns the entry row id.
  */
-export async function saveEntry(db: Db, w: Writer, d: EntryDraft, voiceLogId: string, edits: string[]): Promise<string> {
+export async function saveEntry(db: Db, w: Writer, d: EntryDraft, voiceLogId: string, edits: string[], entryAt: number | null = null): Promise<string> {
   if (d.problems.length || !d.kind || d.amountPoisha === null) {
     throw new Error(`entry is not complete: ${d.problems.join(', ') || 'no amount'}`);
   }
   const kind = d.kind;
   const amount = d.amountPoisha;
   const id = w.newId();
-  const entry = () => ({ id, voice_log_id: voiceLogId, device_name: w.deviceName, ...rowCols(w) });
+  const entry = () => ({ id, voice_log_id: voiceLogId, device_name: w.deviceName, ...rowCols(w), ...(entryAt ? { entry_at: entryAt } : {}) });
   await db.withTransactionAsync(async () => {
     if (kind === 'baki' || kind === 'joma') {
       const partyId = await findOrCreateCustomer(db, w, d.customerName!);
@@ -669,6 +663,8 @@ export const CLIP_SQL = `CASE WHEN v.audio_status = 'expired' THEN NULL WHEN v.a
 
 export interface LedgerLine {
   id: string;
+  /** A credit sale's baki row: deleting it deletes the sale (voidEntry 'sales', basket_id). */
+  basket_id: string | null;
   kind: 'baki' | 'joma';
   amount_poisha: number;
   created_at: number;
@@ -681,7 +677,7 @@ export interface LedgerLine {
 /** A customer's ledger, newest first, with the clip that made each line. */
 export const customerHistory = (db: Db, customerId: string) =>
   db.getAllAsync<LedgerLine>(
-    `SELECT l.id, l.kind, l.amount_poisha, l.at AS created_at,
+    `SELECT l.id, l.basket_id, l.kind, l.amount_poisha, l.at AS created_at,
        (SELECT GROUP_CONCAT(name, ', ') FROM (
           SELECT p.name FROM v_sales s JOIN products p ON p.id = s.product_id
           WHERE l.basket_id IS NOT NULL AND s.basket_id = l.basket_id ORDER BY s.line_no)) AS products,
@@ -1170,81 +1166,87 @@ export const TABLE_OF: Record<RecentEntry['kind'], EntryTable> = {
   purchase: 'purchases',
 };
 
-// ── pilot stats & export ───────────────────────────────────────
+// ── debug log, wipe ────────────────────────────────────────────
 
-export interface PilotStats {
-  total: number;
-  saved: number;
-  edited: number;
-  cancelled: number;
-  unsupported: number;
-  sttError: number;
-  /** Chosen on ছবি দেখে: counted apart, not in total or accuracy (no parser involved). */
-  picked: number;
-  /** Voice logs the reviewer marked, and how many of those STT heard right. */
-  sttChecked: number;
-  sttOk: number;
-  /** saved without edits ÷ (saved + edited + cancelled). The pilot target is 80%. */
-  accuracy: number | null;
-}
+/** The hidden debug log (⚙, long-press the version): the last commands with what Gemini made of them. */
+export const DEBUG_LOG_LIMIT = 200;
+export const debugLog = (db: Db, limit = DEBUG_LOG_LIMIT) =>
+  db.getAllAsync<VoiceLogRow>("SELECT * FROM voice_logs WHERE source = 'voice' ORDER BY created_at DESC LIMIT ?", limit);
 
-export async function pilotStats(db: Db, since = 0): Promise<PilotStats> {
-  const rows = await db.getAllAsync<{ outcome: Outcome; n: number }>(
-    'SELECT outcome, COUNT(*) AS n FROM voice_logs WHERE created_at >= ? AND via IS NULL GROUP BY outcome',
-    since,
-  );
-  const picked = await db.getFirstAsync<{ n: number }>(
-    "SELECT COUNT(*) AS n FROM voice_logs WHERE created_at >= ? AND via = 'pick'",
-    since,
-  );
-  const n = (o: Outcome) => rows.find((r) => r.outcome === o)?.n ?? 0;
-  // pending = left the confirm card without deciding: counts as cancelled
-  const s = {
-    saved: n('saved'),
-    edited: n('saved_edited'),
-    cancelled: n('cancelled') + n('pending'),
-    unsupported: n('unsupported'),
-    sttError: n('stt_error'),
-  };
-  const decided = s.saved + s.edited + s.cancelled;
-  const stt = await db.getFirstAsync<{ checked: number; ok: number | null }>(
-    'SELECT COUNT(stt_ok) AS checked, SUM(stt_ok) AS ok FROM voice_logs WHERE created_at >= ?',
-    since,
-  );
-  return {
-    total: rows.reduce((a, r) => a + r.n, 0),
-    ...s,
-    picked: picked?.n ?? 0,
-    sttChecked: stt?.checked ?? 0,
-    sttOk: stt?.ok ?? 0,
-    accuracy: decided ? Math.round((s.saved / decided) * 100) : null,
-  };
-}
-
-export const pilotLog = (db: Db, limit = 500) =>
-  db.getAllAsync<VoiceLogRow>('SELECT * FROM voice_logs ORDER BY created_at DESC LIMIT ?', limit);
+/** Tables emptied by a wipe, children before parents (foreign keys). */
+const WIPE_ORDER = [
+  'ledger', 'sales', 'purchases', 'expenses', 'owner_withdrawals', 'day_close',
+  'product_aliases', 'products', 'customer_aliases', 'customers', 'voice_logs', 'shop',
+] as const;
 
 /**
- * "পাইলট ডাটা মুছুন": empties every entry, product, customer and voice log so the
- * real pilot starts clean. Keeps this device. The append-only DELETE guards are
- * dropped and re-created inside one transaction. Returns the audio files to delete.
+ * "সব তথ্য মুছুন" on this phone: every entry, product, customer, voice log and the shop row, and
+ * all sync / Drive / queue bookkeeping, so the phone starts like new. Keeps this phone's own
+ * devices row (the other phones' rows go) and the sync_meta keys in `keepMeta` (the account,
+ * the wipe already seen). The append-only DELETE guards are dropped and re-created inside one
+ * transaction. Returns the audio files to delete from the phone.
  */
-export async function wipePilotData(db: Db): Promise<string[]> {
-  const audio = await db.getAllAsync<{ audio_path: string }>(
-    'SELECT audio_path FROM voice_logs WHERE audio_path IS NOT NULL',
-  );
+export async function wipeAllData(db: Db, keepDeviceId: string | null, keepMeta: readonly string[] = []): Promise<string[]> {
+  const audio = await db.getAllAsync<{ audio_path: string }>('SELECT audio_path FROM voice_logs WHERE audio_path IS NOT NULL');
   await db.withTransactionAsync(async () => {
     for (const t of ENTRY_TABLES) await db.runAsync(`DROP TRIGGER ${t}_no_delete`);
-    // children before parents (foreign keys)
-    for (const t of ['ledger', 'sales', 'purchases', 'expenses', 'owner_withdrawals', 'day_close', 'product_aliases', 'products', 'customer_aliases', 'customers', 'voice_logs']) {
-      await db.runAsync(`DELETE FROM ${t}`);
-    }
+    for (const t of WIPE_ORDER) await db.runAsync(`DELETE FROM ${t}`);
+    await db.runAsync('DELETE FROM devices WHERE id IS NOT ?', keepDeviceId);
     for (const t of ENTRY_TABLES) await db.runAsync(noDeleteTrigger(t));
-    await db.runAsync('DELETE FROM sync_state');
-    await db.runAsync('DELETE FROM sync_inbox');
-    await db.runAsync('DELETE FROM audio_queue');
+    for (const t of ['sync_state', 'sync_inbox', 'audio_queue', 'understand_queue']) await db.runAsync(`DELETE FROM ${t}`);
+    const ph = keepMeta.map(() => '?').join(', ');
+    await db.runAsync(`DELETE FROM sync_meta${keepMeta.length ? ` WHERE key NOT IN (${ph})` : ''}`, ...keepMeta);
   });
   return audio.map((a) => a.audio_path);
+}
+
+/** What a wipe would erase, for the last warning: live entries, customers, products. */
+export async function wipeCounts(db: Db): Promise<{ entries: number; customers: number; products: number }> {
+  const n = async (sql: string) => (await db.getFirstAsync<{ n: number }>(sql))?.n ?? 0;
+  const entries = (
+    await Promise.all(ENTRY_TABLES.map((t) => n(`SELECT COUNT(*) AS n FROM v_${t}`)))
+  ).reduce((a, b) => a + b, 0);
+  return {
+    entries,
+    customers: await n("SELECT COUNT(*) AS n FROM customers WHERE archived = 0 AND party_type = 'customer'"),
+    products: await n('SELECT COUNT(*) AS n FROM products WHERE archived = 0'),
+  };
+}
+
+// ── মুছুন: customer / product ─────────────────────────────────
+
+/** Live entries pointing at the customer (সব ধরনের) and what they owe. */
+export async function customerDeleteCheck(db: Db, id: string): Promise<DeleteCheck> {
+  const n = await db.getFirstAsync<{ n: number }>(
+    `SELECT (SELECT COUNT(*) FROM v_ledger WHERE party_id = ?) + (SELECT COUNT(*) FROM v_sales WHERE customer_id = ?) AS n`,
+    id,
+    id,
+  );
+  const bal = await db.getFirstAsync<{ b: number | null }>(
+    "SELECT SUM(CASE kind WHEN 'baki' THEN amount_poisha ELSE -amount_poisha END) AS b FROM v_ledger WHERE party_id = ?",
+    id,
+  );
+  return { entries: n?.n ?? 0, balancePoisha: bal?.b ?? 0 };
+}
+
+export async function productDeleteCheck(db: Db, id: string): Promise<DeleteCheck> {
+  const n = await db.getFirstAsync<{ n: number }>(
+    'SELECT (SELECT COUNT(*) FROM v_sales WHERE product_id = ?) + (SELECT COUNT(*) FROM v_purchases WHERE product_id = ?) AS n',
+    id,
+    id,
+  );
+  return { entries: n?.n ?? 0, balancePoisha: 0 };
+}
+
+/**
+ * Hides a customer or product everywhere (archived, synced to the other phones). The row
+ * stays: voided and old entries still point at it. Throws if the plan says no.
+ */
+export async function archiveParty(db: Db, w: Writer, table: 'customers' | 'products', id: string): Promise<DeletePlan> {
+  const plan = table === 'customers' ? customerPlan(await customerDeleteCheck(db, id)) : productPlan(await productDeleteCheck(db, id));
+  if (plan === 'blocked') throw new Error('customer still has baki');
+  await db.runAsync(`UPDATE ${table} SET archived = 1, updated_at = MAX(updated_at + 1, ?) WHERE id = ? AND archived = 0`, w.now(), id);
+  return plan;
 }
 
 // ── merge (এই দুইটা কি একই?) — step 7 ─────────────────────────

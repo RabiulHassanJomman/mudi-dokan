@@ -83,6 +83,18 @@ export function restDrive(d: RestDeps): DriveApi {
     return made.id;
   }
 
+  /** The folder at `path` if it exists (never creates one). */
+  async function findFolder(path: readonly string[]): Promise<string | null> {
+    let parent = 'root';
+    for (const name of path) {
+      const query = `name = ${q(name)} and mimeType = '${FOLDER_MIME}' and trashed = false and ${q(parent)} in parents`;
+      const found = await json<{ files: { id: string }[] }>(`${API}/files?q=${encodeURIComponent(query)}&fields=files(id)&pageSize=10`);
+      if (!found.files.length) return null;
+      parent = found.files[0]!.id;
+    }
+    return parent;
+  }
+
   /** A 404 on upload: the folder was deleted on Drive; forget it so the next try makes it again. */
   async function forgetFolders(): Promise<void> {
     if (!d.cache) return;
@@ -182,6 +194,19 @@ export function restDrive(d: RestDeps): DriveApi {
       const r = await call(`${API}/files/${encodeURIComponent(fileId)}`, { method: 'DELETE' });
       if (r.ok || r.status === 404) return;
       throw new DriveError(r.status, `Drive delete ${r.status}: ${(await r.text()).slice(0, 200)}`);
+    },
+
+    async removeFolder(path) {
+      // every folder of that name (a second "Mudi Dokan" can exist if two phones made it at once)
+      let removed = false;
+      for (;;) {
+        const id = await findFolder(path);
+        if (!id) break;
+        await api.remove(id);
+        removed = true;
+      }
+      if (d.cache) await d.cache.set('*', null);
+      return removed;
     },
 
     async usage() {

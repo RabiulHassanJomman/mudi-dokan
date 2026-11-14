@@ -7,9 +7,11 @@ import { useSQLiteContext } from 'expo-sqlite';
 import { Icon, productIcon, type IconName } from '../components/Icon';
 import { Txt } from '../components/Txt';
 import { historyRows } from '../db/repo';
+import { useDeleteEntry } from '../components/DeleteEntry';
+import { entryDeleteText, visibleHistory, voidedCount } from '../domain/delete';
 import { addDays, dayStart, today } from '../domain/cash';
 import { HISTORY_FILTERS, buildHistory, historyLine, historyWords, matchesFilter, type HistoryFilter, type HistoryItem } from '../domain/history';
-import { dayLabel, formatTaka } from '../lib/bn';
+import { dayLabel, formatNumber, formatTaka } from '../lib/bn';
 import { speak, stopSpeaking } from '../lib/speak';
 import { useClipPlayer } from '../lib/useClipPlayer';
 import { colors, fontSize, productTiles, radius, size, spacing } from '../theme/tokens';
@@ -60,6 +62,9 @@ export default function HistoryScreen() {
   const [date, setDate] = useState(params.date ?? today());
   const [filter, setFilter] = useState<HistoryFilter>(HISTORY_FILTERS.some((f) => f.key === params.filter) ? (params.filter as HistoryFilter) : 'all');
   const [items, setItems] = useState<HistoryItem[]>([]);
+  const [showVoided, setShowVoided] = useState(false);
+  const [reload, setReload] = useState(0);
+  const del = useDeleteEntry(() => setReload((n) => n + 1));
   const isToday = date === today();
   const title = isToday ? 'আজকের খাতা' : `${dayLabel(dayStart(date))}-এর খাতা`;
 
@@ -74,10 +79,12 @@ export default function HistoryScreen() {
         alive = false;
         stopSpeaking();
       };
-    }, [db, date, synced]),
+    }, [db, date, synced, reload]),
   );
 
-  const shown = items.filter((i) => matchesFilter(i, filter));
+  const matching = items.filter((i) => matchesFilter(i, filter));
+  const shown = visibleHistory(matching, showVoided);
+  const nVoided = voidedCount(matching);
   const goDay = (n: number) => {
     const next = addDays(date, n);
     if (next > today()) return;
@@ -205,10 +212,40 @@ export default function HistoryScreen() {
               >
                 <Icon name="edit" size={22} color={colors.ink} strokeWidth={1.8} />
               </Pressable>
+              {!i.voided && (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`${line.title} মুছুন`}
+                  onPress={() => del.ask({ table: i.table, id: i.id, text: entryDeleteText(i) })}
+                  style={styles.edit}
+                >
+                  <Icon name="trash" size={22} color={colors.bakiInk} strokeWidth={1.8} />
+                </Pressable>
+              )}
             </Pressable>
           );
         })}
       </ScrollView>
+
+      {nVoided > 0 && (
+        <Pressable
+          accessibilityRole="switch"
+          accessibilityState={{ checked: showVoided }}
+          onPress={() => {
+            setShowVoided((v) => !v);
+            void speak(showVoided ? 'মোছা গুলো লুকানো হলো।' : `${formatNumber(nVoided)}টা মোছা লেখা দেখানো হচ্ছে।`);
+          }}
+          style={({ pressed }) => [styles.voidedToggle, showVoided && styles.voidedToggleOn, pressed && styles.pressed]}
+        >
+          <Icon name="trash" size={22} color={colors.bakiInk} />
+          <Txt size={fontSize.body} weight="bold" color={colors.bakiInk} style={styles.flex}>
+            {showVoided ? 'মোছা গুলো লুকান' : 'মোছা গুলো দেখুন'}
+          </Txt>
+          <Txt size={fontSize.body} weight="bold" color={colors.bakiInk}>
+            {formatNumber(nVoided)}
+          </Txt>
+        </Pressable>
+      )}
 
       <View style={styles.legend}>
         <View style={styles.legendBox} />
@@ -216,6 +253,7 @@ export default function HistoryScreen() {
           নীল দাগ = শুনে ঠিক করা হয়েছে
         </Txt>
       </View>
+      {del.sheet}
     </SafeAreaView>
   );
 }
@@ -250,6 +288,8 @@ const styles = StyleSheet.create({
   play: { width: size.iconButton, height: size.iconButton, borderRadius: radius.pill, backgroundColor: colors.saleTint, alignItems: 'center', justifyContent: 'center' },
   tile: { width: 44, height: 44, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' },
   edit: { width: size.iconButton, height: size.iconButton, borderRadius: radius.sm, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' },
+  voidedToggle: { minHeight: 52, borderRadius: radius.icon, backgroundColor: colors.surface, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.md },
+  voidedToggleOn: { backgroundColor: colors.bakiTint },
   legend: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingHorizontal: 4 },
   legendBox: { width: 18, height: 18, borderRadius: 6, borderWidth: 3, borderColor: colors.stock },
   disabled: { opacity: 0.35 },

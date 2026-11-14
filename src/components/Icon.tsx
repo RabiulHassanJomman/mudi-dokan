@@ -7,6 +7,8 @@ export type IconName =
   | 'settings' | 'keypad' | 'arrow' | 'search' | 'image' | 'phone' | 'person' | 'alert'
   // step 5: cash card, ✏️ fix, day picker, cash out
   | 'wallet' | 'edit' | 'forward' | 'up' | 'equals' | 'undo'
+  // delete (🗑 মুছুন)
+  | 'trash'
   // product pictures (Pick.dc.html)
   | 'rice' | 'dal' | 'oil' | 'sugar' | 'egg' | 'soap';
 
@@ -102,6 +104,7 @@ export function Icon({ name, size = 24, color, strokeWidth = 1.8 }: Props) {
         <Path {...p} d="M5 4h.01M12 4h.01M19 4h.01M5 10h.01M12 10h.01M19 10h.01M5 16h.01M12 16h.01M19 16h.01M12 21h.01" strokeWidth={strokeWidth + 2} />
       )}
       {name === 'alert' && <Path {...p} d="M12 8v5M12 17h.01" />}
+      {name === 'trash' && <Path {...p} d="M4 7h16 M9 7V4h6v3 M6 7l1 13h10l1-13 M10 11v6 M14 11v6" />}
       {name === 'arrow' && <Path {...p} d="M5 12h14M13 6l6 6-6 6" />}
       {name === 'phone' && <Path {...p} d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z" />}
       {name === 'person' && (

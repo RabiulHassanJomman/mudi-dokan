@@ -10,6 +10,7 @@ export const PHASE_BN: Record<SyncPhase, string> = {
   syncing: 'সিঙ্ক হচ্ছে…',
   error: 'সিঙ্ক হয়নি — আবার চেষ্টা হবে',
   budget: 'আজকের ফ্রি সীমা শেষ — কাল আবার পাঠাবে',
+  wiped: 'দোকানের সব তথ্য মোছা হয়েছে — সিঙ্ক বন্ধ',
 };
 
 /** After a first sync took the shop name and opening cash from the cloud (Setup was done offline). */
@@ -38,3 +39,7 @@ export function syncWords(s: SyncStatus, now = Date.now()): string {
   }
   return parts.join(' ');
 }
+
+/** After another phone erased the shop. */
+export const CLOUD_WIPED_BN = 'দোকানের সব তথ্য মোছা হয়েছে — এই ফোনেও মুছবেন?';
+export const CLOUD_WIPED_KEEP_BN = 'ঠিক আছে, এই ফোনের তথ্য রাখা হলো। আর কিছু পাঠাবে না।';

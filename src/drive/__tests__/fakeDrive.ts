@@ -80,6 +80,17 @@ export class FakeDrive implements DriveApi {
     this.files.delete(id);
   }
 
+  async removeFolder(path: readonly string[]) {
+    this.maybeFail(`removeFolder ${path.join('/')}`);
+    const prefix = path.join('/');
+    const gone = [...this.folders.entries()].filter(([k]) => k === prefix || k.startsWith(`${prefix}/`));
+    for (const [k, id] of gone) {
+      this.folders.delete(k);
+      for (const f of [...this.files.values()]) if (f.parent === id) this.files.delete(f.id);
+    }
+    return gone.length > 0;
+  }
+
   async usage() {
     return [...this.files.values()].reduce((a, f) => a + f.size, 0);
   }

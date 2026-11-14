@@ -6,12 +6,10 @@ import {
   findProducts,
   getVoiceLog,
   knownNames,
-  pilotStats,
   recentEntries,
   saveBasket,
   setOutcome,
-  setSttOk,
-  wipePilotData,
+  wipeAllData,
   todayTotals,
 } from '../repo';
 import { migratedDb, testWriter } from './nodeDb';
@@ -205,41 +203,14 @@ describe('reads', () => {
     expect(recent[1]).toMatchObject({ quantity: 2, unit: 'kg' });
     expect(await todayTotals(db, 0)).toEqual({ sales: 29000, baki: 17000 });
   });
-
-  it('pilot stats', async () => {
-    const { db, w } = await setup();
-    await sell(db, w, 'চাল ২ কেজি ১২০ টাকা');
-    await sell(db, w, 'চাল ১ কেজি');
-    await sell(db, w, 'চাল ৩ কেজি', (b) => b);
-    const c = await createVoiceLog(db, w, { transcript: 'চাউল দুই', source: 'voice', contextTab: 'sale' });
-    await setOutcome(db, w, c, 'cancelled');
-    await setOutcome(db, w, c, 'saved'); // ignored: already decided
-    await createVoiceLog(db, w, { transcript: '', source: 'voice', contextTab: 'sale', sttError: 'no-speech' });
-    const u = await createVoiceLog(db, w, { transcript: 'করিম ৫০০ জমা', source: 'voice', contextTab: 'sale' });
-    await setOutcome(db, w, u, 'unsupported');
-    expect(await getVoiceLog(db, c)).toMatchObject({ outcome: 'cancelled' });
-    expect(await pilotStats(db)).toEqual({
-      total: 6, saved: 2, edited: 1, cancelled: 1, unsupported: 1, sttError: 1, picked: 0, sttChecked: 0, sttOk: 0, accuracy: 50,
-    });
-  });
-
-  it('stt_ok: the reviewer marks whether STT heard right', async () => {
-    const { db, w } = await setup();
-    const id = await createVoiceLog(db, w, { transcript: 'চাউল দুই', source: 'voice', contextTab: 'sale' });
-    expect(await getVoiceLog(db, id)).toMatchObject({ stt_ok: null });
-    await setSttOk(db, w, id, false);
-    expect(await getVoiceLog(db, id)).toMatchObject({ stt_ok: 0 });
-    await setSttOk(db, w, id, null);
-    expect(await getVoiceLog(db, id)).toMatchObject({ stt_ok: null });
-  });
 });
 
-describe('wipePilotData', () => {
+describe('wipeAllData', () => {
   it('empties sales, products, customers, logs; keeps the device; append-only still holds', async () => {
     const { db, w, raw } = await setup();
     await sell(db, w, 'করিম বাকিতে নিল চাল ১ কেজি ৬০ টাকা');
     await createVoiceLog(db, w, { transcript: 'x', source: 'voice', contextTab: 'sale', audioPath: 'file:///a.wav' });
-    const audio = await wipePilotData(db);
+    const audio = await wipeAllData(db, 'dev-1');
     expect(audio).toEqual(['file:///a.wav']);
     for (const t of ['products', 'customers', 'sales', 'ledger', 'voice_logs', 'product_aliases']) {
       expect({ t, ...(raw.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get() as object) }).toEqual({ t, n: 0 });

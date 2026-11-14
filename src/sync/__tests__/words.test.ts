@@ -14,10 +14,10 @@ describe('sync words', () => {
   it('syncWords', () => {
     expect(
       syncWords(
-        { phase: 'idle', email: 'shop@example.com', lastError: null, stats: { lastSyncAt: NOW - 120_000, pending: 3, waiting: 0, writesToday: 120, readsToday: 40, cloudShop: false }, notice: null },
+        { phase: 'idle', email: 'shop@example.com', lastError: null, stats: { lastSyncAt: NOW - 120_000, pending: 3, waiting: 0, writesToday: 120, readsToday: 40, cloudShop: false }, notice: null, wipePending: null },
         NOW,
       ),
     ).toBe('সিঙ্ক ঠিক আছে। অ্যাকাউন্ট shop@example.com। শেষ সিঙ্ক ২ মিনিট আগে। ৩টা হিসাব পাঠানো বাকি। আজ পাঠানো ১২০, সীমা ১৮,০০০।');
-    expect(syncWords({ phase: 'signed_out', email: null, lastError: null, stats: null, notice: null }, NOW)).toBe('Google অ্যাকাউন্টে ঢোকা নেই — সিঙ্ক বন্ধ।');
+    expect(syncWords({ phase: 'signed_out', email: null, lastError: null, stats: null, notice: null, wipePending: null }, NOW)).toBe('Google অ্যাকাউন্টে ঢোকা নেই — সিঙ্ক বন্ধ।');
   });
 });

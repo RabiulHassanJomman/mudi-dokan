@@ -75,6 +75,18 @@ export const fonts = {
   bold: 'HindSiliguri_700Bold',
 } as const;
 
+/**
+ * Numbers only: Noto Sans Bengali. Hind Siliguri's ১ is a hook that reads like a letter; in Noto
+ * it has a long tail and the digits are spaced apart (compared with Baloo Da 2, Tiro Bangla,
+ * Anek Bangla on the font test screen). Text stays Hind Siliguri; <Num> switches per run.
+ */
+export const numFonts = {
+  regular: 'NotoSansBengali_400Regular',
+  medium: 'NotoSansBengali_500Medium',
+  semibold: 'NotoSansBengali_600SemiBold',
+  bold: 'NotoSansBengali_700Bold',
+} as const;
+
 /** Font sizes (px). Ranges in the design are mapped to one step each. */
 export const fontSize = {
   caption: 15,

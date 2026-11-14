@@ -84,7 +84,7 @@ describe('migrate', () => {
     const tables = raw.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as { name: string }[];
     for (const { name } of tables) {
       // local bookkeeping, never synced: sync state, the Drive upload queue
-      if (name.startsWith('sync_') || name === 'audio_queue') continue;
+      if (name.startsWith('sync_') || name === 'audio_queue' || name === 'understand_queue') continue;
       const cols = (raw.prepare(`PRAGMA table_info(${name})`).all() as { name: string }[]).map((c) => c.name);
       expect({ name, cols }).toEqual({ name, cols: expect.arrayContaining(['id', 'device_id', 'created_at', 'updated_at']) });
     }
@@ -311,8 +311,8 @@ describe('v7–v9 (shared by main and exp/gemini-audio)', () => {
     expect(() => db.exec("UPDATE sales SET quantity = 1 WHERE id = 's1'")).toThrow(/append-only/);
   }
 
-  it('v7–v9 are shared by every branch (the latest is now 12)', () => {
-    expect(SCHEMA_VERSION).toBe(12);
+  it('v7–v9 are shared by every branch (the latest is now 13)', () => {
+    expect(SCHEMA_VERSION).toBe(13);
   });
 
   it('v6 shop phone (main) → v9: data kept, new columns null', async () => {
@@ -559,6 +559,27 @@ describe('v10: voided + entry_at (corrections and undo)', () => {
     old.exec("UPDATE voice_logs SET drive_file_id = 'drv1', audio_status = 'uploaded' WHERE id = 'v1'");
     old.exec("UPDATE voice_logs SET audio_status = 'expired' WHERE id = 'v4'");
     expect(() => old.exec("UPDATE voice_logs SET audio_status = 'gone' WHERE id = 'v1'")).toThrow();
+    old.close();
+  });
+
+  it('v12 shop phone (step 8, Drive on) → v13: every row, queue and sync state kept; empty understand_queue', async () => {
+    const old = v9Shop();
+    for (let v = 9; v < 12; v++) old.exec(`${MIGRATIONS[v]}\nPRAGMA user_version = ${v + 1};`);
+    insert(old, 'voice_logs', {
+      ...row('v2'), transcript: 'ডাল ১ কেজি', device_name: 'আব্বু', audio_path: 'file:///doc/v2.aac', audio_status: 'uploaded',
+      drive_file_id: 'drv2', engine: 'gemini', gemini_json: '{"intent":"sale"}', outcome: 'saved',
+    });
+    // v12 queued v1's clip (its audio_path, not yet on Drive)
+    old.exec("INSERT INTO sync_state VALUES ('voice_logs', 'v1', 1763000000000)");
+    const before = dumpAll(old);
+    await expect(migrate(adapter(old))).resolves.toBe(12);
+    expect(old.prepare('PRAGMA user_version').get()).toEqual({ user_version: SCHEMA_VERSION });
+    expect(dumpAll(old)).toEqual(before);
+    expect(old.prepare('SELECT voice_log_id FROM audio_queue').all()).toEqual([{ voice_log_id: 'v1' }]);
+    expect(old.prepare('SELECT COUNT(*) AS n FROM understand_queue').get()).toEqual({ n: 0 });
+    old.exec("INSERT INTO understand_queue (voice_log_id, tab, queued_at) VALUES ('v1', 'sale', 1)");
+    expect(old.prepare("SELECT state, attempts, next_at FROM understand_queue").get()).toEqual({ state: 'waiting', attempts: 0, next_at: 0 });
+    expect(() => old.exec("UPDATE understand_queue SET state = 'done'")).toThrow();
     old.close();
   });
 });

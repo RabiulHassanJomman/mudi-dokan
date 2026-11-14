@@ -13,7 +13,8 @@ import { addDatabaseChangeListener, openDatabaseAsync } from 'expo-sqlite';
 
 import { DATABASE_NAME } from '../db/client';
 import { adoptCloudShop, dismissedMerges, mergeItems, repointMerged } from '../db/repo';
-import { writer } from '../device';
+import { getDevice, writer } from '../device';
+import { afterLocalWipe } from '../wipe/files';
 import { duplicatePairs, type MergePair } from '../domain/merge';
 import type { Db } from '../db/repo';
 import { watchAccount } from './auth';
@@ -53,6 +54,10 @@ async function boot(): Promise<SyncController> {
     afterApply: () => repointMerged(syncDb as unknown as Db, writer()),
     adoptShop: (shop) => adoptCloudShop(syncDb as unknown as Db, writer(), shop),
     onData: bumpData,
+    // another phone erased the shop and the user said হ্যাঁ: this phone too, files included
+    wipeLocal: async () => {
+      await afterLocalWipe(await engine.wipeLocal(getDevice().id));
+    },
     onFirstSync: () => {
       for (const fn of firstSyncSubs) fn();
     },

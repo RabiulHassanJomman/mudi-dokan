@@ -34,6 +34,8 @@ export interface DriveApi {
   remove(fileId: string): Promise<void>;
   /** Bytes of every file the app keeps on Drive (audio + backups). */
   usage(): Promise<number>;
+  /** Deletes a folder and everything in it ("সব তথ্য মুছুন"); false if there is no such folder. */
+  removeFolder(path: readonly string[]): Promise<boolean>;
 }
 
 /** Drive said no (HTTP status), or the network failed (status 0). */

@@ -8,7 +8,11 @@ import { Icon, productIcon, type IconName } from '../../components/Icon';
 import { ScreenHeader } from '../../components/ScreenHeader';
 import { Txt } from '../../components/Txt';
 import { buildLabel } from '../../lib/buildInfo';
-import { cashDay, getSetup, pilotStats, recentEntries, todayTotals, type PilotStats } from '../../db/repo';
+import { PendingCard } from '../../components/PendingCard';
+import { useDeleteEntry } from '../../components/DeleteEntry';
+import { TABLE_OF } from '../../db/repo';
+import { entryDeleteText } from '../../domain/delete';
+import { cashDay, getSetup, recentEntries, todayTotals } from '../../db/repo';
 import { today as todayDate } from '../../domain/cash';
 import { recentLine, type RecentEntry } from '../../domain/recent';
 import { getDevice } from '../../device';
@@ -54,10 +58,11 @@ export default function SaleScreen() {
   /** Rows from another phone came in: reload. */
   const synced = useDataVersion();
   const play = useClipPlayer();
+  const [reload, setReload] = useState(0);
+  const del = useDeleteEntry(() => setReload((n) => n + 1));
   const [shopName, setShopName] = useState<string | null>(null);
   const [today, setToday] = useState({ sales: 0, baki: 0 });
   const [recent, setRecent] = useState<RecentEntry[]>([]);
-  const [stats, setStats] = useState<PilotStats | null>(null);
   /** হাতে ক্যাশ = today's expected cash in hand. */
   const [cash, setCash] = useState<number | null>(null);
 
@@ -67,10 +72,9 @@ export default function SaleScreen() {
         setToday(await todayTotals(db, startOfToday()));
         setCash((await cashDay(db, todayDate())).expectedPoisha);
         setRecent(await recentEntries(db, 3));
-        setStats(await pilotStats(db));
         setShopName((await getSetup(db, getDevice().id)).shopName);
       })();
-    }, [db, synced]),
+    }, [db, synced, reload]),
   );
 
   const readScreen = () => {
@@ -161,6 +165,8 @@ export default function SaleScreen() {
           </Pressable>
         </View>
 
+        <PendingCard />
+
         {recent.map((r) => {
           const line = recentLine(r);
           const look = entryLook(r);
@@ -203,28 +209,28 @@ export default function SaleScreen() {
                   <Icon name="play" size={22} color={colors.sale} />
                 </Pressable>
               ) : (
-                // no clip (typed, Android < 13, or past 90 days): ▶️ hidden, the row keeps its shape
+                // no clip (typed, or past 90 days): ▶️ hidden, the row keeps its shape
                 <View style={[styles.play, styles.noClip]} />
               )}
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`${line.title}, মুছুন`}
+                onPress={() => del.ask({ table: TABLE_OF[r.kind], id: r.id, text: entryDeleteText(r) })}
+                style={styles.trash}
+              >
+                <Icon name="trash" size={22} color={colors.bakiInk} />
+              </Pressable>
             </Pressable>
           );
         })}
 
-        <Pressable accessibilityRole="button" onPress={() => nav.push('/pilot-log')} style={styles.logLink}>
-          <Icon name="list" size={20} color={colors.muted} />
-          <Txt size={fontSize.captionLg} weight="semibold" color={colors.muted}>
-            পাইলট লগ
-            {stats && stats.total > 0
-              ? ` · ${toBnDigits(stats.total)}টি কমান্ড${stats.accuracy !== null ? ` · ${toBnDigits(stats.accuracy)}% ঠিক` : ''}`
-              : ''}
-          </Txt>
-        </Pressable>
         {__DEV__ && (
           <Txt size={fontSize.caption} weight="medium" color={colors.muted} style={styles.build}>
             {buildLabel()}
           </Txt>
         )}
       </ScrollView>
+      {del.sheet}
     </SafeAreaView>
   );
 }
@@ -312,11 +318,5 @@ const styles = StyleSheet.create({
   disabled: { opacity: 0.35 },
   noClip: { opacity: 0 },
   build: { textAlign: 'center' },
-  logLink: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.xxs,
-    minHeight: size.minTouch,
-  },
+  trash: { width: 44, height: 52, alignItems: 'center', justifyContent: 'center' },
 });

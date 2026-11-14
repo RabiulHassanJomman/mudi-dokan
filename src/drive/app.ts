@@ -23,7 +23,7 @@ import type { Db } from '../db/repo';
 import { getDevice } from '../device';
 import { dataChanged, syncController } from '../sync/app';
 import { watchAccount } from '../sync/auth';
-import { backupPath, stamp, type DriveApi, type DriveFile } from './api';
+import { ROOT_FOLDER, backupPath, stamp, type DriveApi, type DriveFile } from './api';
 import {
   BACKUP_MIME,
   META_BACKUP_AT,
@@ -251,7 +251,10 @@ async function runOnce(background: boolean): Promise<void> {
     wifi = net.type === 'wifi';
   }
   const wifiOnly = (await getMeta(d, META_WIFI_ONLY)) === '1';
-  const reach = canDrive && online;
+  // another phone erased the shop and this one hasn't answered: no clip or backup goes to Drive
+  // (it would bring the erased "Mudi Dokan" folder back)
+  const paused = (await getMeta(d, 'wipe_pending')) !== null;
+  const reach = canDrive && online && !paused;
   const send = reach && (!wifiOnly || wifi);
   const a = canDrive ? driveApi(d) : null;
   try {
@@ -377,6 +380,36 @@ export async function shareBackupFile(): Promise<void> {
   f.create();
   f.write(JSON.stringify(b));
   await Sharing.shareAsync(f.uri, { mimeType: BACKUP_MIME, dialogTitle: 'মুদি দোকান ব্যাকআপ' });
+}
+
+/**
+ * A backup file kept on this phone (Documents/backup, never wiped) and shown to the share sheet
+ * before "সব তথ্য মুছুন". Returns false if there is no way to share (the copy is still kept).
+ */
+export async function backupBeforeWipe(): Promise<{ uri: string; shared: boolean }> {
+  const d = await openDb();
+  if (!d) throw new Error('db');
+  const dev = getDevice();
+  const now = Date.now();
+  const b = await exportBackup(d, { deviceId: dev.id, deviceName: dev.name }, now);
+  const dir = new Directory(Paths.document, 'backup');
+  if (!dir.exists) dir.create({ intermediates: true });
+  const f = new File(dir, `before-wipe-${stamp(now)}.json`);
+  if (f.exists) f.delete();
+  f.create();
+  f.write(JSON.stringify(b));
+  if (!(await Sharing.isAvailableAsync())) return { uri: f.uri, shared: false };
+  await Sharing.shareAsync(f.uri, { mimeType: BACKUP_MIME, dialogTitle: 'মুদি দোকান ব্যাকআপ — মোছার আগে রেখে দিন' });
+  return { uri: f.uri, shared: true };
+}
+
+/** "সব তথ্য মুছুন": the whole "Mudi Dokan" folder on Drive (audio and backups). false = nothing was there / no access. */
+export async function removeDriveFolder(): Promise<boolean> {
+  const d = await openDb();
+  if (!d || !signedIn || !(await hasDriveAccess())) return false;
+  const gone = await driveApi(d).removeFolder([ROOT_FOLDER]);
+  api = null; // folder ids are cached no more
+  return gone;
 }
 
 /** Backups on Drive, newest first. */
