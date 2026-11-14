@@ -236,10 +236,11 @@ describe('upgrade keeps pilot data', () => {
     await expect(migrate(a)).resolves.toBe(4);
     expect(old.prepare('PRAGMA user_version').get()).toEqual({ user_version: SCHEMA_VERSION });
     for (const [t, rows] of Object.entries(before)) {
-      // same rows; new columns may only be added (null)
-      expect(dump(t).map((r) => ({ ...(r as object), via: undefined, intent: undefined }))).toEqual(
-        (rows as object[]).map((r) => ({ ...r, via: undefined, intent: undefined })),
-      );
+      // same rows and values; later versions may only add columns
+      const oldCols = (r: object) => Object.keys(r);
+      expect(
+        dump(t).map((r, k) => Object.fromEntries(oldCols((rows as object[])[k]!).map((c) => [c, (r as Record<string, unknown>)[c]]))),
+      ).toEqual(rows);
     }
     expect(old.prepare('SELECT via FROM voice_logs').get()).toEqual({ via: null });
     old.close();
@@ -259,5 +260,53 @@ describe('v6', () => {
       { id: 'v2', intent: null, outcome: 'stt_error' },
     ]);
     old.close();
+  });
+});
+
+describe('v7 (Gemini audio experiment)', () => {
+  it('a v6 shop phone keeps its pilot data; the new voice_logs columns start null', async () => {
+    const old = new DatabaseSync(':memory:');
+    const a = adapter(old);
+    await a.execAsync('PRAGMA foreign_keys = ON;');
+    for (const sql of MIGRATIONS.slice(0, 6)) old.exec(sql);
+    old.exec('PRAGMA user_version = 6');
+    insert(old, 'devices', { ...row('d1'), device_name: 'আব্বু', role: 'owner' });
+    insert(old, 'products', { ...row('p1'), name: 'চাল', unit: 'kg', sell_price_poisha: 6000 });
+    insert(old, 'customers', { ...row('c1'), name: 'করিম' });
+    insert(old, 'voice_logs', {
+      ...row('v1'), transcript: 'করিম চাল ২ কেজি বাকি', device_name: 'আব্বু', outcome: 'saved_edited', stt_ok: 1,
+      parsed_json: JSON.stringify({ intent: 'sale', items: [{ product: 'চাল', quantity: { value: 2, unit: 'kg' } }] }),
+      edits_json: '["items[0].quantity"]', final_json: '{"credit":true}', intent: 'sale', audio_path: 'file:///x/voice_1.wav', audio_status: 'local',
+      source: 'voice', context_tab: 'sale',
+    });
+    insert(old, 'voice_logs', { ...row('v2'), transcript: '', device_name: 'আব্বু', stt_error: 'no-speech', outcome: 'stt_error', source: 'voice' });
+    insert(old, 'sales', {
+      ...entry('s1'), product_id: 'p1', quantity: 3, sell_price_poisha: 6000, amount_poisha: 18000, cost_price_poisha: 0,
+      credit: 1, customer_id: 'c1', voice_log_id: 'v1', basket_id: 'b1', line_no: 1,
+    });
+    insert(old, 'ledger', { ...entry('l1'), party_id: 'c1', kind: 'baki', amount_poisha: 18000, basket_id: 'b1', voice_log_id: 'v1' });
+    insert(old, 'expenses', { ...entry('e1'), item: 'বিদ্যুৎ বিল', amount_poisha: 50000 });
+    const tables = ['devices', 'products', 'customers', 'voice_logs', 'sales', 'ledger', 'expenses'];
+    const dump = (t: string) => old.prepare(`SELECT * FROM ${t} ORDER BY id`).all() as Record<string, unknown>[];
+    const before = Object.fromEntries(tables.map((t) => [t, dump(t)]));
+
+    await expect(migrate(a)).resolves.toBe(6);
+    expect(old.prepare('PRAGMA user_version').get()).toEqual({ user_version: SCHEMA_VERSION });
+    for (const t of tables) {
+      const after = dump(t);
+      expect(after.map((r, k) => Object.fromEntries(Object.keys(before[t]![k]!).map((c) => [c, r[c]])))).toEqual(before[t]);
+    }
+    expect(old.prepare('SELECT engine, parsed_by, android_json, gemini_json, gemini_ms FROM voice_logs WHERE id = ?').get('v1')).toEqual({
+      engine: null, parsed_by: null, android_json: null, gemini_json: null, gemini_ms: null,
+    });
+    // entries are still append-only after the upgrade
+    expect(() => old.exec("UPDATE sales SET quantity = 1 WHERE id = 's1'")).toThrow(/append-only/);
+    old.close();
+  });
+
+  it('engine and parsed_by take only known values', () => {
+    insert(raw, 'voice_logs', { ...row('v1'), transcript: 'চাল ২ কেজি', device_name: 'আব্বু', engine: 'both', parsed_by: 'android' });
+    expect(() => insert(raw, 'voice_logs', { ...row('v2'), transcript: 'x', device_name: 'আব্বু', engine: 'openai' })).toThrow();
+    expect(() => insert(raw, 'voice_logs', { ...row('v3'), transcript: 'x', device_name: 'আব্বু', parsed_by: 'both' })).toThrow();
   });
 });

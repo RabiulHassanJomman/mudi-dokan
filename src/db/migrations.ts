@@ -212,8 +212,30 @@ ALTER TABLE voice_logs ADD COLUMN intent TEXT;
 UPDATE voice_logs SET intent = json_extract(parsed_json, '$.intent') WHERE parsed_json IS NOT NULL;
 `;
 
+/**
+ * v7 (experiment exp/gemini-audio): Gemini audio understanding next to Android STT + rule
+ * parser. engine = the setting when the command was spoken (null = before v7, android);
+ * parsed_by = whose result the confirm card showed (parsed_json stays "what was shown");
+ * android_json / gemini_json = each engine's result; Gemini's transcript, error, latency
+ * and tokens. Old rows keep nulls.
+ */
+const V7 = `
+ALTER TABLE voice_logs ADD COLUMN engine TEXT CHECK (engine IS NULL OR engine IN ('android','gemini','both'));
+ALTER TABLE voice_logs ADD COLUMN parsed_by TEXT CHECK (parsed_by IS NULL OR parsed_by IN ('android','gemini'));
+ALTER TABLE voice_logs ADD COLUMN android_json TEXT;
+ALTER TABLE voice_logs ADD COLUMN gemini_json TEXT;
+ALTER TABLE voice_logs ADD COLUMN gemini_transcript TEXT;
+ALTER TABLE voice_logs ADD COLUMN gemini_error TEXT;
+ALTER TABLE voice_logs ADD COLUMN gemini_model TEXT;
+ALTER TABLE voice_logs ADD COLUMN gemini_ms INTEGER;
+ALTER TABLE voice_logs ADD COLUMN gemini_prompt_tokens INTEGER;
+ALTER TABLE voice_logs ADD COLUMN gemini_audio_tokens INTEGER;
+ALTER TABLE voice_logs ADD COLUMN gemini_output_tokens INTEGER;
+ALTER TABLE voice_logs ADD COLUMN gemini_thought_tokens INTEGER;
+`;
+
 /** Index i holds the SQL that takes the DB from user_version i to i + 1. */
-export const MIGRATIONS: readonly string[] = [V1, V2, V3, V4, V5, V6];
+export const MIGRATIONS: readonly string[] = [V1, V2, V3, V4, V5, V6, V7];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;
 

@@ -10,8 +10,8 @@
  * Non-sale commands (not saved by the app yet) and unsure sales come in as status
  * "review": expected is a draft and the eval does not score them until labelled.
  */
-import type { Intent, ParsedCommand, Unit } from '../src/parser/types';
-import type { Expected, ExpectedItem, Fixture, Seed, Tab } from './eval-types';
+import type { Intent, ParsedCommand, Unit } from '../parser/types';
+import type { Expected, ExpectedItem, Fixture, Seed, Tab } from './types';
 
 /** One saved line, as basketSummary() writes it to voice_logs.final_json. */
 export interface SavedItem {
@@ -54,6 +54,8 @@ export interface PilotLog {
   stt_ok?: boolean;
   /** 'pick' = chosen on ছবি দেখে: no speech, no parse, nothing to evaluate. */
   via?: 'pick';
+  /** The recorded clip's file name (eval --audio looks for it in eval/clips/). */
+  audio_file?: string;
 }
 
 export type SkipReason = 'not_saved' | 'no_transcript' | 'stt_wrong' | 'no_result' | 'picked';
@@ -66,7 +68,7 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 const tabOf = (log: PilotLog): Tab => (TABS.includes(log.tab as Tab) ? (log.tab as Tab) : 'sale');
 
 /** The parser's guess as a starting label (no confirmed result exists for it). */
-function draftFromParse(p: Partial<ParsedCommand>): Expected {
+export function draftFromParse(p: Partial<ParsedCommand>): Expected {
   const e: Expected = { intent: p.intent ?? 'unknown' };
   if (p.customer) e.customer = p.customer;
   if (p.credit) e.credit = true;

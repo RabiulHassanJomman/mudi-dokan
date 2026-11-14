@@ -1,5 +1,5 @@
-/** Shared shapes for the offline eval (scripts/eval-*.ts). Mac-only, never bundled. */
-import type { Intent, ParseContext, Unit } from '../src/parser/types';
+/** Shared shapes for the eval (scripts/eval-*.ts) and the app's engine comparison (pure TS). */
+import type { Intent, ParseContext, Unit } from '../parser/types';
 
 export type Tab = NonNullable<ParseContext['tab']>;
 /** new = hand-written, tests = from the unit tests, pilot = imported from a shop's pilot log (held out). */

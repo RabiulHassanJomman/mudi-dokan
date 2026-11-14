@@ -1,19 +1,38 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Paths } from 'expo-file-system';
 import { useSQLiteContext } from 'expo-sqlite';
+import { AudioModule, setAudioModeAsync, useAudioRecorder, type RecordingOptions } from 'expo-audio';
 import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-speech-recognition';
 import Svg, { Path } from 'react-native-svg';
 
 import { Icon } from '../components/Icon';
 import { Txt } from '../components/Txt';
-import { createVoiceLog } from '../db/repo';
+import { createVoiceLog, setOutcome } from '../db/repo';
 import { writer } from '../device';
+import { getEngine } from '../lib/engine';
+import { GEMINI_WAIT_MS, runGemini } from '../lib/gemini';
 import { colors, fontSize, radius, spacing } from '../theme/tokens';
 
-type Phase = 'starting' | 'listening' | 'error';
+type Phase = 'starting' | 'listening' | 'thinking' | 'error';
+
+/**
+ * Gemini mode on Android < 13: the recognizer can't keep the clip, so expo-audio records it
+ * (AAC in ADTS, which Gemini takes; 16 kHz mono ≈ 4 KB/s). No live transcript then.
+ */
+const AAC_16K: RecordingOptions = {
+  extension: '.aac',
+  sampleRate: 16000,
+  numberOfChannels: 1,
+  bitRate: 32000,
+  android: { extension: '.aac', outputFormat: 'aac_adts', audioEncoder: 'aac' },
+  ios: { extension: '.aac', audioQuality: 32, outputFormat: 'aac ' },
+  web: {},
+};
+/** The recorder has no end-of-speech detection: stop by itself after this. */
+const RECORD_MAX_MS = 15_000;
 
 const ERROR_TEXT: Record<string, string> = {
   'no-speech': 'কিছু শুনতে পাইনি',
@@ -35,6 +54,13 @@ export default function ListeningScreen() {
   const [heard, setHeard] = useState('');
   const [errorText, setErrorText] = useState('');
   const [volume, setVolume] = useState(0);
+  /** Fixed for this command (debug setting, pilot log screen). */
+  const engine = useRef(getEngine()).current;
+  const useRecorder = engine === 'gemini' && Platform.OS === 'android' && Number(Platform.Version) < 33;
+  const recorder = useAudioRecorder(AAC_16K);
+  const recordTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** ✕ pressed: drop a Gemini answer that comes in later. */
+  const left = useRef(false);
 
   const final = useRef<{ text: string; alternatives: string[] } | null>(null);
   const audio = useRef<string | null>(null);
@@ -45,8 +71,11 @@ export default function ListeningScreen() {
     final.current = null;
     audio.current = null;
     sttError.current = null;
+    closing.current = false;
+    left.current = false;
     setHeard('');
     setPhase('starting');
+    if (useRecorder) return startRecorder();
     const perm = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
     if (!perm.granted) {
       setErrorText(ERROR_TEXT['not-allowed']!);
@@ -62,14 +91,44 @@ export default function ListeningScreen() {
       recordingOptions: { persist: true, outputDirectory: Paths.document.uri, outputFileName: `voice_${Date.now()}.wav` },
       volumeChangeEventOptions: { enabled: true, intervalMillis: 120 },
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  async function startRecorder() {
+    const perm = await AudioModule.requestRecordingPermissionsAsync();
+    if (!perm.granted) {
+      setErrorText(ERROR_TEXT['not-allowed']!);
+      setPhase('error');
+      return;
+    }
+    await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
+    await recorder.prepareToRecordAsync();
+    recorder.record();
+    setPhase('listening');
+    recordTimer.current = setTimeout(() => void stopRecorder(), RECORD_MAX_MS);
+  }
+
+  async function stopRecorder() {
+    if (recordTimer.current) clearTimeout(recordTimer.current);
+    recordTimer.current = null;
+    if (closing.current) return;
+    closing.current = true;
+    await recorder.stop();
+    await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
+    if (recorder.uri) return finishGemini(recorder.uri, null, null);
+    setErrorText(ERROR_TEXT['no-speech']!);
+    setPhase('error');
+  }
 
   useEffect(() => {
     void start();
     return () => {
       closing.current = true;
-      ExpoSpeechRecognitionModule.abort();
+      if (recordTimer.current) clearTimeout(recordTimer.current);
+      if (useRecorder) void recorder.stop().catch(() => undefined);
+      else ExpoSpeechRecognitionModule.abort();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [start]);
 
   useSpeechRecognitionEvent('start', () => setPhase('listening'));
@@ -93,6 +152,13 @@ export default function ListeningScreen() {
   async function finish() {
     const w = writer();
     const got = final.current?.text.trim();
+    const clip = audio.current;
+    const code = sttError.current ?? 'no-speech';
+    if (code === 'aborted' && !got) return;
+    if (engine === 'gemini' && clip) {
+      closing.current = true;
+      return finishGemini(clip, got || null, got ? null : code);
+    }
     if (got) {
       closing.current = true;
       const logId = await createVoiceLog(db, w, {
@@ -100,21 +166,58 @@ export default function ListeningScreen() {
         source: 'voice',
         contextTab: tab,
         alternatives: final.current?.alternatives,
-        audioPath: audio.current,
+        audioPath: clip,
+        engine,
       });
+      // both: Gemini hears the same clip in the background; the card uses Android's result
+      if (engine === 'both' && clip) void runGemini(db, logId, clip, { tab, hint: got });
       router.replace({ pathname: '/confirm', params: { logId, tab, ...carry } });
       return;
     }
-    const code = sttError.current ?? 'no-speech';
-    if (code === 'aborted') return;
-    await createVoiceLog(db, w, { transcript: '', source: 'voice', contextTab: tab, sttError: code, audioPath: audio.current });
+    const logId = await createVoiceLog(db, w, { transcript: '', source: 'voice', contextTab: tab, sttError: code, audioPath: clip, engine });
+    // measured too: would Gemini have understood what the recognizer missed?
+    if (engine === 'both' && clip) void runGemini(db, logId, clip, { tab, hint: null });
     setErrorText(ERROR_TEXT[code] ?? `শুনতে সমস্যা (${code})`);
+    setPhase('error');
+  }
+
+  /**
+   * gemini mode: wait for Gemini (≤ ~12 s). Its result drives the confirm card; if it fails
+   * or did not understand, the Android transcript does (fallback); with neither, "আবার বলুন".
+   */
+  async function finishGemini(clip: string, got: string | null, code: string | null) {
+    setPhase('thinking');
+    const w = writer();
+    const logId = await createVoiceLog(db, w, {
+      transcript: got ?? '',
+      source: 'voice',
+      contextTab: tab,
+      alternatives: final.current?.alternatives,
+      audioPath: clip,
+      engine: 'gemini',
+      sttError: code,
+      keepPending: true,
+    });
+    const g = await runGemini(db, logId, clip, { tab, hint: got, deadlineMs: GEMINI_WAIT_MS });
+    if (left.current) {
+      await setOutcome(db, w, logId, g.ok || got ? 'cancelled' : 'stt_error');
+      return;
+    }
+    if ((g.ok && g.parsed?.intent !== 'unknown') || got) {
+      router.replace({ pathname: '/confirm', params: { logId, tab, ...carry } });
+      return;
+    }
+    await setOutcome(db, w, logId, 'stt_error');
+    closing.current = false;
+    setErrorText(g.ok ? 'কিছু বুঝিনি' : code && ERROR_TEXT[code] ? ERROR_TEXT[code]! : 'বুঝতে পারিনি');
     setPhase('error');
   }
 
   const close = () => {
     closing.current = true;
-    ExpoSpeechRecognitionModule.abort();
+    left.current = true;
+    if (useRecorder) void recorder.stop().catch(() => undefined);
+    else ExpoSpeechRecognitionModule.abort();
     router.back();
   };
 
@@ -137,7 +240,7 @@ export default function ListeningScreen() {
           </View>
         </View>
         <Txt size={fontSize.promptLg} weight="bold" color={colors.onColor}>
-          {phase === 'error' ? 'আবার বলুন' : phase === 'starting' ? 'একটু দাঁড়ান…' : 'শুনছি…'}
+          {phase === 'error' ? 'আবার বলুন' : phase === 'starting' ? 'একটু দাঁড়ান…' : phase === 'thinking' ? 'বুঝছি…' : 'শুনছি…'}
         </Txt>
         {phase === 'listening' && <Bars volume={volume} />}
       </View>
@@ -175,11 +278,11 @@ export default function ListeningScreen() {
             </Txt>
           </Pressable>}
         </>
-      ) : (
+      ) : phase === 'thinking' ? null : (
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="থামুন"
-          onPress={() => ExpoSpeechRecognitionModule.stop()}
+          onPress={() => (useRecorder ? void stopRecorder() : ExpoSpeechRecognitionModule.stop())}
           style={styles.action}
         >
           <View style={styles.stopSquare} />
