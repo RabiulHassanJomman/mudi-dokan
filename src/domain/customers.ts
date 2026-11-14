@@ -73,3 +73,34 @@ export const balanceWords = (name: string, balancePoisha: number): string =>
     : balancePoisha < 0
       ? `${name}, অগ্রিম দিয়েছে ${formatNumber(-balancePoisha / 100)} টাকা।`
       : `${name}, কোনো বাকি নেই।`;
+
+const key = (s: string) => norm(s).toLowerCase();
+
+/** A heard name that is a known alias → that customer's name; else unchanged. */
+export function resolveCustomerAlias(name: string | undefined, aliases: Readonly<Record<string, string>>): string | undefined {
+  if (!name) return name;
+  const k = key(name);
+  const hit = Object.entries(aliases).find(([a]) => key(a) === k);
+  return hit ? hit[1] : name;
+}
+
+/**
+ * After a confirmed save (or a name picked on the "বাকি কত?" card): the heard name becomes
+ * an alias of the chosen customer when the user corrected it to, or picked, an existing
+ * customer. Not when the chosen one is new, or the heard name is itself a customer or alias
+ * (then it was a different person, not another spelling).
+ */
+export function customerAliasToLearn(
+  heard: string | null | undefined,
+  chosen: string | null | undefined,
+  knownBefore: readonly string[],
+  aliases: Readonly<Record<string, string>>,
+): string | null {
+  const h = norm(heard ?? '');
+  const c = norm(chosen ?? '');
+  if (!h || !c || key(h) === key(c)) return null;
+  if (!knownBefore.some((k) => key(k) === key(c))) return null;
+  if (knownBefore.some((k) => key(k) === key(h))) return null;
+  if (Object.keys(aliases).some((a) => key(a) === key(h))) return null;
+  return h;
+}

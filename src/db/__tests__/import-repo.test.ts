@@ -40,3 +40,28 @@ describe('customer list import', () => {
     expect(await db.getAllAsync('SELECT * FROM customers')).toEqual([]);
   });
 });
+
+describe('customer aliases', () => {
+  it('learned alias → map, import candidates; never a customer name or a second time', async () => {
+    const { addCustomerAlias, customerAliasMap, customerCandidates: cands, importCustomers: imp } = await import('../repo');
+    const db = await migratedDb();
+    const w = testWriter();
+    await imp(db, w, [{ name: 'করিম', phone: null, note: null }, { name: 'মিনা', phone: null, note: null }]);
+    expect(await addCustomerAlias(db, w, ' কোরিম ', 'করিম')).toBe(true);
+    expect(await addCustomerAlias(db, w, 'কোরিম', 'করিম')).toBe(false);
+    expect(await addCustomerAlias(db, w, 'মিনা', 'করিম')).toBe(false);
+    expect(await addCustomerAlias(db, w, 'x', 'কেউ না')).toBe(false);
+    expect(await customerAliasMap(db)).toEqual({ কোরিম: 'করিম' });
+    expect((await cands(db)).find((c) => c.name === 'করিম')!.aliases).toEqual(['কোরিম']);
+  });
+
+  it('the pilot wipe clears aliases with the customers', async () => {
+    const { addCustomerAlias, wipePilotData } = await import('../repo');
+    const db = await migratedDb();
+    const w = testWriter();
+    await importCustomers(db, w, [{ name: 'করিম', phone: null, note: null }]);
+    await addCustomerAlias(db, w, 'কোরিম', 'করিম');
+    await wipePilotData(db);
+    expect(await db.getAllAsync('SELECT * FROM customer_aliases')).toEqual([]);
+  });
+});

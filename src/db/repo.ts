@@ -484,12 +484,48 @@ export async function saveEntry(db: Db, w: Writer, d: EntryDraft, voiceLogId: st
 
 // ── list import (ক্রেতার তালিকা আনুন) ────────────────────────────
 
-/** The shop's customers, for the import's duplicate check. */
+/** The shop's customers with their aliases, for the import's duplicate check. */
 export async function customerCandidates(db: Db): Promise<Candidate[]> {
-  const rows = await db.getAllAsync<{ name: string; phone: string | null }>(
-    "SELECT name, phone FROM customers WHERE archived = 0 AND party_type = 'customer' ORDER BY created_at",
+  const rows = await db.getAllAsync<{ name: string; phone: string | null; aliases: string | null }>(
+    `SELECT c.name, c.phone,
+       (SELECT GROUP_CONCAT(alias, char(31)) FROM customer_aliases a WHERE a.customer_id = c.id) AS aliases
+     FROM customers c WHERE c.archived = 0 AND c.party_type = 'customer' ORDER BY c.created_at`,
   );
-  return rows.map((r) => ({ name: r.name, aliases: [], phone: r.phone, label: 'আগে থেকে' }));
+  return rows.map((r) => ({ name: r.name, aliases: r.aliases ? r.aliases.split('\u001f') : [], phone: r.phone, label: 'আগে থেকে' }));
+}
+
+// ── customer aliases ───────────────────────────────────────────
+
+/** Heard spelling → customer name ("কোরিম" → করিম). */
+export async function customerAliasMap(db: Db): Promise<Record<string, string>> {
+  const rows = await db.getAllAsync<{ alias: string; name: string }>(
+    `SELECT a.alias, c.name FROM customer_aliases a JOIN customers c ON c.id = a.customer_id
+     WHERE c.archived = 0 AND c.party_type = 'customer' ORDER BY a.created_at`,
+  );
+  return Object.fromEntries(rows.map((r) => [r.alias, r.name]));
+}
+
+/**
+ * Remembers a heard name for an existing customer (customerAliasToLearn decides when).
+ * Skipped when the name already is a customer or an alias. Returns whether it was added.
+ */
+export async function addCustomerAlias(db: Db, w: Writer, alias: string, customerName: string): Promise<boolean> {
+  const a = alias.normalize('NFC').replace(/\s+/g, ' ').trim();
+  if (!a) return false;
+  const c = await db.getFirstAsync<{ id: string }>(
+    "SELECT id FROM customers WHERE name = ? AND party_type = 'customer' AND archived = 0 ORDER BY created_at LIMIT 1",
+    customerName.trim(),
+  );
+  if (!c) return false;
+  const taken = await db.getFirstAsync<{ n: number }>(
+    `SELECT (SELECT COUNT(*) FROM customers WHERE name = ? AND archived = 0)
+          + (SELECT COUNT(*) FROM customer_aliases WHERE alias = ?) AS n`,
+    a,
+    a,
+  );
+  if (taken && taken.n > 0) return false;
+  await insert(db, 'customer_aliases', { id: w.newId(), alias: a, customer_id: c.id, ...rowCols(w) });
+  return true;
 }
 
 /** Confirmed import rows → normal customer rows, all or nothing. Returns how many. */
@@ -508,13 +544,15 @@ export interface CustomerBalance {
   id: string;
   name: string;
   phone: string | null;
+  /** From the list import: honorifics, address ("ভাই · মসজিদের পাশে"). */
+  note: string | null;
   /** baki − joma; positive = the shop is owed (পাবো). */
   balance_poisha: number;
   last_at: number | null;
 }
 
 const BALANCE_SQL = `
-  SELECT c.id, c.name, c.phone,
+  SELECT c.id, c.name, c.phone, c.note,
     COALESCE(SUM(CASE l.kind WHEN 'baki' THEN l.amount_poisha ELSE -l.amount_poisha END), 0) AS balance_poisha,
     MAX(l.created_at) AS last_at
   FROM customers c LEFT JOIN v_ledger l ON l.party_id = c.id
@@ -679,7 +717,7 @@ export async function wipePilotData(db: Db): Promise<string[]> {
   await db.withTransactionAsync(async () => {
     for (const t of ENTRY_TABLES) await db.runAsync(`DROP TRIGGER ${t}_no_delete`);
     // children before parents (foreign keys)
-    for (const t of ['ledger', 'sales', 'purchases', 'expenses', 'owner_withdrawals', 'day_close', 'product_aliases', 'products', 'customers', 'voice_logs']) {
+    for (const t of ['ledger', 'sales', 'purchases', 'expenses', 'owner_withdrawals', 'day_close', 'product_aliases', 'products', 'customer_aliases', 'customers', 'voice_logs']) {
       await db.runAsync(`DELETE FROM ${t}`);
     }
     for (const t of ENTRY_TABLES) await db.runAsync(noDeleteTrigger(t));

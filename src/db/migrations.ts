@@ -213,15 +213,62 @@ UPDATE voice_logs SET intent = json_extract(parsed_json, '$.intent') WHERE parse
 `;
 
 /**
- * v7: customers.note — what the list import (ক্রেতার তালিকা আনুন) takes off a name
- * ("ভাই", "মসজিদের পাশে"), so the name stays clean for matching.
+ * v7: Gemini audio experiment (exp/gemini-audio) next to Android STT + rule parser.
+ * engine = the setting when the command was spoken (null = before v7, android);
+ * parsed_by = whose result the confirm card showed (parsed_json stays "what was shown");
+ * android_json / gemini_json = each engine's result; Gemini's transcript, error, latency
+ * and tokens. All nullable: unused on main (no Gemini there), kept so every branch has
+ * the same schema at the same version.
  */
 const V7 = `
+ALTER TABLE voice_logs ADD COLUMN engine TEXT CHECK (engine IS NULL OR engine IN ('android','gemini','both'));
+ALTER TABLE voice_logs ADD COLUMN parsed_by TEXT CHECK (parsed_by IS NULL OR parsed_by IN ('android','gemini'));
+ALTER TABLE voice_logs ADD COLUMN android_json TEXT;
+ALTER TABLE voice_logs ADD COLUMN gemini_json TEXT;
+ALTER TABLE voice_logs ADD COLUMN gemini_transcript TEXT;
+ALTER TABLE voice_logs ADD COLUMN gemini_error TEXT;
+ALTER TABLE voice_logs ADD COLUMN gemini_model TEXT;
+ALTER TABLE voice_logs ADD COLUMN gemini_ms INTEGER;
+ALTER TABLE voice_logs ADD COLUMN gemini_prompt_tokens INTEGER;
+ALTER TABLE voice_logs ADD COLUMN gemini_audio_tokens INTEGER;
+ALTER TABLE voice_logs ADD COLUMN gemini_output_tokens INTEGER;
+ALTER TABLE voice_logs ADD COLUMN gemini_thought_tokens INTEGER;
+`;
+
+/**
+ * v8: customers.note — what the list import (ক্রেতার তালিকা আনুন) takes off a name
+ * ("ভাই", "মসজিদের পাশে"), so the name stays clean for matching.
+ */
+const V8 = `
 ALTER TABLE customers ADD COLUMN note TEXT;
 `;
 
-/** Index i holds the SQL that takes the DB from user_version i to i + 1. */
-export const MIGRATIONS: readonly string[] = [V1, V2, V3, V4, V5, V6, V7];
+/**
+ * v9: customer_aliases — another spelling of a customer ("কোরিম" → করিম), learned when
+ * a heard name is corrected to, or picked as, an existing customer. Like product_aliases.
+ */
+const V9 = `
+CREATE TABLE customer_aliases (
+  alias TEXT NOT NULL,
+  customer_id TEXT NOT NULL REFERENCES customers(id),${ROW}
+);
+CREATE INDEX customer_aliases_alias ON customer_aliases(alias);
+`;
+
+/**
+ * Index i holds the SQL that takes the DB from user_version i to i + 1.
+ * Shared by every branch: a schema change lands on main first, then is merged into
+ * exp/gemini-audio (CLAUDE.md). Append only; never edit or renumber a shipped one.
+ */
+export const MIGRATIONS: readonly string[] = [V1, V2, V3, V4, V5, V6, V7, V8, V9];
+
+/**
+ * Nov 14 fork: an early main build shipped v7 = customers.note (no Gemini columns) while
+ * exp/gemini-audio had v7 = Gemini columns. Both now continue from v8 = V7 + V8 above.
+ * A DB at version 7 gets whichever of the two column sets it lacks, then counts as v8.
+ */
+const FORK_VERSION = 7;
+const FORK_FIX_TO = 8;
 
 export const SCHEMA_VERSION = MIGRATIONS.length;
 
@@ -244,7 +291,9 @@ export async function migrate(db: MigratableDb): Promise<number> {
   if (from > SCHEMA_VERSION) {
     throw new Error(`DB version ${from} is newer than this app (${SCHEMA_VERSION}); update the app`);
   }
-  for (let v = from; v < SCHEMA_VERSION; v++) {
+  let start = from;
+  if (from === FORK_VERSION) start = await repairForkedV7(db);
+  for (let v = start; v < SCHEMA_VERSION; v++) {
     await db.execAsync('BEGIN;');
     try {
       await db.execAsync(`${MIGRATIONS[v]}\nPRAGMA user_version = ${v + 1};`);
@@ -255,4 +304,24 @@ export async function migrate(db: MigratableDb): Promise<number> {
     }
   }
   return from;
+}
+
+const hasColumn = async (db: MigratableDb, table: string, column: string) =>
+  ((await db.getFirstAsync<{ n: number }>(`SELECT COUNT(*) AS n FROM pragma_table_info('${table}') WHERE name = '${column}'`))?.n ?? 0) > 0;
+
+/** See FORK_VERSION. Returns the version to continue from. */
+async function repairForkedV7(db: MigratableDb): Promise<number> {
+  const hasGemini = await hasColumn(db, 'voice_logs', 'engine');
+  const hasNote = await hasColumn(db, 'customers', 'note');
+  // plain v7 (Gemini columns, no note): the normal v8 step adds the note
+  if (hasGemini && !hasNote) return FORK_VERSION;
+  await db.execAsync('BEGIN;');
+  try {
+    await db.execAsync(`${hasGemini ? '' : V7}${hasNote ? '' : V8}\nPRAGMA user_version = ${FORK_FIX_TO};`);
+    await db.execAsync('COMMIT;');
+  } catch (e) {
+    await db.execAsync('ROLLBACK;');
+    throw e;
+  }
+  return FORK_FIX_TO;
 }

@@ -154,3 +154,23 @@ describe('import preview (generic)', () => {
     ]);
   });
 });
+
+describe('customer aliases (pure)', () => {
+  const { customerAliasToLearn, resolveCustomerAlias } = jest.requireActual('../customers') as typeof import('../customers');
+  const known = ['করিম', 'মিনা'];
+
+  it('resolve: a known alias → the customer', () => {
+    expect(resolveCustomerAlias('কোরিম', { কোরিম: 'করিম' })).toBe('করিম');
+    expect(resolveCustomerAlias('রহিম', { কোরিম: 'করিম' })).toBe('রহিম');
+    expect(resolveCustomerAlias(undefined, {})).toBeUndefined();
+  });
+
+  it('learn: heard name corrected to / picked as an existing customer', () => {
+    expect(customerAliasToLearn('কোরিম', 'করিম', known, {})).toBe('কোরিম');
+    expect(customerAliasToLearn('করিম', 'করিম', known, {})).toBeNull(); // nothing corrected
+    expect(customerAliasToLearn('কোরিম', 'জামাল', known, {})).toBeNull(); // new customer
+    expect(customerAliasToLearn('মিনা', 'করিম', known, {})).toBeNull(); // another person
+    expect(customerAliasToLearn('কোরিম', 'করিম', known, { কোরিম: 'করিম' })).toBeNull(); // already learned
+    expect(customerAliasToLearn(null, 'করিম', known, {})).toBeNull(); // nothing heard (number pad)
+  });
+});
