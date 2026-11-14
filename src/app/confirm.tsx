@@ -53,6 +53,7 @@ import {
   findProducts,
   getVoiceLog,
   knownNames,
+  ownerNames,
   pickProducts,
   productAliasMap,
   saveBasket,
@@ -218,6 +219,8 @@ export default function ConfirmScreen() {
           productAliases: await productAliasMap(db),
           deviceRole: device.role ?? undefined,
           deviceName: device.name,
+          // "রফিক ৫০০ নিল" = owner withdrawal when রফিক's phone is মালিক; "মালিক" is built in
+          ownerNames: await ownerNames(db),
         });
         if (parsed.customer) parsed = { ...parsed, customer: resolveCustomerAlias(parsed.customer, aliasesNow) };
         await setParsed(db, w, logId.current, parsed);

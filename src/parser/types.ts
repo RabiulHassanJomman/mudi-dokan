@@ -108,7 +108,7 @@ export interface ParseContext {
   knownCustomers?: string[];
   /** Spoken name → product (product_aliases): {"চাউল": "চাল", "লাক্স সাবান": "সাবান"}. */
   productAliases?: Readonly<Record<string, string>>;
-  /** Extra names that mean the owner/family (e.g. device names); মালিক/আব্বু/আম্মু are built in. */
+  /** Names that mean the owner: device_name of every phone with role মালিক. Only "মালিক" is built in. */
   ownerNames?: string[];
   /** This phone's role (Setup step ২). Decides what "৩০০ টাকা নিলাম" means; unset = staff. */
   deviceRole?: 'owner' | 'staff';

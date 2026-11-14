@@ -99,3 +99,17 @@ describe('picked entries in the pilot stats', () => {
     expect(s).toMatchObject({ total: 1, saved: 0, cancelled: 1, picked: 1, accuracy: 0 });
   });
 });
+
+describe('ownerNames (parser ctx.ownerNames)', () => {
+  it('device names of মালিক phones only; an existing device keeps its saved name and role', async () => {
+    const { ownerNames } = await import('../repo');
+    const db = await migratedDb();
+    const w = testWriter();
+    await saveSetup(db, w, { shopName: 'রহমান স্টোর', deviceName: 'রফিক', role: 'owner', openingCashPoisha: 0 }, '2026-11-14');
+    await db.runAsync(
+      "INSERT INTO devices (id, device_name, role, device_id, created_at, updated_at) VALUES ('d2', 'কর্মচারী ১', 'staff', 'd2', 1, 1)",
+    );
+    expect(await ownerNames(db)).toEqual(['রফিক']);
+    expect((await getSetup(db, w.deviceId)).deviceName).toBe('রফিক');
+  });
+});

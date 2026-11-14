@@ -117,6 +117,15 @@ export async function saveSetup(db: Db, w: Writer, s: SetupDraft, businessDate: 
   });
 }
 
+/**
+ * Names that mean the owner for the parser (ctx.ownerNames): device_name of every phone
+ * with role মালিক. Before sync (step 7) that is only this phone's own row.
+ */
+export async function ownerNames(db: Db): Promise<string[]> {
+  const rows = await db.getAllAsync<{ n: string }>("SELECT DISTINCT device_name AS n FROM devices WHERE role = 'owner'");
+  return rows.map((r) => r.n.trim()).filter(Boolean);
+}
+
 // ── products & customers ───────────────────────────────────────
 
 /** ছবি দেখে বেছে নিন: active products, most sold first, with their aliases. */

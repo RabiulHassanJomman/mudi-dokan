@@ -52,7 +52,7 @@ const staffPhone: Case[] = [
 const unchanged: Case[] = [
   // a named owner is still the owner, even when staff says it
   { text: 'মালিক ৫০০ নিল', ctx: staff, expected: { intent: 'owner_withdrawal', person: 'মালিক', amount: 500 } },
-  { text: 'আব্বু ১০০০ নিল', ctx: staff, expected: { intent: 'owner_withdrawal', person: 'আব্বু', amount: 1000 } },
+  { text: 'আব্বু ১০০০ নিল', ctx: { ...staff, ownerNames: ['আব্বু'] }, expected: { intent: 'owner_withdrawal', person: 'আব্বু', amount: 1000 } },
   // ordinary commands don't pick up the device name
   { text: 'বিদ্যুৎ বিল ৫০০ টাকা খরচ', ctx: staff, expected: { intent: 'expense', item: 'বিদ্যুৎ বিল', amount: 500 } },
   { text: 'চাল ২ কেজি', ctx: owner, expected: { intent: 'sale', product: 'চাল', quantity: { value: 2, unit: 'kg' } } },

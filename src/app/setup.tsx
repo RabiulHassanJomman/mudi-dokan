@@ -11,10 +11,12 @@ import { Txt } from '../components/Txt';
 import { getSetup, saveSetup } from '../db/repo';
 import { getDevice, markSetupDone, setDevice, writer } from '../device';
 import {
-  DEVICE_PRESETS,
+  DEVICE_NAME_MAX,
   ROLE_BN,
   businessDate,
-  defaultRole,
+  cleanDeviceName,
+  nameFromSpeech,
+  newSetupDraft,
   setupProblems,
   setupReadback,
   type Role,
@@ -31,7 +33,7 @@ const PLACEHOLDER_DEVICE = 'এই ফোন';
 
 const PROBLEM_TEXT: Record<SetupProblem, string> = {
   shop_name: 'দোকানের নাম লিখুন।',
-  device_name: 'এই ফোন কার, বেছে নিন।',
+  device_name: 'আপনার নাম লিখুন বা বলুন।',
   role: 'মালিক না কর্মচারী, বেছে নিন।',
   opening_cash: 'ক্যাশে কত টাকা, বলুন বা চাপুন।',
 };
@@ -46,8 +48,10 @@ export default function SetupScreen() {
   const editing = useLocalSearchParams<{ edit?: string }>().edit === '1';
   const voice = useVoiceOnce();
 
-  const [draft, setDraft] = useState<SetupDraft>({ shopName: '', deviceName: '', role: null, openingCashPoisha: null });
-  const [customName, setCustomName] = useState(false);
+  const [draft, setDraft] = useState<SetupDraft>(newSetupDraft());
+  /** Which 🎤 is listening: the name or the cash. */
+  const [listeningFor, setListeningFor] = useState<'name' | 'cash' | null>(null);
+  const [heardName, setHeardName] = useState<string | null>(null);
   const [padOpen, setPadOpen] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -57,12 +61,12 @@ export default function SetupScreen() {
   useEffect(() => {
     void (async () => {
       const s = await getSetup(db, getDevice().id);
+      // an existing phone keeps its saved name and role; a new one starts as কর্মচারী
       const name = s.deviceName && s.deviceName !== PLACEHOLDER_DEVICE ? s.deviceName : '';
-      setCustomName(!!name && !(DEVICE_PRESETS as readonly string[]).includes(name));
       setDraft({
         shopName: s.shopName ?? '',
         deviceName: name,
-        role: name ? s.role : null,
+        role: s.role ?? 'staff',
         openingCashPoisha: s.openingCashPoisha,
       });
     })();
@@ -76,17 +80,37 @@ export default function SetupScreen() {
     setShown([]);
   };
 
-  const pickName = (name: string) => {
-    setCustomName(false);
-    set({ deviceName: name, role: defaultRole(name) });
+  /** 🎤 next to "আপনার নাম": "আমার নাম রফিক" → রফিক. */
+  const listenName = async () => {
+    if (voice.listening) {
+      setListeningFor(null);
+      return voice.stop();
+    }
+    stopSpeaking();
+    setHeardName(null);
+    setListeningFor('name');
+    const alts = await voice.listen();
+    setListeningFor(null);
+    const name = alts?.length ? nameFromSpeech(alts[0]!) : '';
+    if (!name) {
+      void speak('শুনতে পাইনি। আবার বলুন, না হলে লিখে দিন।');
+      return;
+    }
+    setHeardName(alts![0]!);
+    set({ deviceName: name });
     void speak(name);
   };
 
   const listenCash = async () => {
-    if (voice.listening) return voice.stop();
+    if (voice.listening) {
+      setListeningFor(null);
+      return voice.stop();
+    }
     stopSpeaking();
     setHeard(null);
+    setListeningFor('cash');
     const alts = await voice.listen();
+    setListeningFor(null);
     if (!alts?.length) {
       void speak('শুনতে পাইনি। আবার বলুন, না হলে নম্বর চাপুন।');
       return;
@@ -106,7 +130,7 @@ export default function SetupScreen() {
     const parts = [
       editing ? 'দোকানের তথ্য।' : 'দোকান চালু করুন।',
       `এক, দোকানের নাম। ${draft.shopName.trim() || 'লেখা হয়নি।'}`,
-      `দুই, এই ফোন কার? ${draft.deviceName.trim() ? `${draft.deviceName}, ${draft.role ? ROLE_BN[draft.role] : 'মালিক না কর্মচারী বেছে নিন'}।` : 'আব্বু, আম্মু, না কর্মচারী?'}`,
+      `দুই, আপনার নাম। ${draft.deviceName.trim() ? `${draft.deviceName.trim()}, ${draft.role ? ROLE_BN[draft.role] : 'মালিক না কর্মচারী বেছে নিন'}।` : 'লিখুন, না হলে মাইক চেপে বলুন। তারপর মালিক না কর্মচারী।'}`,
       `তিন, এখন ক্যাশে কত টাকা? ${draft.openingCashPoisha === null ? 'মাইক চেপে বলুন।' : `${formatNumber(draft.openingCashPoisha / 100)} টাকা।`}`,
       editing ? 'শেষে রাখুন চাপুন।' : 'শেষে শুরু করুন চাপুন।',
     ];
@@ -175,37 +199,37 @@ export default function SetupScreen() {
           />
         </Section>
 
-        <Section n={2} title="এই ফোন কার?" bad={bad('device_name') || bad('role')}>
-          <View accessibilityRole="radiogroup" accessibilityLabel="এই ফোন কার" style={styles.grid}>
-            {DEVICE_PRESETS.map((name) => (
-              <Chip key={name} label={name} on={!customName && draft.deviceName === name} color={colors.stock} tint={colors.stockTint} onPress={() => pickName(name)} />
-            ))}
-            {customName ? (
-              <TextInput
-                autoFocus={!draft.deviceName}
-                value={draft.deviceName}
-                onChangeText={(t) => set({ deviceName: t })}
-                accessibilityLabel="নতুন নাম"
-                placeholder="নাম লিখুন"
-                placeholderTextColor={colors.muted}
-                style={[styles.chip, styles.chipInput]}
-              />
-            ) : (
-              <Pressable
-                accessibilityRole="button"
-                onPress={() => {
-                  setCustomName(true);
-                  set({ deviceName: '', role: null });
-                }}
-                style={[styles.chip, styles.chipNew]}
-              >
-                <Icon name="plus" size={22} color={colors.ink2} strokeWidth={2.4} />
-                <Txt size={fontSize.bodyLg} weight="semibold" color={colors.ink2}>
-                  নতুন নাম
-                </Txt>
-              </Pressable>
-            )}
+        <Section n={2} title="আপনার নাম" bad={bad('device_name') || bad('role')}>
+          <View style={styles.cashRow}>
+            <TextInput
+              value={draft.deviceName}
+              onChangeText={(t) => set({ deviceName: t })}
+              onEndEditing={() => set({ deviceName: cleanDeviceName(draft.deviceName) })}
+              maxLength={DEVICE_NAME_MAX}
+              accessibilityLabel="আপনার নাম"
+              placeholder="যেমন: রফিক"
+              placeholderTextColor={colors.muted}
+              returnKeyType="done"
+              style={[styles.input, styles.flex]}
+            />
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={listeningFor === 'name' ? 'থামুন' : 'নাম বলে দিন'}
+              onPress={() => void listenName()}
+              style={[styles.round, { backgroundColor: listeningFor === 'name' ? colors.baki : colors.sale }]}
+            >
+              <Icon name="mic" size={32} color={colors.onColor} />
+            </Pressable>
           </View>
+          {listeningFor === 'name' ? (
+            <Txt size={fontSize.captionLg} weight="semibold" color={colors.baki}>
+              শুনছি… যেমন “আমার নাম রফিক”
+            </Txt>
+          ) : heardName ? (
+            <Txt size={fontSize.captionLg} weight="medium" color={colors.muted}>
+              শুনেছি: “{heardName}”
+            </Txt>
+          ) : null}
           <Txt size={fontSize.captionLg} weight="semibold" color={colors.muted}>
             কাজ
           </Txt>
@@ -240,9 +264,9 @@ export default function SetupScreen() {
             </Pressable>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={voice.listening ? 'থামুন' : 'বলে দিন'}
+              accessibilityLabel={listeningFor === 'cash' ? 'থামুন' : 'বলে দিন'}
               onPress={() => void listenCash()}
-              style={[styles.round, { backgroundColor: voice.listening ? colors.baki : colors.sale }]}
+              style={[styles.round, { backgroundColor: listeningFor === 'cash' ? colors.baki : colors.sale }]}
             >
               <Icon name="mic" size={32} color={colors.onColor} />
             </Pressable>
@@ -250,7 +274,7 @@ export default function SetupScreen() {
               <Icon name="keypad" size={28} color={colors.ink} />
             </Pressable>
           </View>
-          {voice.listening ? (
+          {listeningFor === 'cash' ? (
             <Txt size={fontSize.captionLg} weight="semibold" color={colors.baki}>
               শুনছি… যেমন “পাঁচ হাজার টাকা”
             </Txt>
@@ -388,7 +412,6 @@ const styles = StyleSheet.create({
     fontSize: fontSize.label,
     color: colors.ink,
   },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
   row: { flexDirection: 'row', gap: spacing.xs },
   chip: {
     flexGrow: 1,
@@ -402,16 +425,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing.xxs,
-  },
-  chipNew: { borderStyle: 'dashed', borderColor: colors.border },
-  chipInput: {
-    borderColor: colors.stock,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 0,
-    fontFamily: fonts.bold,
-    fontSize: fontSize.bodyLg,
-    color: colors.stock,
-    textAlign: 'center',
   },
   cashRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   round: { width: size.stepper, height: size.stepper, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' },

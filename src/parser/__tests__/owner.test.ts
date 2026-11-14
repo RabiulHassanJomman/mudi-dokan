@@ -2,19 +2,25 @@
  * Owner withdrawal (মালিক/পরিবার ক্যাশ থেকে নিল) — reduces expected cash,
  * NOT an expense, excluded from profit. See docs/Plan.md feature 10.
  */
+import { parseCommand } from '../parse';
 import { check, type Case } from './helpers';
+
+/** Owner names come from the phones whose role is মালিক (their device_name), plus "মালিক". */
+const family = { ownerNames: ['আব্বু', 'আম্মু', 'আব্বা'] };
 
 const withdrawals: Case[] = [
   { text: 'মালিক ৫০০ নিল', expected: { intent: 'owner_withdrawal', person: 'মালিক', amount: 500 } },
   {
     text: 'আব্বু ১০০০ নিল বাসার জন্য',
+    ctx: family,
     expected: { intent: 'owner_withdrawal', person: 'আব্বু', amount: 1000, note: 'বাসার জন্য' },
   },
   { text: 'মালিক ২০০ টাকা নিল', expected: { intent: 'owner_withdrawal', person: 'মালিক', amount: 200 } },
   { text: 'মালিক নিল দুই হাজার', expected: { intent: 'owner_withdrawal', person: 'মালিক', amount: 2000 } },
-  { text: 'আম্মু পাঁচশ টাকা নিয়েছে', expected: { intent: 'owner_withdrawal', person: 'আম্মু', amount: 500 } },
+  { text: 'আম্মু পাঁচশ টাকা নিয়েছে', ctx: family, expected: { intent: 'owner_withdrawal', person: 'আম্মু', amount: 500 } },
   {
     text: 'আব্বা দেড় হাজার নিল ওষুধের জন্য',
+    ctx: family,
     expected: { intent: 'owner_withdrawal', person: 'আব্বা', amount: 1500, note: 'ওষুধের জন্য' },
   },
   { text: 'মালিক ৩০০', expected: { intent: 'owner_withdrawal', person: 'মালিক', amount: 300 } },
@@ -41,6 +47,7 @@ const notWithdrawal: Case[] = [
   // owner name with a stronger keyword keeps that intent
   {
     text: 'আব্বু চাল ২ কেজি বাকিতে নিল',
+    ctx: family,
     expected: { intent: 'sale', credit: true, customer: 'আব্বু', product: 'চাল', quantity: { value: 2, unit: 'kg' } },
   },
   { text: 'মালিকের দোকান ভাড়া ৫০০০ খরচ', expected: { intent: 'expense', item: 'মালিক দোকান ভাড়া', amount: 5000 } },
@@ -60,4 +67,18 @@ describe.each([
 
 describe('owner cash in', () => {
   it.todo('আব্বু ক্যাশে ৫০০০ দিল / রাখল — owner deposit (increases cash, not a sale)');
+});
+
+describe('family words are not built in any more', () => {
+  it.each(['আব্বু ১০০০ নিল বাসার জন্য', 'আম্মু পাঁচশ টাকা নিয়েছে', 'আব্বা ৫০০ নিল'])(
+    '"%s" is no owner withdrawal unless an owner phone has that name',
+    (text) => {
+      expect(parseCommand(text).intent).not.toBe('owner_withdrawal');
+      expect(parseCommand(text, { ownerNames: ['আব্বু', 'আম্মু', 'আব্বা'] }).intent).toBe('owner_withdrawal');
+    },
+  );
+
+  it('"মালিক" always is', () => {
+    expect(parseCommand('মালিক ৫০০ নিল', { ownerNames: [] })).toMatchObject({ intent: 'owner_withdrawal', person: 'মালিক', amount: 500 });
+  });
 });

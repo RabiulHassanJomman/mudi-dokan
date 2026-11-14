@@ -43,6 +43,8 @@ export interface Seed {
   customers: string[];
   /** Spoken name → product, like the app's product_aliases. */
   aliases: Record<string, string>;
+  /** device_name of the shop's মালিক phones (the app's ctx.ownerNames); "মালিক" is built in. */
+  owners?: string[];
 }
 
 /** Same text + tab = same case (whitespace and Unicode form ignored). */

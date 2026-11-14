@@ -125,7 +125,7 @@ const SCHEMA = {
 };
 
 const SYSTEM = `You parse one Bangla voice command from a grocery shop (Bangladesh) into JSON.
-intent: sale (selling goods), purchase (shop buys stock: কিনলাম/কেনা), baki (customer owes money, no goods), joma (customer pays back: জমা/দিল/শোধ), expense (shop cost: বিল/ভাড়া/বেতন/নাস্তা/খরচ), owner_withdrawal (owner or family takes cash: মালিক/আব্বু/আম্মু নিল), stock_query, profit_query, unknown.
+intent: sale (selling goods), purchase (shop buys stock: কিনলাম/কেনা), baki (customer owes money, no goods), joma (customer pays back: জমা/দিল/শোধ), expense (shop cost: বিল/ভাড়া/বেতন/নাস্তা/খরচ), owner_withdrawal (the owner takes cash: "মালিক" or a name in "owners" + নিল), stock_query, profit_query, unknown.
 Rules:
 - items only for sale; one entry per line in spoken order; the same product twice stays two lines.
 - product: use ONLY a name from the given product list (map spelling variants and brand words to it, e.g. চাউল → চাল). If none fits, use the spoken word.
@@ -157,7 +157,7 @@ const EXAMPLES: [string, unknown][] = [
   ['রশিদের নামে আটশো টাকা বাকি লেখেন', { intent: 'baki', customer: 'রশিদ', credit: false, amount: 800, item: null, person: null, note: null, items: [] }],
   ['মিজান সাতশো টাকা জমা দিল', { intent: 'joma', customer: 'মিজান', credit: false, amount: 700, item: null, person: null, note: null, items: [] }],
   ['গ্যাস বিল আটশো টাকা খরচ', { intent: 'expense', customer: null, credit: false, amount: 800, item: 'গ্যাস বিল', person: null, note: null, items: [] }],
-  ['আব্বু তিনশো টাকা নিল ওষুধের জন্য', { intent: 'owner_withdrawal', customer: null, credit: false, amount: 300, item: null, person: 'আব্বু', note: 'ওষুধের জন্য', items: [] }],
+  ['মালিক তিনশো টাকা নিল ওষুধের জন্য', { intent: 'owner_withdrawal', customer: null, credit: false, amount: 300, item: null, person: 'মালিক', note: 'ওষুধের জন্য', items: [] }],
 ];
 
 function userText(f: Fixture): string {
@@ -165,7 +165,7 @@ function userText(f: Fixture): string {
   const products = topProducts(f.text)
     .map((p) => `${p.name} (${p.unit}${also(p.name).length ? `; also said ${also(p.name).join('/')}` : ''})`)
     .join(', ');
-  return `transcript: ${f.text}\ntab: ${f.tab}\nproducts: ${products}\ncustomers: ${seed.customers.slice(0, 10).join(', ')}`;
+  return `transcript: ${f.text}\ntab: ${f.tab}\nproducts: ${products}\ncustomers: ${seed.customers.slice(0, 10).join(', ')}\nowners: ${(seed.owners ?? []).join(', ')}`;
 }
 
 interface GeminiItem { product: string | null; quantity: number | null; unit: string; unitPrice: number | null; total: number | null }
@@ -342,6 +342,7 @@ async function main() {
     knownProducts: seed.products.map((p) => p.name),
     knownCustomers: seed.customers,
     productAliases: seed.aliases,
+    ownerNames: seed.owners ?? [],
   });
   console.log(`${fixtures.length} cases · rule parser${ruleOnly ? '' : ` vs ${model}`}\n`);
   const rows: Row[] = [];
