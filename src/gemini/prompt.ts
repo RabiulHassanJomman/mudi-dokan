@@ -116,6 +116,8 @@ export interface PromptContext {
   products: { name: string; unit: Unit; aliases: string[] }[];
   /** ≤ 15. */
   customers: string[];
+  /** Customer name → learned spellings (customer_aliases). */
+  customerAliases?: Record<string, string[]>;
   device?: { name: string; role: 'owner' | 'staff' | null };
 }
 
@@ -123,7 +125,10 @@ export function contextText(c: PromptContext): string {
   const products = c.products
     .map((p) => `${p.name} (${p.unit}${p.aliases.length ? `; also said ${p.aliases.join('/')}` : ''})`)
     .join(', ');
-  const lines = [`tab: ${c.tab}`, `products: ${products}`, `customers: ${c.customers.join(', ')}`];
+  const customers = c.customers
+    .map((n) => (c.customerAliases?.[n]?.length ? `${n} (also said ${c.customerAliases[n]!.join('/')})` : n))
+    .join(', ');
+  const lines = [`tab: ${c.tab}`, `products: ${products}`, `customers: ${customers}`];
   if (c.device) lines.push(`this phone: ${c.device.name}, role ${c.device.role ?? 'unset'}`);
   return lines.join('\n');
 }

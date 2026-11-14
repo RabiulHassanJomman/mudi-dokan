@@ -117,3 +117,12 @@ describe('convertGemini: other intents', () => {
     });
   });
 });
+
+describe('convertGemini: customer aliases', () => {
+  it('a learned spelling of a customer comes back as the customer', () => {
+    const withAliases = { ...names, customerAliases: { কোরিম: 'করিম' } };
+    expect(convertGemini({ ...NULLS, intent: 'baki', customer: 'কোরিম', amount: 300 }, withAliases).parsed.customer).toBe('করিম');
+    expect(convertGemini({ ...NULLS, intent: 'sale', customer: 'কোরিম', credit: true, items: [line('চাল', 1, 'kg', null, 60)] }, withAliases).parsed.customer).toBe('করিম');
+    expect(convertGemini({ ...NULLS, intent: 'baki', customer: 'রহিম', amount: 300 }, withAliases).parsed.customer).toBe('রহিম');
+  });
+});

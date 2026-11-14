@@ -20,6 +20,8 @@ export interface ConvertContext {
   knownProducts: readonly string[];
   /** Spoken name → product name. */
   productAliases: Readonly<Record<string, string>>;
+  /** Learned spelling → customer name (customer_aliases). */
+  customerAliases?: Readonly<Record<string, string>>;
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -79,7 +81,9 @@ export function convertGemini(json: unknown, ctx: ConvertContext): Converted {
 
   const i = intent as Intent;
   const base = { raw: transcript, normalized: tokenize(transcript).join(' ') };
-  const customer = str(json, 'customer');
+  const custAliases = new Map(Object.entries(ctx.customerAliases ?? {}).map(([k, v]) => [nfc(k), nfc(v)]));
+  const spokenCustomer = str(json, 'customer');
+  const customer = spokenCustomer ? custAliases.get(spokenCustomer) ?? spokenCustomer : undefined;
   const amount = num(json, 'amount');
   const out: Partial<ParsedCommand> = { intent: i };
   const missing: Field[] = [];

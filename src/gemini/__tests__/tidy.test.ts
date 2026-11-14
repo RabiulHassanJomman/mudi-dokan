@@ -1,6 +1,6 @@
 import { customerSpec } from '../../domain/customerImport';
 import { classifyRows, editRow, type Candidate } from '../../domain/importer';
-import { applyTidyHints, buildTidyRequest, convertTidy, tidyCustomers, TIDY_BATCH } from '../tidy';
+import { applyTidyHints, buildTidyRequest, convertTidy, tidyCustomers, tidyRows, TIDY_BATCH } from '../tidy';
 import { fakeTime, mockFetch } from './mock';
 
 const existing: Candidate[] = [
@@ -10,14 +10,17 @@ const existing: Candidate[] = [
 
 describe('tidy request', () => {
   it('sends the raw lines numbered and the shop’s customer names, asks for JSON with the tidy schema', () => {
-    const req = buildTidyRequest('gemini-3.5-flash-lite', ['Rahim bhai 01811-222333', 'korim'], ['করিম', 'মিনা আক্তার']) as {
+    const req = buildTidyRequest('gemini-3.5-flash-lite', ['Rahim bhai 01811-222333', 'korim'], [
+      { name: 'করিম', aliases: ['কোরিম'] },
+      { name: 'মিনা আক্তার', aliases: [] },
+    ]) as {
       systemInstruction: { parts: { text: string }[] };
       contents: { parts: { text: string }[] }[];
       generationConfig: { temperature: number; responseMimeType: string; responseJsonSchema: { type: string; items: { required: string[] } } };
     };
     const text = req.contents.at(-1)!.parts[0]!.text;
     expect(text).toContain('1: Rahim bhai 01811-222333\n2: korim');
-    expect(text).toContain('existing customers: করিম, মিনা আক্তার');
+    expect(text).toContain('existing customers: করিম (also: কোরিম), মিনা আক্তার');
     expect(req.generationConfig).toMatchObject({ temperature: 0, responseMimeType: 'application/json' });
     expect(req.generationConfig.responseJsonSchema.type).toBe('array');
     expect(req.generationConfig.responseJsonSchema.items.required).toEqual(['name_bn', 'phone', 'note', 'maybe_same_as']);
@@ -75,7 +78,7 @@ describe('tidyCustomers', () => {
       Array.from({ length: n }, (_, i) => ({ name_bn: `নাম${from + i}`, phone: null, note: null, maybe_same_as: null }));
     const { fetch, calls } = mockFetch([{ answer: answer(TIDY_BATCH, 0) }, { answer: answer(3, TIDY_BATCH) }]);
     const t = fakeTime();
-    const r = await tidyCustomers({ apiKey: 'k', fetch, now: t.now, sleep: t.sleep }, lines, ['করিম']);
+    const r = await tidyCustomers({ apiKey: 'k', fetch, now: t.now, sleep: t.sleep }, lines, [{ name: 'করিম', aliases: [] }]);
     expect(calls).toHaveLength(2);
     expect(r.ok).toBe(true);
     expect(r.rows.map((x) => x.value.name)).toEqual([...answer(TIDY_BATCH, 0), ...answer(3, TIDY_BATCH)].map((a) => a.name_bn));
@@ -95,5 +98,15 @@ describe('tidyCustomers', () => {
     const r = await tidyCustomers({ apiKey: 'k', fetch }, ['Rahim', 'Karim'], []);
     expect(r).toMatchObject({ ok: false });
     expect(!r.ok && r.error).toMatch(/too many/);
+  });
+});
+
+describe('hints through aliases', () => {
+  it('maybe_same_as naming an alias points at its customer', () => {
+    const shop: Candidate[] = [{ name: 'করিম', aliases: ['কোরিম'], phone: null, label: 'আগে থেকে' }];
+    // a nickname our own check can't link; Gemini names the alias
+    const tidy = convertTidy([{ name_bn: 'বাবলু', phone: null, note: null, maybe_same_as: 'কোরিম' }]);
+    const rows = applyTidyHints(classifyRows(tidyRows(tidy), shop, customerSpec), tidy, shop);
+    expect(rows[0]).toMatchObject({ status: 'maybe', match: { how: 'ai', candidate: { name: 'করিম' } }, include: false });
   });
 });

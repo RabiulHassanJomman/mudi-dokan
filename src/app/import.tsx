@@ -131,7 +131,8 @@ export default function ImportScreen() {
     if (tidying || !rawLines.length) return;
     setTidying(true);
     void speak('Gemini দিয়ে গুছাচ্ছি।');
-    const r = await tidyCustomerLines(rawLines, existing.map((c) => c.name));
+    // candidates carry the learned spellings (customer_aliases)
+    const r = await tidyCustomerLines(rawLines, existing);
     setTidying(false);
     if (!r.ok) {
       setWarning(`Gemini পারল না (${r.error.slice(0, 80)}) — আগের তালিকা রইল।`);

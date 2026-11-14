@@ -21,7 +21,7 @@ Return a JSON array with one object per customer, in input order:
 - name_bn: the person's name in Bangla script. Transliterate English/Latin names (Rahim → রহিম, Karim → করিম, Md./Mohammad → মোহাম্মদ, Akter → আক্তার). Fix obvious spelling mistakes. Remove honorifics and relations (ভাই, আপা, চাচা, bhai, apa, sir, mr …) from the name and put them in note.
 - phone: the Bangladeshi mobile number from that line as 11 digits 01XXXXXXXXX (drop +88, spaces, dashes), or null. NEVER invent or complete a number; if the digits are incomplete, put them in note and phone null.
 - note: honorifics, address or other words from the line, or null.
-- maybe_same_as: if this is probably the same person as a name in "existing customers" (same person spelled differently, English vs Bangla), that existing name exactly as given; else null.
+- maybe_same_as: if this is probably the same person as a name in "existing customers" (same person spelled differently, English vs Bangla, or one of its "also" spellings), that existing name exactly as given (the main name, not the "also" one); else null.
 Skip blank or meaningless lines. Do not add people who are not in the input. Do not merge different lines into one person.`;
 
 const nullable = { type: ['string', 'null'] };
@@ -34,9 +34,16 @@ const SCHEMA = {
   },
 };
 
-export function buildTidyRequest(model: string, lines: readonly string[], existingNames: readonly string[]) {
+/** A shop customer as Gemini sees it: the name and its learned spellings. */
+export interface TidyExisting {
+  name: string;
+  aliases: readonly string[];
+}
+
+export function buildTidyRequest(model: string, lines: readonly string[], existing: readonly TidyExisting[]) {
   const thinkingConfig = /^gemini-2/.test(model) ? { thinkingBudget: 0 } : { thinkingLevel: 'minimal' };
-  const text = `lines:\n${lines.map((l, i) => `${i + 1}: ${l}`).join('\n')}\n\nexisting customers: ${existingNames.join(', ') || '(none)'}`;
+  const names = existing.map((c) => (c.aliases.length ? `${c.name} (also: ${c.aliases.join('/')})` : c.name)).join(', ');
+  const text = `lines:\n${lines.map((l, i) => `${i + 1}: ${l}`).join('\n')}\n\nexisting customers: ${names || '(none)'}`;
   return {
     systemInstruction: { parts: [{ text: SYSTEM }] },
     contents: [{ role: 'user', parts: [{ text }] }],
@@ -105,7 +112,7 @@ export function applyTidyHints(
   return rows.map((r) => {
     const hint = tidy[r.line - 1]?.hint;
     if (r.status !== 'new' || !hint) return r;
-    const c = existing.find((x) => nameKey(x.name) === nameKey(hint));
+    const c = existing.find((x) => [x.name, ...x.aliases].some((n) => nameKey(n) === nameKey(hint)));
     if (!c) return r;
     return { ...r, status: 'maybe', match: { how: 'ai', candidate: c }, include: r.chosen ? r.include : false };
   });
@@ -121,13 +128,13 @@ const addUsage = (a: Usage, b: Usage | null): Usage =>
     : a;
 
 /** All lines, in batches. Any failed batch fails the whole tidy-up (the preview keeps its rows). */
-export async function tidyCustomers(deps: ClientDeps, lines: readonly string[], existingNames: readonly string[]): Promise<TidyResult> {
+export async function tidyCustomers(deps: ClientDeps, lines: readonly string[], existing: readonly TidyExisting[]): Promise<TidyResult> {
   let usage: Usage = { promptTokens: 0, audioTokens: 0, outputTokens: 0, thoughtTokens: 0 };
   let ms = 0;
   const out: TidyLine[] = [];
   for (let at = 0; at < lines.length; at += TIDY_BATCH) {
     const batch = lines.slice(at, at + TIDY_BATCH);
-    const call = await generateBody({ timeoutMs: TIDY_TIMEOUT_MS, ...deps }, (model) => buildTidyRequest(model, batch, existingNames));
+    const call = await generateBody({ timeoutMs: TIDY_TIMEOUT_MS, ...deps }, (model) => buildTidyRequest(model, batch, existing));
     usage = addUsage(usage, call.usage);
     ms += call.ms;
     if (!call.ok) return { ok: false, rows: [], error: `${call.kind}: ${call.error}`, ms, usage };

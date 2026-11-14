@@ -5,14 +5,14 @@
  */
 import { File } from 'expo-file-system';
 
-import { customerBalances, knownNames, pickProducts, productAliasMap, setGeminiResult, type Db } from '../db/repo';
+import { customerAliasMap, customerBalances, knownNames, pickProducts, productAliasMap, setGeminiResult, type Db } from '../db/repo';
 import { getDevice, writer } from '../device';
 import { audioInput, geminiParse, type GeminiResult } from '../gemini';
 import { audioMime, fitAudio } from '../gemini/audio';
 import type { ClientDeps } from '../gemini/client';
 import { promptContext } from '../gemini/context';
 import type { Tab } from '../gemini/prompt';
-import { tidyCustomers, type TidyResult } from '../gemini/tidy';
+import { tidyCustomers, type TidyExisting, type TidyResult } from '../gemini/tidy';
 import { geminiKey, getGeminiModel } from './engine';
 
 /** The shopkeeper is waiting (gemini mode): stop retrying past this. */
@@ -35,17 +35,26 @@ export async function runGemini(
     const mime = audioMime(clipUri);
     if (!mime) throw new Error(`clip type not supported: ${clipUri.split('/').pop()}`);
     const audio = fitAudio(await new File(clipUri).bytes(), mime);
-    const [catalog, owed, names, aliases] = await Promise.all([pickProducts(db), customerBalances(db), knownNames(db), productAliasMap(db)]);
+    const [catalog, owed, names, aliases, custAliases] = await Promise.all([
+      pickProducts(db),
+      customerBalances(db),
+      knownNames(db),
+      productAliasMap(db),
+      customerAliasMap(db),
+    ]);
+    const aliasesByCustomer: Record<string, string[]> = {};
+    for (const [alias, name] of Object.entries(custAliases)) (aliasesByCustomer[name] ??= []).push(alias);
     const device = getDevice();
     const prompt = promptContext({
       tab: TABS.find((t) => t === opts.tab) ?? 'sale',
       catalog,
       customers: [...new Set([...owed.map((c) => c.name), ...names.customers])],
+      customerAliases: aliasesByCustomer,
       hint: opts.hint,
       device: { name: device.name, role: device.role },
     });
     const deps: ClientDeps = { apiKey, model, fetch: fetch as unknown as ClientDeps['fetch'], deadlineMs: opts.deadlineMs };
-    result = await geminiParse(deps, audioInput(audio), prompt, { knownProducts: names.products, productAliases: aliases });
+    result = await geminiParse(deps, audioInput(audio), prompt, { knownProducts: names.products, productAliases: aliases, customerAliases: custAliases });
   } catch (e) {
     result = { ok: false, model, parsed: null, transcript: null, error: `error: ${e instanceof Error ? e.message : String(e)}`, ms: Date.now() - t0, usage: null };
   }
@@ -58,9 +67,9 @@ export async function runGemini(
 }
 
 /** "Gemini দিয়ে গুছিয়ে নিন": the import's raw lines + the shop's customer names → tidy rows. */
-export async function tidyCustomerLines(lines: readonly string[], existingNames: readonly string[]): Promise<TidyResult> {
+export async function tidyCustomerLines(lines: readonly string[], existing: readonly TidyExisting[]): Promise<TidyResult> {
   const apiKey = geminiKey();
   const zero = { promptTokens: 0, audioTokens: 0, outputTokens: 0, thoughtTokens: 0 };
   if (!apiKey) return { ok: false, rows: [], error: 'no EXPO_PUBLIC_GEMINI_KEY in this build', ms: 0, usage: zero };
-  return tidyCustomers({ apiKey, model: getGeminiModel(), fetch: fetch as unknown as ClientDeps['fetch'] }, lines, existingNames);
+  return tidyCustomers({ apiKey, model: getGeminiModel(), fetch: fetch as unknown as ClientDeps['fetch'] }, lines, existing);
 }

@@ -97,3 +97,11 @@ describe('prompt context', () => {
     expect(c.device).toEqual({ name: 'আব্বু', role: null });
   });
 });
+
+describe('prompt context: customer aliases', () => {
+  it('customers go with their learned spellings', async () => {
+    const { contextText } = await import('../prompt');
+    const c = promptContext({ tab: 'ledger', catalog: [], customers: ['করিম', 'মিনা'], customerAliases: { করিম: ['কোরিম', 'Karim'] }, hint: null });
+    expect(contextText(c)).toContain('customers: করিম (also said কোরিম/Karim), মিনা');
+  });
+});

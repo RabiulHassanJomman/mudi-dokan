@@ -61,13 +61,20 @@ export function promptContext(args: {
   catalog: readonly CatalogProduct[];
   /** Most relevant first (most owed). */
   customers: readonly string[];
+  /** Customer name → learned spellings. */
+  customerAliases?: Readonly<Record<string, readonly string[]>>;
   hint: string | null;
   device?: PromptContext['device'];
 }): PromptContext {
+  const customers = args.customers.slice(0, MAX_CUSTOMERS);
+  const aliases = Object.fromEntries(
+    customers.filter((n) => args.customerAliases?.[n]?.length).map((n) => [n, [...args.customerAliases![n]!]]),
+  );
   return {
     tab: args.tab,
     products: topProducts(args.catalog, args.hint).map((p) => ({ name: p.name, unit: p.unit, aliases: p.aliases })),
-    customers: args.customers.slice(0, MAX_CUSTOMERS),
+    customers,
+    ...(Object.keys(aliases).length ? { customerAliases: aliases } : {}),
     ...(args.device ? { device: args.device } : {}),
   };
 }
