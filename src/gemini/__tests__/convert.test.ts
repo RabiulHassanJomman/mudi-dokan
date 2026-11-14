@@ -109,6 +109,9 @@ describe('convertGemini: other intents', () => {
   it('stock and balance questions', () => {
     expect(convertGemini({ ...NULLS, intent: 'stock_query', product: 'চাউল' }, names).parsed).toMatchObject({ intent: 'stock_query', product: 'চাল' });
     expect(convertGemini({ ...NULLS, intent: 'balance_query', customer: 'করিম' }, names).parsed).toMatchObject({ intent: 'balance_query', customer: 'করিম', missing: [] });
+    expect(convertGemini({ ...NULLS, intent: 'total_baki_query' }, names).parsed).toMatchObject({ intent: 'total_baki_query', missing: [], confidence: 'high' });
+    // a balance question with no name = all customers, like the rule parser
+    expect(convertGemini({ ...NULLS, intent: 'balance_query' }, names).parsed).toMatchObject({ intent: 'total_baki_query', missing: [] });
   });
 
   it('unknown is low confidence', () => {

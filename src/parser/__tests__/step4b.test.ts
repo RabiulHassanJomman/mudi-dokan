@@ -21,7 +21,6 @@ describe('balance question: "<name> বাকি কত?"', () => {
     { text: 'করিমের কাছে কত পাবো', expected: { intent: 'balance_query', customer: 'করিম' } },
     { text: 'সুমি আপুর বাকি কতো', ctx, expected: { intent: 'balance_query', customer: 'সুমি' } },
     { text: 'হাসান ভাইয়ের কাছে কত বাকি আছে', ctx, expected: { intent: 'balance_query', customer: 'হাসান' } },
-    { text: 'বাকি কত', expected: { intent: 'balance_query', missing: ['customer'] } },
   ];
   it.each(cases.map((c) => [c.text, c] as const))('%s', (_n, c) => check(c));
 
@@ -32,6 +31,10 @@ describe('balance question: "<name> বাকি কত?"', () => {
 
   it('on the বাকি tab too', () => {
     expect(parseCommand('করিমের বাকি কত', { tab: 'ledger' })).toMatchObject({ intent: 'balance_query', customer: 'করিম' });
+  });
+
+  it('a named customer with "মোট" is still that customer', () => {
+    expect(parseCommand('করিমের মোট বাকি কত', ctx)).toMatchObject({ intent: 'balance_query', customer: 'করিম' });
   });
 
   it('stock questions are unchanged', () => {
@@ -93,5 +96,26 @@ describe('customer name in a cash sale', () => {
     expect(r.intent).toBe('sale');
     expect(r.customer).toBeUndefined();
     expect(r.items?.every((i) => i.product)).toBe(true);
+  });
+});
+
+describe('total বাকি question: no name = all customers', () => {
+  it.each([
+    'মোট কত বাকি',
+    'মোট কত বাকি?',
+    'সবার বাকি কত',
+    'সবার বাকি কতো?',
+    'বাকি কত টাকা পাওনা',
+    'সব মিলিয়ে বাকি কত',
+    'বাকি কত',
+  ])('%s', (text) => {
+    for (const c of [{}, ctx, { tab: 'ledger' as const }]) {
+      expect(parseCommand(text, c)).toMatchObject({ intent: 'total_baki_query', missing: [], confidence: 'high' });
+      expect(parseCommand(text, c).customer).toBeUndefined();
+    }
+  });
+
+  it('with an amount it is an entry, not a question', () => {
+    expect(parseCommand('সবার ২০০ টাকা বাকি', ctx).intent).not.toBe('total_baki_query');
   });
 });

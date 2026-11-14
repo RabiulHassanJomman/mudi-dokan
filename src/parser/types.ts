@@ -8,6 +8,8 @@ export type Intent =
   | 'stock_query'
   /** "করিমের বাকি কত?" — what a customer owes. */
   | 'balance_query'
+  /** "মোট কত বাকি?", "সবার বাকি কত" — what all customers owe together. */
+  | 'total_baki_query'
   | 'profit_query'
   | 'unknown';
 

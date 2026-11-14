@@ -8,6 +8,8 @@ export const STOCK = wordSet(['আছে', 'স্টক', 'মজুদ']);
 export const HOW_MUCH = wordSet(['কত', 'কতো']);
 /** "(I) will get" — what a customer owes the shop. */
 export const OWED = wordSet(['পাবো', 'পাব', 'পাওনা']);
+/** "everyone's / in total" — a বাকি question with no name left = all customers. NOT in ALL_KEYWORDS. */
+export const ALL_PEOPLE = wordSet(['মোট', 'সবার', 'সব', 'সবাই', 'সবাইকে', 'সকলের', 'সকল', 'টোটাল', 'সবমিলিয়ে', 'মিলিয়ে']);
 export const QUESTION = wordSet(['কত', 'কতো', 'কি', 'কী', 'কতটুকু', 'কয়টা', 'কয়', 'কতগুলো', 'এখন', 'দোকানে']);
 
 export const PURCHASE = wordSet(['কেনা', 'কিনলাম', 'কিনেছি', 'কিনছি', 'এনেছি', 'আনলাম', 'আনছি', 'ক্রয়']);

@@ -143,8 +143,9 @@ export function convertGemini(json: unknown, ctx: ConvertContext): Converted {
     out.product = canon(str(json, 'product'));
     if (!out.product) missing.push('product');
   } else if (i === 'balance_query') {
-    out.customer = customer;
-    if (!customer) missing.push('customer');
+    // no name = all customers (as the rule parser does)
+    if (customer) out.customer = customer;
+    else out.intent = 'total_baki_query';
   }
   if (i === 'unknown') lowReasons.add('unknown_intent');
 

@@ -16,7 +16,7 @@ import {
   type ProductInfo,
 } from '../basket';
 import { heardPrefix } from '../confirmWords';
-import { balanceWords } from '../customers';
+import { balanceWords, totalBakiWords } from '../customers';
 import { choosePurchaseProduct, entryFromParse, entryReadback } from '../entry';
 import { padDisplay } from '../numpad';
 import { pickText, pickWords } from '../pick';
@@ -197,6 +197,22 @@ describe('balance words (বাকি খাতা, "করিমের বা�
     [-5000, 'করিম, অগ্রিম দিয়েছে ৫০ টাকা।'],
     [0, 'করিম, কোনো বাকি নেই।'],
   ])('%d', (p, s) => expect(balanceWords('করিম', p)).toBe(s));
+});
+
+describe('মোট বাকি: total, how many, top 3', () => {
+  const r = (name: string, taka: number) => ({ name, balance_poisha: taka * 100 });
+  it('sums only what is owed, top 3 by amount', () => {
+    expect(
+      totalBakiWords([r('সুমি', 500), r('করিম', 2300), r('হাসান', -50), r('রহিম', 1200), r('জামাল', 0), r('মিনা', 150)]),
+    ).toBe('মোট বাকি ৪,১৫০ টাকা, ৪ জনের কাছে। সবচেয়ে বেশি: করিম ২,৩০০ টাকা, রহিম ১,২০০ টাকা, সুমি ৫০০ টাকা।');
+  });
+  it('one customer', () => {
+    expect(totalBakiWords([r('করিম', 250.5)])).toBe('মোট বাকি ২৫০.৫ টাকা, ১ জনের কাছে। সবচেয়ে বেশি: করিম ২৫০.৫ টাকা।');
+  });
+  it('nobody owes', () => {
+    expect(totalBakiWords([])).toBe('কারো কাছে কোনো বাকি নেই।');
+    expect(totalBakiWords([r('করিম', 0), r('রহিম', -100)])).toBe('কারো কাছে কোনো বাকি নেই।');
+  });
 });
 
 describe('what the confirm card says it got', () => {

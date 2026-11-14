@@ -214,10 +214,12 @@ export function parseCommand(text: string, ctx: ParseContext = {}): ParsedComman
   if (has(K.PROFIT)) {
     return compact({ intent: 'profit_query', period, missing: [], confidence: 'high', ...base });
   }
-  // "করিমের বাকি কত?", "করিমের কাছে কত পাবো": a question, no amount said
+  // "করিমের বাকি কত?", "করিমের কাছে কত পাবো": a question, no amount said.
+  // No name left ("মোট কত বাকি", "সবার বাকি কত") = all customers together.
   const anyNumberAt = tokens.some((_, k) => parseNumber(tokens, k) !== null);
   if ((has(K.BAKI) || has(K.OWED)) && has(K.HOW_MUCH) && !anyNumberAt && !has(K.CREDIT) && !has(K.TAKE)) {
-    const names = tokens.filter((t) => !isNoise(t)).map(stripGenitive);
+    const names = tokens.filter((t) => !isNoise(t) && !K.ALL_PEOPLE.has(t)).map(stripGenitive);
+    if (!names.length) return compact({ intent: 'total_baki_query', missing: [], confidence: 'high', ...base });
     const hit = matchKnown(names, ctx.knownCustomers);
     const customer = hit?.match ?? customerName(names);
     return compact({

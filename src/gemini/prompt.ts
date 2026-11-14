@@ -14,6 +14,7 @@ export const INTENTS: readonly Intent[] = [
   'owner_withdrawal',
   'stock_query',
   'balance_query',
+  'total_baki_query',
   'profit_query',
   'unknown',
 ];
@@ -60,7 +61,7 @@ export function responseSchema(withTranscript: boolean) {
 }
 
 export const SYSTEM = `You parse one Bangla voice command from a grocery shop (Bangladesh) into JSON.
-intent: sale (selling goods), purchase (shop buys stock: কিনলাম/কেনা), baki (customer owes money, no goods), joma (customer pays back: জমা/দিল/শোধ), expense (shop cost: বিল/ভাড়া/বেতন/নাস্তা/খরচ), owner_withdrawal (the owner takes cash: "মালিক" or a name in "owners" + নিল/নিয়েছে), stock_query (চাল কত আছে?), balance_query (করিমের বাকি কত?), profit_query (লাভ কত?), unknown.
+intent: sale (selling goods), purchase (shop buys stock: কিনলাম/কেনা), baki (customer owes money, no goods), joma (customer pays back: জমা/দিল/শোধ), expense (shop cost: বিল/ভাড়া/বেতন/নাস্তা/খরচ), owner_withdrawal (the owner takes cash: "মালিক" or a name in "owners" + নিল/নিয়েছে), stock_query (চাল কত আছে?), balance_query (one named customer: করিমের বাকি কত?), total_baki_query (all customers together, no name: মোট কত বাকি? সবার বাকি কত? বাকি কত টাকা পাওনা?), profit_query (লাভ কত?), unknown.
 Rules:
 - items only for sale; one entry per line in spoken order; the same product twice stays two lines.
 - product: use ONLY a name from the given product list (map spelling variants and brand words to it, e.g. চাউল → চাল). If none fits, use the spoken word.
@@ -98,6 +99,7 @@ export const EXAMPLES: [string, Record<string, unknown>][] = [
   ],
   ['মিনা আপা তিনশো টাকা বাকি', { intent: 'baki', ...NULLS, customer: 'মিনা', amount: 300 }],
   ['রশিদের নামে আটশো টাকা বাকি লেখেন', { intent: 'baki', ...NULLS, customer: 'রশিদ', amount: 800 }],
+  ['সবার বাকি কত', { intent: 'total_baki_query', ...NULLS }],
   ['মিজান সাতশো টাকা জমা দিল', { intent: 'joma', ...NULLS, customer: 'মিজান', amount: 700 }],
   ['গ্যাস বিল আটশো টাকা খরচ', { intent: 'expense', ...NULLS, amount: 800, item: 'গ্যাস বিল' }],
   ['মালিক তিনশো টাকা নিল ওষুধের জন্য', { intent: 'owner_withdrawal', ...NULLS, amount: 300, person: 'মালিক', note: 'ওষুধের জন্য' }],

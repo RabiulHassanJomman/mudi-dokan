@@ -29,7 +29,7 @@ import {
   type ItemDraft,
 } from '../domain/basket';
 import { classifyAnswer, heardPrefix } from '../domain/confirmWords';
-import { balanceWords, customerAliasToLearn, resolveCustomerAlias, suggestCustomers } from '../domain/customers';
+import { balanceWords, customerAliasToLearn, resolveCustomerAlias, suggestCustomers, totalBakiWords } from '../domain/customers';
 import {
   canSaveEntry,
   choosePurchaseProduct,
@@ -75,7 +75,7 @@ type How = 'voice' | 'typed' | 'pick';
 
 /** "চাল কত আছে?" / "করিমের বাকি কত?": the answer, or (name not known) the closest names to choose from. */
 interface Answer {
-  question: 'stock' | 'balance';
+  question: 'stock' | 'balance' | 'total_baki';
   /** The name as heard. */
   spoken: string | null;
   /** What TTS said; null until a name is chosen. */
@@ -101,6 +101,7 @@ const INTENT_BN: Record<Intent, string> = {
   owner_withdrawal: 'মালিক নিল',
   stock_query: 'স্টক জানা',
   balance_query: 'বাকি জানা',
+  total_baki_query: 'মোট বাকি জানা',
   profit_query: 'লাভ জানা',
   unknown: 'বুঝিনি',
 };
@@ -261,6 +262,15 @@ export default function ConfirmScreen() {
         if (!alive) return;
         setState({ kind: 'answer', transcript, answer });
         void speak(answer.text ?? answerPrompt(answer));
+        return;
+      }
+      if (parsed.intent === 'total_baki_query') {
+        await setOutcome(db, w, logId.current, 'unsupported');
+        decided.current = true;
+        const text = totalBakiWords(await customerBalances(db));
+        if (!alive) return;
+        setState({ kind: 'answer', transcript, answer: { question: 'total_baki', spoken: null, text, choices: [] } });
+        void speak(text);
         return;
       }
 
