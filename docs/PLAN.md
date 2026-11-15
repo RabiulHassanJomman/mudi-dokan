@@ -2,11 +2,11 @@ Mudi Dokan App — Plan
 Full history (decision log, step-by-step notes, old designs, design tokens, Gemini notes): docs/archive/plan-history.md
 
 Status
-• Done: steps 1–5, 7, 8 (shell, voice→confirm→save, Pick, stock/baki/customer, cash/history/undo, multi-phone sync, Drive audio + backup). Gemini-only voice engine with offline queue, মুছুন (voided/archived), সব তথ্য মুছুন, ক্রেতা import, Noto digit font. Gemini prompt caching (system + 12 examples cached at 25% token cost after first request; ~60% fewer prompt tokens on cached calls).
-• Last build: release APK (built Nov 15, installed on Pixel 7; has home detail sheet, live-text fix, বিরতি/চালিয়ে যান on Listening). Voice TTS still robotic; Fenrir samples generated (test on Pixel later). `npm test` → 1081 passing. firestore.rules deployed (Nov 15).
-• Unfinished: pause/resume not yet tested on the phone (Android 13+ joins one WAV per resume; recognizer may still end by itself after a few quiet seconds); real Bangla voice not yet tested for baki/joma/khoroch/kena, step-5 voice queries, queue review; cloud "wipe all phones" not tested on real Firestore; background backup at night not seen running; restore not tried on phone. Fenrir TTS not integrated (caching done first).
+• Done: steps 1–5, 7, 8 (shell, voice→confirm→save, Pick, stock/baki/customer, cash/history/undo, multi-phone sync, Drive audio + backup). Gemini-only voice engine with offline queue, মুছুন (voided/archived), সব তথ্য মুছুন, ক্রেতা import, Noto digit font.
+• Last build: release APK (built Nov 15, installed on Pixel 7; has home detail sheet, live-text fix, বিরতি/চালিয়ে যান on Listening). Hidden voice-test screen (⚙ › version long-press › 🔊) lists Bangla TTS voices; on-device voices are robotic; Gemini TTS "Fenrir" chosen from samples, not built in yet. `npm test` → 1081 passing. firestore.rules deployed (Nov 15).
+• Unfinished: pause/resume not yet tested on the phone (Android 13+ joins one WAV per resume; recognizer may still end by itself after a few quiet seconds); real Bangla voice not yet tested for baki/joma/khoroch/kena, step-5 voice queries, queue review; cloud "wipe all phones" not tested on real Firestore; background backup at night not seen running; restore not tried on phone. Fenrir TTS not integrated (plan: cache clips, speak with robotic voice first if not cached, never wait on network).
 • Known bugs: "তিন তলার" parsed as number; বস্তা-type units stored 1:1; two customers with same name can't be split; deep-link tap right after launch can crash (adb only); both phones take nightly backup.
-• Next: test Pixel with prompt caching (fewer 🔊 → understand_queue delays?); then Fenrir TTS (low-latency Bangla voice with fallback).
+• Next: find where command latency comes from (debug log ms; each prompt ≈1.8k tokens, 12 examples; Gemini 3.5 caches repeated prefixes by itself, no request field needed); then Fenrir TTS.
 
 Rules that still matter
 • Every row: id (UUID), device_id, updated_at. Money = INTEGER poisha. Quantity REAL in product unit.
