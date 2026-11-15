@@ -3,7 +3,7 @@ Full history (decision log, step-by-step notes, old designs, design tokens, Gemi
 
 Status
 • Done: steps 1–5, 7, 8 (shell, voice→confirm→save, Pick, stock/baki/customer, cash/history/undo, multi-phone sync, Drive audio + backup). Gemini-only voice engine with offline queue, মুছুন (voided/archived), সব তথ্য মুছুন, ক্রেতা import, Noto digit font.
-• Last build: release APK 0.1.x on Pixel 7 (update install, v13 migration ok). `npm test` → 1076 passing. firestore.rules deployed (Nov 15).
+• Last build: release APK 0.1.47 (built Nov 15, Pixel 7). `npm test` → 1076 passing. firestore.rules deployed (Nov 15).
 • Unfinished: real Bangla voice not yet tested for baki/joma/khoroch/kena, step-5 voice queries, queue review; cloud "wipe all phones" not tested on real Firestore; background backup at night not seen running; restore not tried on phone.
 • Known bugs: "তিন তলার" parsed as number; বস্তা-type units stored 1:1; two customers with same name can't be split; deep-link tap right after launch can crash (adb only); both phones take nightly backup.
 • Next: Pixel offline voice → queue → review test; pilot with real voice; step 6 (fix parser/prompt from pilot log).
@@ -15,7 +15,7 @@ Rules that still matter
 • Nothing saves without confirmation (✅ / "হ্যাঁ"). Bangla UI, targets ≥ 52 px, 🔊 on every screen.
 • Engine: Gemini only (clip → Gemini → confirm card). No Android STT. Rule parser (pure TS, no RN imports, unit-tested) only handles typed text and হ্যাঁ/না. Offline/429/error → understand_queue, reviewed later. Key is in the APK (EXPO_PUBLIC_GEMINI_KEY): billing stays off; real release needs a proxy.
 • Sync: SQLite is truth, Firestore only transport at shops/{uid}/{table}/{rowId}. Entries = UUID union; mutable tables = LWW by updated_at. Merge duplicates via merged_into + alias + correction. Daily write cap 18K.
-• Migrations: one append-only MIGRATIONS list (now v14); never edit a shipped one; add an upgrade test with real-looking rows.
+• Migrations: one append-only MIGRATIONS list (now v14, verified from SCHEMA_VERSION); never edit a shipped one; add an upgrade test with real-looking rows.
 • Release: `npm run apk` only, dedicated release key (~/.mudi-dokan/keys, MUDI_RELEASE_* in ~/.gradle/gradle.properties), install with `adb install -r`, never uninstall. Keep key backups off this Mac.
 • Branch: main only.
 
