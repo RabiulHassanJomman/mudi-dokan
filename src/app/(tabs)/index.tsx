@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
@@ -16,7 +16,7 @@ import { cashDay, getSetup, recentEntries, todayTotals } from '../../db/repo';
 import { today as todayDate } from '../../domain/cash';
 import { recentLine, type RecentEntry } from '../../domain/recent';
 import { getDevice } from '../../device';
-import { formatNumber, formatTaka, toBnDigits } from '../../lib/bn';
+import { dayLabel, formatNumber, formatQty, formatTaka, toBnDigits } from '../../lib/bn';
 import { speak } from '../../lib/speak';
 import { useClipPlayer } from '../../lib/useClipPlayer';
 import { colors, fontSize, productTiles, radius, size, spacing } from '../../theme/tokens';
@@ -46,6 +46,31 @@ function entryLook(e: RecentEntry): { icon: IconName; tile: string; ink: string;
   }
 }
 
+const KIND_LABEL: Record<RecentEntry['kind'], string> = {
+  sale: 'বিক্রি',
+  baki: 'বাকি',
+  joma: 'জমা',
+  expense: 'খরচ',
+  owner_withdrawal: 'মালিক নিল',
+  purchase: 'কেনা',
+};
+
+/** Label/value rows shown when a recent row is tapped. */
+function detailRows(e: RecentEntry): [string, string][] {
+  const d = new Date(e.created_at);
+  const time = `${toBnDigits(String(d.getHours()).padStart(2, '0'))}:${toBnDigits(String(d.getMinutes()).padStart(2, '0'))}`;
+  const rows: [string, string][] = [['ধরন', KIND_LABEL[e.kind]]];
+  const nameLabel = e.kind === 'baki' || e.kind === 'joma' ? 'কার' : e.kind === 'owner_withdrawal' ? 'কে' : 'জিনিস';
+  rows.push([nameLabel, e.title]);
+  if (e.kind === 'sale' && e.lines > 1) rows.push(['কয়টি জিনিস', toBnDigits(e.lines)]);
+  if (e.quantity !== null && e.unit) rows.push(['পরিমাণ', formatQty(e.quantity, e.unit)]);
+  if (e.kind === 'sale' && e.customer) rows.push(['ক্রেতা', e.customer]);
+  rows.push(['টাকা', formatTaka(e.amount_poisha)]);
+  if (e.kind === 'sale') rows.push(['কীভাবে', e.credit ? 'বাকিতে' : 'নগদ']);
+  rows.push(['সময়', `${dayLabel(e.created_at)}, ${time}`]);
+  return rows;
+}
+
 const startOfToday = () => {
   const d = new Date();
   d.setHours(0, 0, 0, 0);
@@ -63,6 +88,7 @@ export default function SaleScreen() {
   const [shopName, setShopName] = useState<string | null>(null);
   const [today, setToday] = useState({ sales: 0, baki: 0 });
   const [recent, setRecent] = useState<RecentEntry[]>([]);
+  const [detail, setDetail] = useState<RecentEntry | null>(null);
   /** হাতে ক্যাশ = today's expected cash in hand. */
   const [cash, setCash] = useState<number | null>(null);
 
@@ -175,7 +201,10 @@ export default function SaleScreen() {
               key={`${r.kind}-${r.id}`}
               accessibilityRole="button"
               accessibilityLabel={`${line.words} শুনুন`}
-              onPress={() => void speak(line.words)}
+              onPress={() => {
+                setDetail(r);
+                void speak(line.words);
+              }}
               style={({ pressed }) => [styles.entry, { borderColor: look.border }, pressed && styles.pressed]}
             >
               <View style={[styles.entryTile, { backgroundColor: look.tile }]}>
@@ -231,6 +260,46 @@ export default function SaleScreen() {
         )}
       </ScrollView>
       {del.sheet}
+      <Modal visible={!!detail} transparent animationType="slide" onRequestClose={() => setDetail(null)}>
+        <Pressable style={styles.backdrop} onPress={() => setDetail(null)} accessibilityLabel="বন্ধ করুন">
+          <Pressable style={styles.sheet} onPress={() => {}}>
+            {detail &&
+              detailRows(detail).map(([k, v]) => (
+                <View key={k} style={styles.detailRow}>
+                  <Txt size={fontSize.bodyLg} weight="medium" color={colors.ink2}>
+                    {k}
+                  </Txt>
+                  <Txt size={fontSize.button} weight="bold" style={styles.detailValue}>
+                    {v}
+                  </Txt>
+                </View>
+              ))}
+            <View style={styles.sheetButtons}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="আবার শুনুন"
+                onPress={() => detail && void speak(recentLine(detail).words)}
+                style={[styles.sheetButton, { backgroundColor: colors.saleTint }]}
+              >
+                <Icon name="play" size={24} color={colors.sale} />
+                <Txt size={fontSize.button} weight="bold" color={colors.sale}>
+                  শুনুন
+                </Txt>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="বন্ধ করুন"
+                onPress={() => setDetail(null)}
+                style={[styles.sheetButton, { backgroundColor: colors.sale }]}
+              >
+                <Txt size={fontSize.button} weight="bold" color={colors.onColor}>
+                  ঠিক আছে
+                </Txt>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -317,6 +386,12 @@ const styles = StyleSheet.create({
   },
   disabled: { opacity: 0.35 },
   noClip: { opacity: 0 },
+  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
+  sheet: { backgroundColor: colors.surface, borderTopLeftRadius: radius.card, borderTopRightRadius: radius.card, padding: spacing.screen, gap: spacing.sm },
+  detailRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: spacing.md, minHeight: 44 },
+  detailValue: { flexShrink: 1, textAlign: 'right' },
+  sheetButtons: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm },
+  sheetButton: { flex: 1, height: 56, borderRadius: radius.pill, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.xs },
   build: { textAlign: 'center' },
   trash: { width: 44, height: 52, alignItems: 'center', justifyContent: 'center' },
 });

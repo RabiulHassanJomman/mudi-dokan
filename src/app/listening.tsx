@@ -75,6 +75,8 @@ export default function ListeningScreen() {
   const [heard, setHeard] = useState('');
   const [liveVolume, setLiveVolume] = useState(0);
   const heardRef = useRef('');
+  /** Phrases the recognizer has already finished. */
+  const doneText = useRef('');
   const clipRef = useRef<string | null>(null);
   const sttError = useRef<string | null>(null);
   const volume = LIVE ? liveVolume : barLevel(rec.metering);
@@ -92,6 +94,7 @@ export default function ListeningScreen() {
     setPhase('starting');
     setHeard('');
     heardRef.current = '';
+    doneText.current = '';
     clipRef.current = null;
     sttError.current = null;
     if (LIVE) {
@@ -153,7 +156,11 @@ export default function ListeningScreen() {
   useSpeechRecognitionEvent('start', () => setPhase('listening'));
   useSpeechRecognitionEvent('volumechange', (e) => setLiveVolume(Math.max(0, Math.min(1, (e.value + 2) / 12))));
   useSpeechRecognitionEvent('result', (e) => {
-    const text = e.results[0]?.transcript ?? '';
+    // a final result closes one phrase and the next result starts a new one: keep every phrase
+    // instead of letting the latest replace the rest
+    const part = e.results[0]?.transcript ?? '';
+    const text = [doneText.current, part].filter(Boolean).join(' ');
+    if (e.isFinal) doneText.current = text;
     heardRef.current = text;
     setHeard(text);
   });
