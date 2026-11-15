@@ -69,3 +69,4 @@ If I say "small:" → only edit code + run related tests. No APK, no phone, no P
 no branch merge, no summary longer than 5 lines. Commit only; I'll say when to push/build.
 
 Final report: max 10 lines. What changed, what to test, anything blocking. No restating my prompt.
+Read docs/archive/* only if I ask.
