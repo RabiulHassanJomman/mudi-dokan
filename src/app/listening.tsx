@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Platform, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams } from 'expo-router';
 import { File, Paths } from 'expo-file-system';
@@ -395,6 +395,7 @@ export default function ListeningScreen() {
           {phase === 'nokey' ? NO_KEY_BN : phase === 'error' ? 'আবার বলুন' : phase === 'starting' ? 'একটু দাঁড়ান…' : phase === 'paused' ? 'বিরতি' : phase === 'thinking' ? 'বুঝছি…' : 'শুনছি…'}
         </Txt>
         {phase === 'listening' && <Bars volume={volume} />}
+        {(phase === 'thinking' || phase === 'starting') && <ActivityIndicator size="large" color={colors.onColor} />}
       </View>
 
       {!!heard && phase !== 'error' && phase !== 'nokey' && (
