@@ -40,6 +40,8 @@ export interface Usage {
   audioTokens: number;
   outputTokens: number;
   thoughtTokens: number;
+  /** Prompt tokens reused from cache (at 25% cost). */
+  cachedTokens: number;
 }
 
 export type CallResult =
@@ -53,6 +55,7 @@ interface Body {
     promptTokenCount?: number;
     candidatesTokenCount?: number;
     thoughtsTokenCount?: number;
+    cachedContentTokenCount?: number;
     promptTokensDetails?: { modality?: string; tokenCount?: number }[];
   };
   error?: { message?: string; details?: { retryDelay?: string }[] };
@@ -74,6 +77,7 @@ export function usageOf(body: Body | null): Usage | null {
     audioTokens: u.promptTokensDetails?.find((d) => d.modality === 'AUDIO')?.tokenCount ?? 0,
     outputTokens: u.candidatesTokenCount ?? 0,
     thoughtTokens: u.thoughtsTokenCount ?? 0,
+    cachedTokens: u.cachedContentTokenCount ?? 0,
   };
 }
 
@@ -140,7 +144,7 @@ export async function generateBody(deps: ClientDeps, request: (model: string) =>
     if (!res.ok) return { ok: false, kind: 'api', error: `HTTP ${res.status}: ${json?.error?.message ?? 'no body'}`, ms, usage, attempts };
     const text = json?.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('') ?? '';
     try {
-      return { ok: true, json: JSON.parse(text) as unknown, text, ms, usage: usage ?? { promptTokens: 0, audioTokens: 0, outputTokens: 0, thoughtTokens: 0 }, attempts };
+      return { ok: true, json: JSON.parse(text) as unknown, text, ms, usage: usage ?? { promptTokens: 0, audioTokens: 0, outputTokens: 0, thoughtTokens: 0, cachedTokens: 0 }, attempts };
     } catch {
       return { ok: false, kind: 'bad_json', error: `bad JSON: ${text.slice(0, 200)}`, ms, usage, attempts };
     }

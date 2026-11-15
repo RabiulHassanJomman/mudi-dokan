@@ -71,7 +71,7 @@ export async function runGemini(
 /** "Gemini দিয়ে গুছিয়ে নিন": the import's raw lines + the shop's customer names → tidy rows. */
 export async function tidyCustomerLines(lines: readonly string[], existing: readonly TidyExisting[]): Promise<TidyResult> {
   const apiKey = geminiKey();
-  const zero = { promptTokens: 0, audioTokens: 0, outputTokens: 0, thoughtTokens: 0 };
+  const zero = { promptTokens: 0, audioTokens: 0, outputTokens: 0, thoughtTokens: 0, cachedTokens: 0 };
   if (!apiKey) return { ok: false, rows: [], error: 'no EXPO_PUBLIC_GEMINI_KEY in this build', ms: 0, usage: zero };
   return tidyCustomers({ apiKey, model: getGeminiModel(), fetch: fetch as unknown as ClientDeps['fetch'] }, lines, existing);
 }

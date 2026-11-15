@@ -50,7 +50,7 @@ describe('generate (REST generateContent)', () => {
   it('reads prompt, audio, output and thinking tokens', async () => {
     const { fetch } = mockFetch([{ answer: SALE, usage: USAGE }]);
     const r = await generate({ apiKey: 'k', fetch }, audio, ctx);
-    expect(r.ok && r.usage).toEqual({ promptTokens: 900, audioTokens: 120, outputTokens: 60, thoughtTokens: 12 });
+    expect(r.ok && r.usage).toEqual({ promptTokens: 900, audioTokens: 120, outputTokens: 60, thoughtTokens: 12, cachedTokens: 0 });
   });
 
   it('retries 503 with 2 s, 5 s, 10 s back-off, then gives up', async () => {

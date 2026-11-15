@@ -35,6 +35,7 @@ export default function RootLayout() {
         <Stack.Screen name="review" />
         <Stack.Screen name="debug-log" />
         <Stack.Screen name="font-test" />
+        <Stack.Screen name="voice-test" />
         <Stack.Screen name="wipe" />
         <Stack.Screen name="setup" options={{ animation: 'fade' }} />
         <Stack.Screen name="pick" options={{ animation: 'slide_from_bottom' }} />

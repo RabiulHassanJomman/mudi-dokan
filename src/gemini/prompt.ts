@@ -155,8 +155,8 @@ export function buildRequest(model: string, input: Input, ctx: PromptContext) {
   const audio = 'audio' in input;
   const thinkingConfig = /^gemini-2/.test(model) ? { thinkingBudget: 0 } : { thinkingLevel: 'minimal' };
   const contents = [
-    ...EXAMPLES.flatMap(([t, o]) => [
-      { role: 'user', parts: [{ text: `${audio ? 'example, said' : 'transcript'}: ${t}\ntab: sale` }] },
+    ...EXAMPLES.flatMap(([t, o], i) => [
+      { role: 'user', parts: [{ text: `${audio ? 'example, said' : 'transcript'}: ${t}\ntab: sale`, ...(i === EXAMPLES.length - 1 ? { cacheControl: { type: 'ephemeral' } } : {}) }] },
       { role: 'model', parts: [{ text: JSON.stringify(audio ? { transcript: t, ...o } : o) }] },
     ]),
     {
@@ -167,7 +167,7 @@ export function buildRequest(model: string, input: Input, ctx: PromptContext) {
     },
   ];
   return {
-    systemInstruction: { parts: [{ text: audio ? SYSTEM + AUDIO_RULES : SYSTEM }] },
+    systemInstruction: { parts: [{ text: audio ? SYSTEM + AUDIO_RULES : SYSTEM, cacheControl: { type: 'ephemeral' } }] },
     contents,
     generationConfig: {
       temperature: 0,

@@ -62,6 +62,11 @@ export default function DebugLogScreen() {
             ১২৩
           </Txt>
         </Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel="ভয়েস পরীক্ষা" onPress={() => nav.push('/voice-test')} style={styles.square}>
+          <Txt size={fontSize.label} weight="bold">
+            🔊
+          </Txt>
+        </Pressable>
         <Pressable accessibilityRole="button" accessibilityLabel="শেয়ার" onPress={share} style={styles.square}>
           <Icon name="arrow" size={26} color={colors.ink} strokeWidth={2.2} />
         </Pressable>

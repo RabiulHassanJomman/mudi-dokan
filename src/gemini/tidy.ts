@@ -124,12 +124,12 @@ export type TidyResult =
 
 const addUsage = (a: Usage, b: Usage | null): Usage =>
   b
-    ? { promptTokens: a.promptTokens + b.promptTokens, audioTokens: a.audioTokens + b.audioTokens, outputTokens: a.outputTokens + b.outputTokens, thoughtTokens: a.thoughtTokens + b.thoughtTokens }
+    ? { promptTokens: a.promptTokens + b.promptTokens, audioTokens: a.audioTokens + b.audioTokens, outputTokens: a.outputTokens + b.outputTokens, thoughtTokens: a.thoughtTokens + b.thoughtTokens, cachedTokens: a.cachedTokens + b.cachedTokens }
     : a;
 
 /** All lines, in batches. Any failed batch fails the whole tidy-up (the preview keeps its rows). */
 export async function tidyCustomers(deps: ClientDeps, lines: readonly string[], existing: readonly TidyExisting[]): Promise<TidyResult> {
-  let usage: Usage = { promptTokens: 0, audioTokens: 0, outputTokens: 0, thoughtTokens: 0 };
+  let usage: Usage = { promptTokens: 0, audioTokens: 0, outputTokens: 0, thoughtTokens: 0, cachedTokens: 0 };
   let ms = 0;
   const out: TidyLine[] = [];
   for (let at = 0; at < lines.length; at += TIDY_BATCH) {
