@@ -1,4 +1,4 @@
-import { audioMime, fitAudio, MAX_AUDIO_BYTES, readWav, toBase64, wavFile } from '../audio';
+import { audioMime, fitAudio, joinWavs, MAX_AUDIO_BYTES, readWav, toBase64, wavFile } from '../audio';
 
 /** 16 kHz mono 16-bit WAV of `seconds`, a ramp so the averaging is checkable. */
 function clip(seconds: number, rate = 16000): Uint8Array {
@@ -54,5 +54,41 @@ describe('audio for Gemini', () => {
     expect(audioMime('file:///data/voice_1.wav')).toBe('audio/wav');
     expect(audioMime('rec.aac')).toBe('audio/aac');
     expect(audioMime('rec.m4a')).toBeNull();
+  });
+});
+
+describe('joinWavs (pause and resume)', () => {
+  it('one clip comes back as it is', () => {
+    const a = clip(1);
+    expect(joinWavs([a])).toBe(a);
+  });
+
+  it('joins clips into one WAV: samples in order, one header', () => {
+    const a = clip(1);
+    const b = clip(0.5);
+    const j = joinWavs([a, b]);
+    const w = readWav(j)!;
+    expect(w.sampleRate).toBe(16000);
+    expect(w.channels).toBe(1);
+    expect(w.dataLen).toBe(16000 * 2 + 8000 * 2);
+    expect(j.length).toBe(44 + w.dataLen);
+    const ra = readWav(a)!;
+    const rb = readWav(b)!;
+    expect(Array.from(j.subarray(w.dataAt, w.dataAt + ra.dataLen))).toEqual(Array.from(a.subarray(ra.dataAt, ra.dataAt + ra.dataLen)));
+    expect(Array.from(j.subarray(w.dataAt + ra.dataLen))).toEqual(Array.from(b.subarray(rb.dataAt, rb.dataAt + rb.dataLen)));
+  });
+
+  it('skips a clip that is not a WAV (a segment with no sound)', () => {
+    const a = clip(1);
+    expect(readWav(joinWavs([new Uint8Array(10), a, new Uint8Array(0)]))!.dataLen).toBe(readWav(a)!.dataLen);
+  });
+
+  it('refuses clips with different sample rates', () => {
+    expect(() => joinWavs([clip(1), clip(1, 8000)])).toThrow();
+  });
+
+  it('nothing usable is an error', () => {
+    expect(() => joinWavs([])).toThrow();
+    expect(() => joinWavs([new Uint8Array(5)])).toThrow();
   });
 });

@@ -70,6 +70,27 @@ export function wavFile(pcm: Uint8Array, sampleRate: number, channels: number, b
   return out;
 }
 
+/**
+ * Pause and resume: each resume is a new recognizer clip. Joins them (in order) into one WAV
+ * for Gemini. Clips that are not WAVs are skipped; mixed formats are refused.
+ */
+export function joinWavs(clips: Uint8Array[]): Uint8Array {
+  const parts = clips.map((c) => ({ c, w: readWav(c) })).filter((p): p is { c: Uint8Array; w: Wav } => p.w !== null);
+  if (parts.length === 0) throw new Error('no audio to join');
+  if (parts.length === 1 && parts.length === clips.length) return clips[0]!;
+  const { sampleRate, channels, bits } = parts[0]!.w;
+  if (parts.some((p) => p.w.sampleRate !== sampleRate || p.w.channels !== channels || p.w.bits !== bits)) {
+    throw new Error('clips differ in format');
+  }
+  const pcm = new Uint8Array(parts.reduce((n, p) => n + p.w.dataLen, 0));
+  let at = 0;
+  for (const { c, w } of parts) {
+    pcm.set(c.subarray(w.dataAt, w.dataAt + w.dataLen), at);
+    at += w.dataLen;
+  }
+  return wavFile(pcm, sampleRate, channels, bits);
+}
+
 /** 16-bit mono WAV → half the sample rate (average of each pair), cut to maxBytes. */
 function halveWav(b: Uint8Array, w: Wav, maxBytes: number): { bytes: Uint8Array; cut: boolean } {
   const src = new DataView(b.buffer, b.byteOffset + w.dataAt, w.dataLen);

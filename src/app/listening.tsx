@@ -12,6 +12,7 @@ import { Icon } from '../components/Icon';
 import { Txt } from '../components/Txt';
 import { createVoiceLog, setOutcome } from '../db/repo';
 import { writer } from '../device';
+import { joinWavs } from '../gemini/audio';
 import { NO_KEY_BN, NO_KEY_HELP_BN, hasGemini } from '../lib/engine';
 import { GEMINI_WAIT_MS, runGemini } from '../lib/gemini';
 import { MAX_MS, START as ENDPOINT_START, barLevel, feed, type EndpointState } from '../lib/endpoint';
@@ -23,7 +24,7 @@ import { classify, enqueueUnderstanding } from '../queue/understand';
 import { colors, fontSize, radius, spacing } from '../theme/tokens';
 import { nav } from '../lib/nav';
 
-type Phase = 'starting' | 'listening' | 'thinking' | 'error' | 'nokey';
+type Phase = 'starting' | 'listening' | 'paused' | 'thinking' | 'error' | 'nokey';
 
 /**
  * Every command is a clip for Gemini: AAC, mono, 16 kHz (≈ 4 KB/s) in ADTS, which Gemini takes
@@ -77,9 +78,21 @@ export default function ListeningScreen() {
   const heardRef = useRef('');
   /** Phrases the recognizer has already finished. */
   const doneText = useRef('');
-  const clipRef = useRef<string | null>(null);
+  /** One clip per recognizer session: pause ends a session, resume starts the next. */
+  const segments = useRef<string[]>([]);
+  const pausing = useRef(false);
   const sttError = useRef<string | null>(null);
   const volume = LIVE ? liveVolume : barLevel(rec.metering);
+
+  function beginRecognizer() {
+    ExpoSpeechRecognitionModule.start({
+      lang: 'bn-BD',
+      interimResults: true,
+      continuous: false,
+      recordingOptions: { persist: true, outputDirectory: Paths.document.uri, outputFileName: `voice_${Date.now()}.wav` },
+      volumeChangeEventOptions: { enabled: true, intervalMillis: 120 },
+    });
+  }
 
   const start = useCallback(async () => {
     left.current = false;
@@ -95,7 +108,8 @@ export default function ListeningScreen() {
     setHeard('');
     heardRef.current = '';
     doneText.current = '';
-    clipRef.current = null;
+    segments.current = [];
+    pausing.current = false;
     sttError.current = null;
     if (LIVE) {
       const p = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
@@ -104,13 +118,7 @@ export default function ListeningScreen() {
         setPhase('error');
         return;
       }
-      ExpoSpeechRecognitionModule.start({
-        lang: 'bn-BD',
-        interimResults: true,
-        continuous: false,
-        recordingOptions: { persist: true, outputDirectory: Paths.document.uri, outputFileName: `voice_${Date.now()}.wav` },
-        volumeChangeEventOptions: { enabled: true, intervalMillis: 120 },
-      });
+      beginRecognizer();
       return;
     }
     const perm = await AudioModule.requestRecordingPermissionsAsync();
@@ -165,13 +173,17 @@ export default function ListeningScreen() {
     setHeard(text);
   });
   useSpeechRecognitionEvent('audioend', (e) => {
-    if (e.uri) clipRef.current = e.uri;
+    if (e.uri) segments.current.push(e.uri);
   });
   useSpeechRecognitionEvent('error', (e) => {
     sttError.current = e.error;
   });
   useSpeechRecognitionEvent('end', () => {
     if (!LIVE || stopping.current) return;
+    if (pausing.current) {
+      setPhase('paused');
+      return;
+    }
     void finishLive();
   });
 
@@ -179,9 +191,9 @@ export default function ListeningScreen() {
   async function finishLive() {
     stopping.current = true;
     const saidAt = Date.now();
-    const clip = clipRef.current;
     const code = sttError.current;
     if (code === 'aborted' && !heardRef.current) return;
+    const clip = await joinSegments();
     if (!clip) {
       setErrorText(STT_ERROR_BN[code ?? 'no-speech'] ?? 'কিছু শুনতে পাইনি');
       stopping.current = false;
@@ -189,6 +201,67 @@ export default function ListeningScreen() {
       return;
     }
     await understand(clip, saidAt);
+  }
+
+  /** The clips of every session as one file for Gemini (one session = the clip as it is). */
+  async function joinSegments(): Promise<string | null> {
+    const parts = segments.current;
+    if (parts.length <= 1) return parts[0] ?? null;
+    try {
+      const joined = joinWavs(await Promise.all(parts.map((u) => new File(u).bytes())));
+      const dest = new File(Paths.document, `voice_${Date.now()}.wav`);
+      dest.create();
+      dest.write(joined);
+      parts.forEach((u) => {
+        try {
+          new File(u).delete();
+        } catch {
+          // a leftover part is harmless
+        }
+      });
+      return dest.uri;
+    } catch (e) {
+      console.warn('joining the clips failed, using the first', e);
+      return parts[0] ?? null;
+    }
+  }
+
+  /** ⏸: the clip so far is kept; nothing is sent until থামুন. */
+  function pause() {
+    if (phase !== 'listening') return;
+    if (LIVE) {
+      pausing.current = true;
+      ExpoSpeechRecognitionModule.stop();
+      return;
+    }
+    try {
+      recorder.pause();
+      setPhase('paused');
+    } catch (e) {
+      console.warn('pause failed', e);
+    }
+  }
+
+  /** ▶️: recording continues after the pause; the words and the clip keep adding up. */
+  function resume() {
+    if (phase !== 'paused') return;
+    if (LIVE) {
+      pausing.current = false;
+      sttError.current = null;
+      beginRecognizer();
+      return;
+    }
+    endpoint.current = ENDPOINT_START;
+    recorder.record();
+    setPhase('listening');
+  }
+
+  /** থামুন: while paused the recognizer is already done, so the clips go straight on. */
+  function finish() {
+    if (LIVE) {
+      if (phase === 'paused') void finishLive();
+      else ExpoSpeechRecognitionModule.stop();
+    } else void stop();
   }
 
   async function stop(silent = false) {
@@ -319,7 +392,7 @@ export default function ListeningScreen() {
           </View>
         </View>
         <Txt size={fontSize.promptLg} weight="bold" color={colors.onColor}>
-          {phase === 'nokey' ? NO_KEY_BN : phase === 'error' ? 'আবার বলুন' : phase === 'starting' ? 'একটু দাঁড়ান…' : phase === 'thinking' ? 'বুঝছি…' : 'শুনছি…'}
+          {phase === 'nokey' ? NO_KEY_BN : phase === 'error' ? 'আবার বলুন' : phase === 'starting' ? 'একটু দাঁড়ান…' : phase === 'paused' ? 'বিরতি' : phase === 'thinking' ? 'বুঝছি…' : 'শুনছি…'}
         </Txt>
         {phase === 'listening' && <Bars volume={volume} />}
       </View>
@@ -368,12 +441,32 @@ export default function ListeningScreen() {
           </Pressable>
         </>
       ) : phase === 'thinking' ? null : (
-        <Pressable accessibilityRole="button" accessibilityLabel="থামুন" onPress={() => (LIVE ? ExpoSpeechRecognitionModule.stop() : void stop())} style={styles.action}>
-          <View style={styles.stopSquare} />
-          <Txt size={fontSize.listAmount} weight="bold" color={colors.listening.bg}>
-            থামুন
-          </Txt>
-        </Pressable>
+        <View style={styles.actions}>
+          {phase === 'paused' ? (
+            <Pressable accessibilityRole="button" accessibilityLabel="আবার চালু করুন" onPress={resume} style={styles.action}>
+              <Icon name="mic" size={32} color={colors.listening.bg} />
+              <Txt size={fontSize.listAmount} weight="bold" color={colors.listening.bg}>
+                চালিয়ে যান
+              </Txt>
+            </Pressable>
+          ) : (
+            <Pressable accessibilityRole="button" accessibilityLabel="বিরতি" onPress={pause} style={[styles.action, styles.pauseButton]}>
+              <View style={styles.pauseBars}>
+                <View style={styles.pauseBar} />
+                <View style={styles.pauseBar} />
+              </View>
+              <Txt size={fontSize.listAmount} weight="bold" color={colors.onColor}>
+                বিরতি
+              </Txt>
+            </Pressable>
+          )}
+          <Pressable accessibilityRole="button" accessibilityLabel="থামুন" onPress={finish} style={styles.action}>
+            <View style={styles.stopSquare} />
+            <Txt size={fontSize.listAmount} weight="bold" color={colors.listening.bg}>
+              থামুন
+            </Txt>
+          </Pressable>
+        </View>
       )}
     </SafeAreaView>
   );
@@ -440,5 +533,9 @@ const styles = StyleSheet.create({
     gap: spacing.md,
   },
   actionAlt: { backgroundColor: colors.listening.close, marginTop: -spacing.md },
+  actions: { gap: spacing.md },
+  pauseButton: { backgroundColor: colors.listening.close },
+  pauseBars: { flexDirection: 'row', gap: 6 },
+  pauseBar: { width: 8, height: 26, borderRadius: 3, backgroundColor: colors.onColor },
   stopSquare: { width: 24, height: 24, borderRadius: 4, backgroundColor: colors.listening.bg },
 });

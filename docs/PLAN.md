@@ -3,8 +3,8 @@ Full history (decision log, step-by-step notes, old designs, design tokens, Gemi
 
 Status
 • Done: steps 1–5, 7, 8 (shell, voice→confirm→save, Pick, stock/baki/customer, cash/history/undo, multi-phone sync, Drive audio + backup). Gemini-only voice engine with offline queue, মুছুন (voided/archived), সব তথ্য মুছুন, ক্রেতা import, Noto digit font.
-• Last build: release APK 0.1.47 (built Nov 15, Pixel 7). `npm test` → 1076 passing. firestore.rules deployed (Nov 15).
-• Unfinished: real Bangla voice not yet tested for baki/joma/khoroch/kena, step-5 voice queries, queue review; cloud "wipe all phones" not tested on real Firestore; background backup at night not seen running; restore not tried on phone.
+• Last build: release APK (built Nov 15, installed on Pixel 7; has home detail sheet, live-text fix, বিরতি/চালিয়ে যান on Listening). `npm test` → 1081 passing. firestore.rules deployed (Nov 15).
+• Unfinished: pause/resume not yet tested on the phone (Android 13+ joins one WAV per resume; recognizer may still end by itself after a few quiet seconds); real Bangla voice not yet tested for baki/joma/khoroch/kena, step-5 voice queries, queue review; cloud "wipe all phones" not tested on real Firestore; background backup at night not seen running; restore not tried on phone.
 • Known bugs: "তিন তলার" parsed as number; বস্তা-type units stored 1:1; two customers with same name can't be split; deep-link tap right after launch can crash (adb only); both phones take nightly backup.
 • Next: Pixel offline voice → queue → review test; pilot with real voice; step 6 (fix parser/prompt from pilot log).
 
