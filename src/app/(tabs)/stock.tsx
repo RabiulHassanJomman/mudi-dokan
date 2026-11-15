@@ -10,7 +10,7 @@ import { Txt } from '../../components/Txt';
 import { stockList } from '../../db/repo';
 import { usePartyDelete } from '../../components/DeleteEntry';
 import { stockScreenWords, stockView, stockWords, type StockView } from '../../domain/stock';
-import { formatQty, formatTaka } from '../../lib/bn';
+import { formatNumber, formatQty } from '../../lib/bn';
 import { speak, stopSpeaking } from '../../lib/speak';
 import { colors, fontSize, productTiles, radius, spacing } from '../../theme/tokens';
 import { nav } from '../../lib/nav';
@@ -101,9 +101,14 @@ function StockCard({ v, onDelete }: { v: StockView; onDelete: () => void }) {
           {v.stock <= 0 ? 'শেষ' : formatQty(v.stock, v.unit)}
         </Txt>
       )}
-      {v.sellPricePoisha !== null && (
+      {(v.costPricePoisha !== null || v.sellPricePoisha !== null) && (
         <Txt size={fontSize.caption} weight="medium" color={colors.muted}>
-          {formatTaka(v.sellPricePoisha)}
+          {[
+            v.costPricePoisha !== null && `কেনা ${formatNumber(v.costPricePoisha / 100)}`,
+            v.sellPricePoisha !== null && `বেচা ${formatNumber(v.sellPricePoisha / 100)}`,
+          ]
+            .filter(Boolean)
+            .join(' · ')}
         </Txt>
       )}
     </Pressable>

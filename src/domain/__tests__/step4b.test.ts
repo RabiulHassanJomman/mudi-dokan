@@ -69,6 +69,7 @@ describe('stock (মাল)', () => {
     name: 'চাল',
     unit: 'kg',
     sellPricePoisha: 6000,
+    costPricePoisha: 5500,
     bought: 50,
     sold: 8,
     purchases: 1,
@@ -219,7 +220,7 @@ describe('মোট বাকি: list + total, no names read aloud', () => {
 
 describe('সব মাল: low first, short TTS', () => {
   const v = (name: string, stock: number | null, low = false): StockView => ({
-    id: name, name, unit: 'kg', sellPricePoisha: 6000, stock, known: stock !== null, low,
+    id: name, name, unit: 'kg', sellPricePoisha: 6000, costPricePoisha: 5500, stock, known: stock !== null, low,
   });
 
   it('low-stock first, otherwise order kept', () => {

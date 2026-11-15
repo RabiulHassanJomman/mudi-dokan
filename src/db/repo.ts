@@ -192,6 +192,8 @@ export async function addProductAlias(db: Db, w: Writer, alias: string, productI
 export const stockList = (db: Db) =>
   db.getAllAsync<StockRow>(
     `SELECT p.id, p.name, p.unit, p.sell_price_poisha AS sellPricePoisha,
+       (SELECT CAST(ROUND(SUM(buy_price_poisha * quantity) / SUM(quantity)) AS INTEGER)
+          FROM v_purchases WHERE product_id = p.id AND quantity > 0) AS costPricePoisha,
        COALESCE((SELECT SUM(quantity) FROM v_purchases WHERE product_id = p.id), 0) AS bought,
        COALESCE((SELECT SUM(quantity) FROM v_sales WHERE product_id = p.id), 0) AS sold,
        (SELECT COUNT(*) FROM v_purchases WHERE product_id = p.id) AS purchases

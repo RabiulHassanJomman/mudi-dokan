@@ -69,8 +69,8 @@ describe('stockList (মাল)', () => {
     await sell(db, w, 'ডাল ২ কেজি ২২০ টাকা'); // new product at its first sale
     const list = await stockList(db);
     expect(list).toEqual([
-      { id: expect.any(String), name: 'চাল', unit: 'kg', sellPricePoisha: 6000, bought: 60, sold: 10.5, purchases: 2 },
-      { id: expect.any(String), name: 'ডাল', unit: 'kg', sellPricePoisha: 11000, bought: 0, sold: 2, purchases: 0 },
+      { id: expect.any(String), name: 'চাল', unit: 'kg', sellPricePoisha: 6000, costPricePoisha: 5500, bought: 60, sold: 10.5, purchases: 2 },
+      { id: expect.any(String), name: 'ডাল', unit: 'kg', sellPricePoisha: 11000, costPricePoisha: null, bought: 0, sold: 2, purchases: 0 },
     ]);
     expect(list.map(stockView).map((v) => [v.name, v.stock, v.low])).toEqual([
       ['চাল', 49.5, false],

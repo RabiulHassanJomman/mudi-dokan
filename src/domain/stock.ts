@@ -11,6 +11,8 @@ export interface StockRow {
   name: string;
   unit: Unit;
   sellPricePoisha: number | null;
+  /** Weighted average buy price per unit; null = never bought. */
+  costPricePoisha: number | null;
   /** Sum of purchase quantities, in the product's unit. */
   bought: number;
   sold: number;
@@ -23,6 +25,7 @@ export interface StockView {
   name: string;
   unit: Unit;
   sellPricePoisha: number | null;
+  costPricePoisha: number | null;
   /** null = no purchase written yet (sold before any কেনা): unknown, not negative. */
   stock: number | null;
   known: boolean;
@@ -55,6 +58,7 @@ export function stockView(r: StockRow): StockView {
     name: r.name,
     unit: r.unit,
     sellPricePoisha: r.sellPricePoisha,
+    costPricePoisha: r.costPricePoisha,
     stock,
     known,
     low: stock !== null && stock <= LOW_STOCK[r.unit],
