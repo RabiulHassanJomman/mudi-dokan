@@ -44,7 +44,8 @@ export function recentLine(e: RecentEntry): RecentLine {
       const who = e.customer ? `, ${e.customer}${e.credit ? ', বাকিতে' : ''}` : '';
       return {
         title: e.customer ? `${e.title} · ${e.customer}` : e.title,
-        detail: one ? qty : `${toBnDigits(e.lines)}টি জিনিস`,
+        // one line without a quantity = a নগদ sale said as goods and a total
+        detail: one ? qty || 'নগদ বিক্রি' : `${toBnDigits(e.lines)}টি জিনিস`,
         badge: e.credit ? 'বাকি' : null,
         words: `বিক্রি: ${e.title}${one && sayQty ? ` ${sayQty}` : ''}${who}, ${money}।`,
       };

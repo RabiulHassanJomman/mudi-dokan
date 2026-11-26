@@ -574,7 +574,7 @@ export async function saveEntry(db: Db, w: Writer, d: EntryDraft, voiceLogId: st
       final: entrySummary(d),
       entryTable: ENTRY_TABLE[kind],
       entryId: id,
-      intent: kind,
+      intent: kind === 'goods_sale' ? 'sale' : kind,
     });
   });
   return id;

@@ -8,9 +8,10 @@ Status
 • Known bugs: "তিন তলার" parsed as number; বস্তা-type units stored 1:1; two customers with same name can't be split; deep-link tap right after launch can crash (adb only); both phones take nightly backup.
 • Android parsing A1 done (Nov 27): src/parser/fixed.ts (parseFixed), not wired into the app yet; `npm test` → 1125 passing. No APK built or run for A1: .env (Gemini key) is missing on this Mac and no phone was connected.
 • Android parsing A2 done (Nov 27): v15, goods sale + money-only purchase drafts, save and ✏️ logic; `npm test` → 1138 passing. No screen creates them yet. No APK or phone run (same reason as A1), so the v15 upgrade is untested on the phone.
-• Next: Android parsing step A3 (section below). Restore .env before any APK. After Android parsing: Gemini latency (debug log ms; prompt ≈1.8k tokens, 12 examples), then Fenrir TTS.
+• Android parsing A3 done (Nov 27): confirm card (নগদ goods sale, goods edit, money-only কেনা), ✏️, মাল "খরচ ৳"; the card parses voice logs with engine android. `npm test` → 1147 passing; release APK builds but was not installed (no .env, so no Gemini key). Screens not seen on the phone; nothing creates android logs until A4.
+• Next: Android parsing step A4 (section below). Restore .env before installing an APK on the shop phone. After Android parsing: Gemini latency (debug log ms; prompt ≈1.8k tokens, 12 examples), then Fenrir TTS.
 
-Android parsing (decided Nov 27; A1, A2 built)
+Android parsing (decided Nov 27; A1–A3 built)
 Setting (⚙, per phone): বোঝার উপায় = Android (default) / Gemini. Gemini mode stays as it is today.
 Android mode: phone STT (bn-BD) → new fixed-format parser → confirm card → হ্যাঁ/না. No Gemini call, no understand_queue.
 

@@ -9,8 +9,8 @@ import { ScreenHeader } from '../../components/ScreenHeader';
 import { Txt } from '../../components/Txt';
 import { stockList } from '../../db/repo';
 import { usePartyDelete } from '../../components/DeleteEntry';
-import { stockScreenWords, stockView, stockWords, type StockView } from '../../domain/stock';
-import { formatNumber, formatQty } from '../../lib/bn';
+import { stockQtyText, stockScreenWords, stockView, stockWords, type StockView } from '../../domain/stock';
+import { formatNumber } from '../../lib/bn';
 import { speak, stopSpeaking } from '../../lib/speak';
 import { colors, fontSize, productTiles, radius, spacing } from '../../theme/tokens';
 import { nav } from '../../lib/nav';
@@ -92,13 +92,13 @@ function StockCard({ v, onDelete }: { v: StockView; onDelete: () => void }) {
       <Txt size={fontSize.label} weight="bold">
         {v.name}
       </Txt>
-      {v.stock === null ? (
+      {v.stock === null && !v.spentPoisha ? (
         <Txt size={fontSize.caption} weight="semibold" color={colors.muted}>
-          কেনা লেখা নেই
+          {stockQtyText(v)}
         </Txt>
       ) : (
-        <Txt size={26} weight="bold" color={v.low ? colors.lowStockQty : colors.ink}>
-          {v.stock <= 0 ? 'শেষ' : formatQty(v.stock, v.unit)}
+        <Txt size={v.stock === null ? fontSize.label : 26} weight="bold" color={v.low ? colors.lowStockQty : colors.ink}>
+          {stockQtyText(v)}
         </Txt>
       )}
       {(v.costPricePoisha !== null || v.sellPricePoisha !== null) && (

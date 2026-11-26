@@ -196,6 +196,20 @@ export function entryFromFixed(c: FixedCommand, ctx: Pick<EntryContext, 'product
   return finalize({ ...base, note: null, kind: 'purchase', purchase: line });
 }
 
+/** The Android parse in the shape the voice log keeps (parsed_json). */
+export function fixedAsParsed(c: FixedCommand): ParsedCommand {
+  const base = { confidence: 'high' as const, missing: [], raw: c.raw, normalized: c.normalized };
+  if (!c.kind || c.problems.length) return { ...base, intent: 'unknown' };
+  const goods = c.goods.join(', ');
+  return {
+    ...base,
+    intent: c.kind === 'cash_sale' ? 'sale' : c.kind,
+    amount: c.amount,
+    ...(c.customer ? { customer: c.customer } : {}),
+    ...(c.kind === 'purchase' ? { product: goods } : goods ? { note: goods } : {}),
+  };
+}
+
 // ── edits ──────────────────────────────────────────────────────
 
 export const withKind = (d: EntryDraft, kind: LedgerKind): EntryDraft => finalize({ ...d, kind });
@@ -215,6 +229,8 @@ export const setEntryAmount = (d: EntryDraft, amountPoisha: number | null): Entr
 };
 
 export const setEntryItem = (d: EntryDraft, item: string): EntryDraft => finalize({ ...d, item: item.trim() || null });
+/** The goods said with one total (নগদ বিক্রি, বাকি). */
+export const setEntryNote = (d: EntryDraft, note: string): EntryDraft => finalize({ ...d, note: note.trim() || null });
 export const setEntryPerson = (d: EntryDraft, person: string): EntryDraft => finalize({ ...d, person: person.trim() || null });
 
 const purchaseTotal = (l: PurchaseLine) => (l.quantity && l.buyPricePoisha !== null ? Math.round(l.quantity * l.buyPricePoisha) : null);

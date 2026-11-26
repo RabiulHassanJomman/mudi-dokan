@@ -6,6 +6,7 @@ import {
   setBuyPrice,
   setEntryAmount,
   setEntryItem,
+  setEntryNote,
   setEntryPerson,
   setSellPrice,
   stepPurchase,
@@ -38,9 +39,10 @@ const KIND_LOOK: Record<string, { icon: IconName; ink: string; tint: string }> =
   expense: { icon: 'cash', ink: colors.bakiInk, tint: colors.bakiTint },
   owner_withdrawal: { icon: 'cash', ink: colors.stock, tint: colors.stockTint },
   purchase: { icon: 'box', ink: colors.stock, tint: colors.stockTint },
+  goods_sale: { icon: 'cash', ink: colors.saleDark, tint: colors.saleTint },
 };
 
-/** The confirm card body for বাকি / জমা / খরচ / মালিক নিল / মাল কেনা. Numbers are typed on the big pad. */
+/** The confirm card body for বাকি / জমা / খরচ / মালিক নিল / মাল কেনা / নগদ goods sale. Numbers are typed on the big pad. */
 export function EntryForm({ entry, known, onChange, onRenameProduct }: Props) {
   const [pad, setPad] = useState<PadFor>(null);
   const ledger = entry.kind === null || entry.kind === 'baki' || entry.kind === 'joma';
@@ -69,13 +71,24 @@ export function EntryForm({ entry, known, onChange, onRenameProduct }: Props) {
             <KindToggle label="জমা" icon="cash" on={entry.kind === 'joma'} ink={colors.saleDark} border={colors.sale} tint={colors.saleTint} onPress={() => onChange(withKind(entry, 'joma'))} />
           </View>
           {bad('no_kind') && <Hint text="বাকি না জমা? উপরে বেছে নিন।" />}
-          {!!entry.note && (
-            <Txt wrap size={fontSize.label} weight="semibold" color={colors.bakiInk}>
-              {entry.note}
-            </Txt>
+          {entry.kind === 'baki' && (
+            <Field label="কী কী নিল?" value={entry.note} warn={false} placeholder="না দিলেও চলে" onChange={(t) => onChange(setEntryNote(entry, t))} />
           )}
           <CustomerPicker
             label={entry.kind === 'joma' ? 'কার জমা?' : 'কার বাকি?'}
+            name={entry.customerName}
+            ok={entry.customerOk}
+            known={known}
+            onChange={(n, ok) => onChange(withEntryCustomer(entry, n, ok))}
+          />
+        </>
+      )}
+
+      {entry.kind === 'goods_sale' && (
+        <>
+          <Field label="কী কী বিক্রি?" value={entry.note} warn={bad('no_item')} placeholder="যেমন: আদা, চাল" onChange={(t) => onChange(setEntryNote(entry, t))} />
+          <CustomerPicker
+            label="ক্রেতা (খালি রাখা যায়)"
             name={entry.customerName}
             ok={entry.customerOk}
             known={known}
@@ -117,20 +130,24 @@ export function EntryForm({ entry, known, onChange, onRenameProduct }: Props) {
               {onRenameProduct && <Icon name="edit" size={20} color={colors.ink2} strokeWidth={1.8} />}
             </Pressable>
           </View>
-          <View style={styles.qtyRow}>
-            <Step icon="minus" label="কমান" onPress={() => onChange(stepPurchase(entry, -1))} />
-            <View style={[styles.qtyBox, l.unitWarning && styles.warnBox]}>
-              <Txt size={fontSize.label} weight="bold" style={styles.center}>
-                {l.quantity ? formatQty(l.quantity, l.unit) : `? ${unitBn}`}
-              </Txt>
-            </View>
-            <Step icon="plus" label="বাড়ান" onPress={() => onChange(stepPurchase(entry, 1))} />
-          </View>
-          {l.unitWarning && l.product && (
-            <Hint text={`${l.product.name} সাধারণত ${UNIT_BN_LOC[l.product.unit]} — ঠিক আছে তো?`} />
+          {!l.amountOnly && (
+            <>
+              <View style={styles.qtyRow}>
+                <Step icon="minus" label="কমান" onPress={() => onChange(stepPurchase(entry, -1))} />
+                <View style={[styles.qtyBox, l.unitWarning && styles.warnBox]}>
+                  <Txt size={fontSize.label} weight="bold" style={styles.center}>
+                    {l.quantity ? formatQty(l.quantity, l.unit) : `? ${unitBn}`}
+                  </Txt>
+                </View>
+                <Step icon="plus" label="বাড়ান" onPress={() => onChange(stepPurchase(entry, 1))} />
+              </View>
+              {l.unitWarning && l.product && (
+                <Hint text={`${l.product.name} সাধারণত ${UNIT_BN_LOC[l.product.unit]} — ঠিক আছে তো?`} />
+              )}
+              <PriceRow label={`কেনা দাম (প্রতি ${unitBn})`} poisha={l.buyPricePoisha} warn={bad('no_price')} onPress={() => setPad('buy')} />
+              <PriceRow label={`বেচা দাম (প্রতি ${unitBn})`} poisha={l.sellPricePoisha} optional onPress={() => setPad('sell')} />
+            </>
           )}
-          <PriceRow label={`কেনা দাম (প্রতি ${unitBn})`} poisha={l.buyPricePoisha} warn={bad('no_price')} onPress={() => setPad('buy')} />
-          <PriceRow label={`বেচা দাম (প্রতি ${unitBn})`} poisha={l.sellPricePoisha} optional onPress={() => setPad('sell')} />
         </View>
       )}
 
@@ -138,7 +155,7 @@ export function EntryForm({ entry, known, onChange, onRenameProduct }: Props) {
         accessibilityRole="button"
         accessibilityLabel={entry.amountPoisha === null ? 'টাকা চেপে দিন' : `${formatTaka(entry.amountPoisha)}, বদলান`}
         onPress={() => setPad('amount')}
-        style={[styles.amount, bad('no_amount') && styles.warnBox]}
+        style={[styles.amount, (bad('no_amount') || (!!l?.amountOnly && bad('no_price'))) && styles.warnBox]}
       >
         <Txt size={fontSize.body} weight="semibold" color={colors.muted}>
           {l ? 'মোট' : 'টাকা'}

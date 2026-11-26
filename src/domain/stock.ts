@@ -2,7 +2,7 @@
  * মাল (Stock): stock = bought − sold (never stored), low-stock, and what TTS says.
  * Pure TS.
  */
-import { UNIT_BN, spokenQty, toBnDigits } from '../lib/bn';
+import { UNIT_BN, formatQty, formatTaka, spokenQty, toBnDigits } from '../lib/bn';
 import type { Unit } from '../parser/types';
 
 /** One product with its effective purchase and sale totals (repo.stockList). */
@@ -67,6 +67,12 @@ export function stockView(r: StockRow): StockView {
     low: stock !== null && stock <= LOW_STOCK[r.unit],
     spentPoisha: r.spentPoisha,
   };
+}
+
+/** The big line on a মাল card: the quantity, or the money spent when no quantity was ever said. */
+export function stockQtyText(v: StockView): string {
+  if (v.stock !== null) return v.stock <= 0 ? 'শেষ' : formatQty(v.stock, v.unit);
+  return v.spentPoisha > 0 ? `খরচ ${formatTaka(v.spentPoisha)}` : 'কেনা লেখা নেই';
 }
 
 const priceWords = (v: StockView) =>

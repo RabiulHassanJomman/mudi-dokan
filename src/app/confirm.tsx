@@ -39,8 +39,10 @@ import {
   canSaveEntry,
   choosePurchaseProduct,
   diffEntries,
+  entryFromFixed,
   entryFromParse,
   entryReadback,
+  fixedAsParsed,
   renamePurchaseProduct,
   type EntryDraft,
   type LedgerKind,
@@ -50,7 +52,7 @@ import { basketFromStored, entryFromStored, type StoredEntry } from '../domain/f
 import { filterProducts, type PickProduct } from '../domain/pick';
 import { recentLine, type RecentEntry } from '../domain/recent';
 import { suggestProducts } from '../domain/products';
-import { allStockList, allStockWords, stockView, stockWords, type StockView } from '../domain/stock';
+import { allStockList, allStockWords, stockQtyText, stockView, stockWords, type StockView } from '../domain/stock';
 import {
   addCustomerAlias,
   addProductAlias,
@@ -61,6 +63,7 @@ import {
   findProduct,
   findProducts,
   getVoiceLog,
+  goodsSaleForFix,
   knownNames,
   ownerNames,
   pickProducts,
@@ -86,7 +89,7 @@ import { getDevice, writer } from '../device';
 import { UNIT_BN, formatNumber, formatQty, formatTaka, parseTakaInput, toBnDigits } from '../lib/bn';
 import { speak, stopSpeaking } from '../lib/speak';
 import { pickedCommand, pickText, type PickedItem } from '../domain/pick';
-import { parseCommand } from '../parser';
+import { parseCommand, parseFixed } from '../parser';
 import type { Intent, ParseContext, ParsedCommand } from '../parser/types';
 import { colors, fonts, fontSize, productTiles, radius, size, spacing } from '../theme/tokens';
 import { nav } from '../lib/nav';
@@ -270,20 +273,44 @@ export default function ConfirmScreen() {
         parsed = pickedCommand(pick);
         logId.current = await createVoiceLog(db, w, { transcript, source: 'typed', contextTab: tab, parsed, via: 'pick' });
       } else {
-        /** A voice command: Gemini's checked answer (stored on the log) is the card. Typed text: the rule parser. */
+        /**
+         * A voice command: Gemini's checked answer (stored on the log) is the card; heard by the
+         * phone (Android parsing): the fixed formats. Typed text: the rule parser.
+         */
         let fromGemini: ParsedCommand | null = null;
+        let heardByPhone = false;
         if (params.logId) {
           logId.current = params.logId;
           const log = await getVoiceLog(db, params.logId);
           fromGemini = log?.gemini_json ? (JSON.parse(log.gemini_json) as ParsedCommand) : null;
           transcript = fromGemini?.raw ?? log?.gemini_transcript ?? log?.transcript ?? '';
           setByGemini(!!fromGemini);
+          heardByPhone = log?.engine === 'android' && !fromGemini;
           // said earlier (waited in the queue): the entry keeps that time
           entryAt.current = await queuedAtOf(db, params.logId);
         } else {
           transcript = params.text ?? '';
           // empty = the number-pad fallback (voice failed): nothing to parse
           logId.current = await createVoiceLog(db, w, { transcript, source: 'typed', contextTab: tab, ...(transcript ? {} : { via: 'pick' as const }) });
+        }
+        if (heardByPhone) {
+          const cmd = parseFixed(transcript, {
+            knownProducts: names.products,
+            knownCustomers: [...names.customers, ...Object.keys(aliasesNow)],
+            productAliases: await productAliasMap(db),
+          });
+          if (cmd.customer) cmd.customer = resolveCustomerAlias(cmd.customer, aliasesNow);
+          await setParsed(db, w, logId.current!, fixedAsParsed(cmd), { by: 'android' });
+          heardCustomer.current = cmd.customer ?? null;
+          const products = await findProducts(db, cmd.goods);
+          const e = entryFromFixed(cmd, { products, knownCustomers: names.customers });
+          if (!alive) return;
+          if (e) return showEntry(transcript, e);
+          await setOutcome(db, w, logId.current!, 'unsupported');
+          decided.current = true;
+          setState({ kind: 'unsupported', transcript, intent: 'unknown' });
+          void speak('কিছু বুঝিনি। আবার বলুন।');
+          return;
         }
         const rule = fromGemini ? null : parseCommand(transcript, {
           tab: PARSE_TABS.find((t) => t === tab),
@@ -391,13 +418,7 @@ export default function ConfirmScreen() {
           defaultKind,
         });
         if (!alive) return;
-        if (e) {
-          firstEntry.current = e;
-          setEntry(e);
-          setState({ kind: 'entry', transcript });
-          void sayAndListen(entryReadback(e), canSaveEntry(e));
-          return;
-        }
+        if (e) return showEntry(transcript, e);
         // commands nobody understood
         await setOutcome(db, w, logId.current, 'unsupported');
         decided.current = true;
@@ -419,6 +440,14 @@ export default function ConfirmScreen() {
     // load once per screen
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /** A new বাকি / জমা / খরচ / কেনা / নগদ goods card: read it, then listen for হ্যাঁ / না. */
+  function showEntry(transcript: string, e: EntryDraft) {
+    firstEntry.current = e;
+    setEntry(e);
+    setState({ kind: 'entry', transcript });
+    void sayAndListen(entryReadback(e), canSaveEntry(e));
+  }
 
   // ── questions ──────────────────────────────────────────────────
   async function stockAnswer(spoken: string | null, products: PickProduct[]): Promise<Answer> {
@@ -455,7 +484,9 @@ export default function ConfirmScreen() {
     const [table, id] = fix.split(':') as [string, string];
     fixRef.current = { table, id, stored: null };
     decided.current = false;
-    if (table === 'sales') {
+    // a নগদ goods sale is fixed on the entry card (goods and total), other sales as baskets
+    const goods = table === 'sales' ? await goodsSaleForFix(db, id) : null;
+    if (table === 'sales' && !goods) {
       const lines = await basketForFix(db, id);
       if (!lines.length) return void setState({ kind: 'unsupported', transcript: '', intent: 'unknown' });
       const b = basketFromStored(lines, customers);
@@ -466,7 +497,7 @@ export default function ConfirmScreen() {
       void speak(`ঠিক করুন। ${readback(b).replace(/ ঠিক আছে\?$/, '')} বদলে হ্যাঁ চাপুন।`);
       return;
     }
-    const stored = isFixTable(table) ? await entryForFix(db, table, id) : null;
+    const stored = goods ?? (isFixTable(table) ? await entryForFix(db, table, id) : null);
     if (!stored) return void setState({ kind: 'unsupported', transcript: '', intent: 'unknown' });
     fixRef.current.stored = stored;
     const e = entryFromStored(stored);
@@ -895,8 +926,8 @@ export default function ConfirmScreen() {
                   </Txt>
                 )}
               </View>
-              <Txt size={fontSize.label} weight="bold" color={v.low ? colors.lowStockQty : v.stock === null ? colors.muted : colors.ink}>
-                {v.stock === null ? 'কেনা লেখা নেই' : v.stock <= 0 ? 'শেষ' : formatQty(v.stock, v.unit)}
+              <Txt size={fontSize.label} weight="bold" color={v.low ? colors.lowStockQty : v.stock === null && !v.spentPoisha ? colors.muted : colors.ink}>
+                {stockQtyText(v)}
               </Txt>
             </Pressable>
           ))}
