@@ -31,6 +31,7 @@ export default function SayScreen() {
   const [text, setText] = useState('');
   const [problem, setProblem] = useState('');
   const [busy, setBusy] = useState(false);
+  const scroll = useRef<React.ComponentRef<typeof ScrollView>>(null);
   const input = useRef<React.ComponentRef<typeof TextInput>>(null);
 
   const intro = `${customer ? `${customer}। ` : ''}কিবোর্ডের মাইক চেপে বলুন। যেমন: ${examples.join('। অথবা: ')}। বলা হলে, হয়ে গেছে চাপুন।`;
@@ -49,6 +50,7 @@ export default function SayScreen() {
     const said = text.trim();
     if (!said) {
       setProblem('কিছু লেখা হয়নি। কিবোর্ডের মাইক চেপে বলুন।');
+      scroll.current?.scrollTo({ y: 0, animated: true });
       void speak('কিছু লেখা হয়নি। কিবোর্ডের মাইক চেপে বলুন।');
       return;
     }
@@ -69,6 +71,7 @@ export default function SayScreen() {
         await setParsed(db, w, logId, fixedAsParsed(cmd), { by: 'android' });
         await setOutcome(db, w, logId, 'unsupported');
         setProblem(words);
+        scroll.current?.scrollTo({ y: 0, animated: true });
         void speak(words);
         input.current?.focus();
         return;
@@ -102,7 +105,7 @@ export default function SayScreen() {
           </View>
         </View>
 
-        <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
+        <ScrollView ref={scroll} contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
           <View style={styles.example}>
             <View style={styles.exampleHead}>
               <Icon name="mic" size={22} color={colors.saleDark} />
@@ -117,6 +120,14 @@ export default function SayScreen() {
             ))}
           </View>
 
+          {/* above the text box: below it the keyboard would cover it */}
+          {!!problem && (
+            <View accessibilityLiveRegion="polite" style={styles.problem}>
+              <Txt wrap size={fontSize.label} weight="bold" color={colors.bakiInk}>
+                {problem}
+              </Txt>
+            </View>
+          )}
           <TextInput
             ref={input}
             value={text}
@@ -133,13 +144,6 @@ export default function SayScreen() {
             style={[styles.input, !!problem && styles.inputWarn]}
           />
 
-          {!!problem && (
-            <View style={styles.problem}>
-              <Txt wrap size={fontSize.label} weight="bold" color={colors.bakiInk}>
-                {problem}
-              </Txt>
-            </View>
-          )}
         </ScrollView>
 
         <View style={styles.actions}>
