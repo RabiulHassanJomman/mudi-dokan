@@ -6,9 +6,10 @@ Status
 • Last build: release APK (built Nov 15, installed on Pixel 7; has home detail sheet, live-text fix, বিরতি/চালিয়ে যান on Listening, spinner while Gemini thinks). Hidden voice-test screen (⚙ › version long-press › 🔊) lists Bangla TTS voices; on-device voices are robotic; Gemini TTS "Fenrir" chosen from samples, not built in yet. `npm test` → 1081 passing. firestore.rules deployed (Nov 15).
 • Unfinished: pause/resume not yet tested on the phone (Android 13+ joins one WAV per resume; recognizer may still end by itself after a few quiet seconds); real Bangla voice not yet tested for baki/joma/khoroch/kena, step-5 voice queries, queue review; cloud "wipe all phones" not tested on real Firestore; background backup at night not seen running; restore not tried on phone. Fenrir TTS not integrated (plan: cache clips, speak with robotic voice first if not cached, never wait on network).
 • Known bugs: "তিন তলার" parsed as number; বস্তা-type units stored 1:1; two customers with same name can't be split; deep-link tap right after launch can crash (adb only); both phones take nightly backup.
-• Next: Android parsing (section below), step A1. Not started. After it: Gemini latency (debug log ms; prompt ≈1.8k tokens, 12 examples), then Fenrir TTS.
+• Android parsing A1 done (Nov 27): src/parser/fixed.ts (parseFixed), not wired into the app yet; `npm test` → 1125 passing. No APK built or run for A1: .env (Gemini key) is missing on this Mac and no phone was connected.
+• Next: Android parsing step A2 (section below). Restore .env before any APK. After Android parsing: Gemini latency (debug log ms; prompt ≈1.8k tokens, 12 examples), then Fenrir TTS.
 
-Android parsing (decided Nov 27, not built yet)
+Android parsing (decided Nov 27; A1 built)
 Setting (⚙, per phone): বোঝার উপায় = Android (default) / Gemini. Gemini mode stays as it is today.
 Android mode: phone STT (bn-BD) → new fixed-format parser → confirm card → হ্যাঁ/না. No Gemini call, no understand_queue.
 

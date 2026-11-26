@@ -1,6 +1,8 @@
 export { parseCommand } from './parse';
 export { parseNumber } from './numbers';
 export { parseSpokenAmount } from './amount';
+export { parseFixed } from './fixed';
+export type { FixedCommand, FixedContext, FixedKind, FixedProblem } from './fixed';
 export type { NumberMatch } from './numbers';
 export { parseUnit } from './units';
 export type { UnitMatch } from './units';
