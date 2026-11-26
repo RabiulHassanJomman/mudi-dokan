@@ -311,8 +311,8 @@ describe('v7–v9 (shared by main and exp/gemini-audio)', () => {
     expect(() => db.exec("UPDATE sales SET quantity = 1 WHERE id = 's1'")).toThrow(/append-only/);
   }
 
-  it('v7–v9 are shared by every branch (the latest is now 14)', () => {
-    expect(SCHEMA_VERSION).toBe(14);
+  it('v7–v9 are shared by every branch (the latest is now 15)', () => {
+    expect(SCHEMA_VERSION).toBe(15);
   });
 
   it('v6 shop phone (main) → v9: data kept, new columns null', async () => {
@@ -608,6 +608,33 @@ describe('v10: voided + entry_at (corrections and undo)', () => {
     expect(old.prepare("SELECT note, amount_poisha FROM v_ledger WHERE id = 'l2'").get()).toEqual({ note: 'তেল, আটা, ময়দা, সুজি', amount_poisha: 50000 });
     // still append-only
     expect(() => old.exec("UPDATE ledger SET note = 'x' WHERE id = 'l2'")).toThrow(/append-only/);
+    old.close();
+  });
+
+  it('v14 shop phone → v15: every row kept, v_sales shows the new note, stock unchanged', async () => {
+    const old = v9Shop();
+    for (let v = 9; v < 14; v++) old.exec(`${MIGRATIONS[v]}\nPRAGMA user_version = ${v + 1};`);
+    const before = dumpAll(old);
+    const sales = () => old.prepare('SELECT id, product_id, quantity, amount_poisha, at FROM v_sales ORDER BY id').all();
+    const stock = () => old.prepare('SELECT * FROM v_stock ORDER BY product_id').all();
+    const [salesBefore, stockBefore] = [sales(), stock()];
+    expect(salesBefore.length).toBeGreaterThan(0);
+    await expect(migrate(adapter(old))).resolves.toBe(14);
+    expect(old.prepare('PRAGMA user_version').get()).toEqual({ user_version: SCHEMA_VERSION });
+    const after = dumpAll(old);
+    for (const t of TABLES) {
+      expect(after[t]!.map((r, k) => Object.fromEntries(Object.keys(before[t]![k]!).map((c) => [c, r[c]])))).toEqual(before[t]);
+    }
+    expect(sales()).toEqual(salesBefore);
+    expect(stock()).toEqual(stockBefore);
+    expect(old.prepare('SELECT DISTINCT note FROM v_sales').all()).toEqual([{ note: null }]);
+    insert(old, 'sales', {
+      ...entry('s9'), product_id: 'p1', quantity: 1, sell_price_poisha: 10000, amount_poisha: 10000,
+      cost_price_poisha: 0, cost_known: 0, note: 'আদা, চাল', created_at: now + 5,
+    });
+    expect(old.prepare("SELECT note, amount_poisha FROM v_sales WHERE id = 's9'").get()).toEqual({ note: 'আদা, চাল', amount_poisha: 10000 });
+    // still append-only
+    expect(() => old.exec("UPDATE sales SET note = 'x' WHERE id = 's9'")).toThrow(/append-only/);
     old.close();
   });
 });

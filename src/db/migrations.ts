@@ -422,10 +422,23 @@ ${forkSafeView('ledger')}
 `;
 
 /**
+ * v15 (Android parsing): sales.note — the goods of a নগদ sale said with one total and no
+ * quantities ("নগদ বিক্রি আদা, চাল ১০০ টাকা"): one sales row of the hidden goods product.
+ * v_sales is made again to show the column (v_stock reads it, so it is made again too).
+ */
+const V15 = `
+ALTER TABLE sales ADD COLUMN note TEXT;
+DROP VIEW v_stock;
+DROP VIEW v_sales;
+${forkSafeView('sales')}
+${V_STOCK}
+`;
+
+/**
  * Index i holds the SQL that takes the DB from user_version i to i + 1.
  * Append only; never edit or renumber a shipped one.
  */
-export const MIGRATIONS: readonly string[] = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14];
+export const MIGRATIONS: readonly string[] = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15];
 
 /**
  * Nov 14 fork: an early main build shipped v7 = customers.note (no Gemini columns) while

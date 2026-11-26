@@ -7,9 +7,10 @@ Status
 • Unfinished: pause/resume not yet tested on the phone (Android 13+ joins one WAV per resume; recognizer may still end by itself after a few quiet seconds); real Bangla voice not yet tested for baki/joma/khoroch/kena, step-5 voice queries, queue review; cloud "wipe all phones" not tested on real Firestore; background backup at night not seen running; restore not tried on phone. Fenrir TTS not integrated (plan: cache clips, speak with robotic voice first if not cached, never wait on network).
 • Known bugs: "তিন তলার" parsed as number; বস্তা-type units stored 1:1; two customers with same name can't be split; deep-link tap right after launch can crash (adb only); both phones take nightly backup.
 • Android parsing A1 done (Nov 27): src/parser/fixed.ts (parseFixed), not wired into the app yet; `npm test` → 1125 passing. No APK built or run for A1: .env (Gemini key) is missing on this Mac and no phone was connected.
-• Next: Android parsing step A2 (section below). Restore .env before any APK. After Android parsing: Gemini latency (debug log ms; prompt ≈1.8k tokens, 12 examples), then Fenrir TTS.
+• Android parsing A2 done (Nov 27): v15, goods sale + money-only purchase drafts, save and ✏️ logic; `npm test` → 1138 passing. No screen creates them yet. No APK or phone run (same reason as A1), so the v15 upgrade is untested on the phone.
+• Next: Android parsing step A3 (section below). Restore .env before any APK. After Android parsing: Gemini latency (debug log ms; prompt ≈1.8k tokens, 12 examples), then Fenrir TTS.
 
-Android parsing (decided Nov 27; A1 built)
+Android parsing (decided Nov 27; A1, A2 built)
 Setting (⚙, per phone): বোঝার উপায় = Android (default) / Gemini. Gemini mode stays as it is today.
 Android mode: phone STT (bn-BD) → new fixed-format parser → confirm card → হ্যাঁ/না. No Gemini call, no understand_queue.
 
@@ -23,6 +24,7 @@ Formats (the keyword picks the type; amount = number before টাকা; one to
 Data
 • Stock is a record of money spent in this mode: no quantity, sales never reduce it. Gemini and Pick entries keep stock = purchases − sales.
 • v15 (new migration): sales.note (goods text); remake v_sales (and v_stock). A নগদ sale uses one fixed hidden product (fixed id, archived, "খুচরা মাল"), quantity 1, cost_known 0. So cash, history, undo, sync, backup work without a new table or firestore.rules change.
+• A product first bought money-only gets unit পিস (no unit was said).
 • Quantity 0 purchase: মাল screen shows টাকা spent (not "শেষ"), history and ✏️ show and edit the total only, average cost ignores it (already filters quantity > 0).
 • Unchanged behaviour: a goods-only বাকি counts in আজ বাকি, not in আজ বিক্রি.
 
@@ -45,7 +47,7 @@ Rules that still matter
 • Nothing saves without confirmation (✅ / "হ্যাঁ"). Bangla UI, targets ≥ 52 px, 🔊 on every screen.
 • Engine today: Gemini only (clip → Gemini → confirm card). Decided Nov 27: Android parsing becomes a second, default engine (section above). Rule parser (pure TS, no RN imports, unit-tested) handles typed text and হ্যাঁ/না. Gemini offline/429/error → understand_queue, reviewed later. Key is in the APK (EXPO_PUBLIC_GEMINI_KEY): billing stays off; real release needs a proxy.
 • Sync: SQLite is truth, Firestore only transport at shops/{uid}/{table}/{rowId}. Entries = UUID union; mutable tables = LWW by updated_at. Merge duplicates via merged_into + alias + correction. Daily write cap 18K.
-• Migrations: one append-only MIGRATIONS list (now v14, verified from SCHEMA_VERSION); never edit a shipped one; add an upgrade test with real-looking rows.
+• Migrations: one append-only MIGRATIONS list (now v15, verified from SCHEMA_VERSION); never edit a shipped one; add an upgrade test with real-looking rows.
 • Release: `npm run apk` only, dedicated release key (~/.mudi-dokan/keys, MUDI_RELEASE_* in ~/.gradle/gradle.properties), install with `adb install -r`, never uninstall. Keep key backups off this Mac.
 • Branch: main only.
 

@@ -4,13 +4,22 @@
  * and what gets saved. Pure TS. Money in poisha.
  */
 import { UNIT_BN, spokenQty, toBnDigits } from '../lib/bn';
+import type { FixedCommand } from '../parser/fixed';
 import type { ParseContext, ParsedCommand, Unit } from '../parser/types';
 import type { ProductInfo } from './basket';
 import { customerStatus } from './customers';
 import { convertQuantity, quantityStep } from './units';
 
 export type LedgerKind = 'baki' | 'joma';
-export type EntryKind = LedgerKind | 'expense' | 'owner_withdrawal' | 'purchase';
+/** goods_sale = a নগদ sale said as goods and one total (no quantities). */
+export type EntryKind = LedgerKind | 'expense' | 'owner_withdrawal' | 'purchase' | 'goods_sale';
+
+/**
+ * The product every goods sale's sales row points at (sales need one). Archived, so it is in
+ * no list; the same id on every phone, so sync keeps one. The goods are in sales.note.
+ */
+export const GOODS_PRODUCT_ID = 'goods-sale';
+export const GOODS_PRODUCT_NAME = 'খুচরা মাল';
 
 export type EntryProblem =
   | 'no_kind' // বাকি না জমা? (the বাকি tab heard a name/amount but no keyword)
@@ -36,6 +45,8 @@ export interface PurchaseLine {
   unitWarning: boolean;
   /** Spoken name to save as an alias of `product` (chosen from the closest matches). */
   alias: string | null;
+  /** Money spent only (Android parsing): no quantity or unit price, stored as quantity 0. */
+  amountOnly?: boolean;
 }
 
 export interface EntryDraft {
@@ -80,6 +91,14 @@ function problemsOf(d: Omit<EntryDraft, 'problems'>): EntryProblem[] {
     if (!d.item) p.push('no_item');
   } else if (d.kind === 'owner_withdrawal') {
     if (noAmount) p.push('no_amount');
+  } else if (d.kind === 'goods_sale') {
+    // the buyer is optional, but a name that is there must be a real one
+    if (d.customerName && !d.customerOk) p.push('customer_unknown');
+    if (noAmount) p.push('no_amount');
+    if (!d.note) p.push('no_item');
+  } else if (d.purchase?.amountOnly) {
+    if (!d.purchase.productName) p.push('no_product');
+    if (noAmount) p.push('no_price');
   } else if (d.purchase) {
     if (!d.purchase.productName) p.push('no_product');
     if (!d.purchase.quantity || d.purchase.quantity <= 0) p.push('no_quantity');
@@ -142,6 +161,41 @@ export function entryFromParse(p: ParsedCommand, ctx: EntryContext): EntryDraft 
   return finalize({ ...base, kind, note: p.note?.trim() || null, customerName: name, customerOk: customerStatus(name, ctx.knownCustomers) === 'known' });
 }
 
+/**
+ * Android parsing (parser/fixed) → the draft the confirm card shows. null when the sentence
+ * is incomplete: the app asks again.
+ */
+export function entryFromFixed(c: FixedCommand, ctx: Pick<EntryContext, 'products' | 'knownCustomers'>): EntryDraft | null {
+  if (!c.kind || c.problems.length || c.amount === undefined) return null;
+  const amountPoisha = poisha(c.amount);
+  const name = c.customer ?? null;
+  const base = {
+    customerName: name,
+    customerOk: !!name && customerStatus(name, ctx.knownCustomers) === 'known',
+    amountPoisha,
+    item: null,
+    person: null,
+    note: c.goods.join(', ') || null,
+    purchase: null,
+  };
+  if (c.kind === 'cash_sale') return finalize({ ...base, kind: 'goods_sale' });
+  if (c.kind !== 'purchase') return finalize({ ...base, kind: c.kind });
+  const spoken = c.goods[0]!;
+  const product = ctx.products.get(spoken) ?? null;
+  const line: PurchaseLine = {
+    productName: product?.name ?? spoken,
+    product,
+    quantity: null,
+    unit: product?.unit ?? 'piece',
+    buyPricePoisha: null,
+    sellPricePoisha: null,
+    unitWarning: false,
+    alias: null,
+    amountOnly: true,
+  };
+  return finalize({ ...base, note: null, kind: 'purchase', purchase: line });
+}
+
 // ── edits ──────────────────────────────────────────────────────
 
 export const withKind = (d: EntryDraft, kind: LedgerKind): EntryDraft => finalize({ ...d, kind });
@@ -151,7 +205,7 @@ export const withEntryCustomer = (d: EntryDraft, name: string, ok: boolean): Ent
   finalize({ ...d, customerName: name.trim() || null, customerOk: ok && !!name.trim() });
 
 export const setEntryAmount = (d: EntryDraft, amountPoisha: number | null): EntryDraft => {
-  if (d.purchase) {
+  if (d.purchase && !d.purchase.amountOnly) {
     // a purchase total: the per-unit price follows
     const q = d.purchase.quantity;
     const buy = amountPoisha !== null && q ? Math.round(amountPoisha / q) : d.purchase.buyPricePoisha;
@@ -167,7 +221,7 @@ const purchaseTotal = (l: PurchaseLine) => (l.quantity && l.buyPricePoisha !== n
 
 /** ± on the purchase quantity; the per-unit buy price stays, the total follows. */
 export function stepPurchase(d: EntryDraft, dir: 1 | -1): EntryDraft {
-  if (!d.purchase) return d;
+  if (!d.purchase || d.purchase.amountOnly) return d;
   const step = quantityStep(d.purchase.unit);
   const q = round3(Math.max(step, (d.purchase.quantity ?? 0) + dir * step));
   const line = { ...d.purchase, quantity: q };
@@ -191,6 +245,9 @@ export const setSellPrice = (d: EntryDraft, perUnitPoisha: number | null): Entry
 export function choosePurchaseProduct(d: EntryDraft, product: ProductInfo): EntryDraft {
   const l = d.purchase;
   if (!l) return d;
+  const heardAs = l.productName && l.productName !== product.name ? l.productName : null;
+  // money only: nothing to convert
+  if (l.amountOnly) return finalize({ ...d, purchase: { ...l, product, productName: product.name, unit: product.unit, alias: heardAs } });
   let { quantity, unit, buyPricePoisha, sellPricePoisha } = l;
   let unitWarning = false;
   if (unit !== product.unit) {
@@ -204,10 +261,9 @@ export function choosePurchaseProduct(d: EntryDraft, product: ProductInfo): Entr
       if (sellPricePoisha !== null) sellPricePoisha = Math.round(sellPricePoisha * factor);
     }
   }
-  const alias = l.productName && l.productName !== product.name ? l.productName : null;
   return finalize({
     ...d,
-    purchase: { ...l, product, productName: product.name, quantity, unit, buyPricePoisha, sellPricePoisha, unitWarning, alias },
+    purchase: { ...l, product, productName: product.name, quantity, unit, buyPricePoisha, sellPricePoisha, unitWarning, alias: heardAs },
   });
 }
 
@@ -232,6 +288,7 @@ export const KIND_BN: Record<EntryKind, string> = {
   expense: 'খরচ',
   owner_withdrawal: 'মালিক নিল',
   purchase: 'মাল কেনা',
+  goods_sale: 'নগদ বিক্রি',
 };
 
 export function entryReadback(d: EntryDraft): string {
@@ -259,7 +316,21 @@ export function entryReadback(d: EntryDraft): string {
     if (has('no_amount')) s += ' কত টাকা?';
     return s + end;
   }
+  if (d.kind === 'goods_sale') {
+    const who = d.customerName ? `${d.customerName}, ` : '';
+    let s = `${who}নগদ বিক্রি${d.note ? `: ${d.note}` : ''}${d.amountPoisha !== null ? `, ${taka(d.amountPoisha)}` : ''}।`;
+    if (has('customer_unknown')) s += ` ${d.customerName} নামে কাউকে চিনি না। নিচে বেছে নিন।`;
+    else if (has('no_item')) s += ' কী কী বিক্রি?';
+    else if (has('no_amount')) s += ' কত টাকা?';
+    return s + end;
+  }
   const l = d.purchase!;
+  if (l.amountOnly) {
+    let s = `কেনা: ${l.productName ?? 'মাল'}${d.amountPoisha !== null ? `, ${taka(d.amountPoisha)}` : ''}।`;
+    if (has('no_product')) s += ' কোন মাল?';
+    else if (has('no_price')) s += ' কত টাকা?';
+    return s + end;
+  }
   const unit = UNIT_BN[l.unit];
   let s = `কেনা: ${l.productName ?? 'মাল'}${l.quantity ? ` ${spokenQty(l.quantity, l.unit)}` : ''}`;
   if (l.buyPricePoisha !== null) s += `, ${unit} ${taka(l.buyPricePoisha)}`;
@@ -309,5 +380,6 @@ export function diffEntries(a: EntryDraft, b: EntryDraft): string[] {
   if (a.amountPoisha !== b.amountPoisha) out.push('amountPoisha');
   if (a.item !== b.item) out.push('item');
   if (a.person !== b.person) out.push('person');
+  if (a.note !== b.note) out.push('note');
   return out;
 }

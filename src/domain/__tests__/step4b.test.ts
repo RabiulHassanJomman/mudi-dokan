@@ -66,6 +66,7 @@ describe('one quantity format: ½ on screen, words in speech', () => {
 describe('stock (মাল)', () => {
   const row = (over: Partial<StockRow>): StockRow => ({
     id: 'p1',
+    spentPoisha: 0,
     name: 'চাল',
     unit: 'kg',
     sellPricePoisha: 6000,
@@ -220,7 +221,7 @@ describe('মোট বাকি: list + total, no names read aloud', () => {
 
 describe('সব মাল: low first, short TTS', () => {
   const v = (name: string, stock: number | null, low = false): StockView => ({
-    id: name, name, unit: 'kg', sellPricePoisha: 6000, costPricePoisha: 5500, stock, known: stock !== null, low,
+    id: name, name, unit: 'kg', sellPricePoisha: 6000, costPricePoisha: 5500, stock, known: stock !== null, low, spentPoisha: 0,
   });
 
   it('low-stock first, otherwise order kept', () => {

@@ -8,7 +8,7 @@ import { ZERO_FLOWS, dayStart, netCash, openingAnchor, type CashAnchor, type Cas
 import type { StoredEntry, StoredSaleLine } from '../domain/fix';
 import type { EntryTable, RawEntry } from '../domain/history';
 import { customerPlan, productPlan, type DeleteCheck, type DeletePlan } from '../domain/delete';
-import { entrySummary, type EntryDraft } from '../domain/entry';
+import { entrySummary, GOODS_PRODUCT_ID, GOODS_PRODUCT_NAME, type EntryDraft, type PurchaseLine } from '../domain/entry';
 import type { CustomerLine } from '../domain/customerImport';
 import type { MergeItem, MergeKind } from '../domain/merge';
 import type { Candidate } from '../domain/names';
@@ -196,7 +196,8 @@ export const stockList = (db: Db) =>
           FROM v_purchases WHERE product_id = p.id AND quantity > 0) AS costPricePoisha,
        COALESCE((SELECT SUM(quantity) FROM v_purchases WHERE product_id = p.id), 0) AS bought,
        COALESCE((SELECT SUM(quantity) FROM v_sales WHERE product_id = p.id), 0) AS sold,
-       (SELECT COUNT(*) FROM v_purchases WHERE product_id = p.id) AS purchases
+       (SELECT COUNT(*) FROM v_purchases WHERE product_id = p.id AND quantity > 0) AS purchases,
+       (SELECT COALESCE(SUM(total_poisha), 0) FROM v_purchases WHERE product_id = p.id AND quantity = 0) AS spentPoisha
      FROM products p
      WHERE p.archived = 0
      ORDER BY (SELECT COUNT(*) FROM v_sales s WHERE s.product_id = p.id) DESC, p.created_at`,
@@ -507,7 +508,7 @@ export async function saveBasket(
 
 // ── other entries (বাকি, জমা, খরচ, মালিক নিল, মাল কেনা) ─────────────
 
-const ENTRY_TABLE = { baki: 'ledger', joma: 'ledger', expense: 'expenses', owner_withdrawal: 'owner_withdrawals', purchase: 'purchases' } as const;
+const ENTRY_TABLE = { baki: 'ledger', joma: 'ledger', expense: 'expenses', owner_withdrawal: 'owner_withdrawals', purchase: 'purchases', goods_sale: 'sales' } as const;
 
 /**
  * Saves a confirmed non-sale entry in one transaction with its voice log outcome
@@ -531,10 +532,26 @@ export async function saveEntry(db: Db, w: Writer, d: EntryDraft, voiceLogId: st
       await insert(db, 'expenses', { item: d.item!, amount_poisha: amount, person: d.person, note: d.note, ...entry() });
     } else if (kind === 'owner_withdrawal') {
       await insert(db, 'owner_withdrawals', { person: d.person, amount_poisha: amount, note: d.note, ...entry() });
+    } else if (kind === 'goods_sale') {
+      await ensureGoodsProduct(db, w);
+      await insert(db, 'sales', {
+        basket_id: id,
+        line_no: 1,
+        product_id: GOODS_PRODUCT_ID,
+        quantity: 1,
+        sell_price_poisha: amount,
+        amount_poisha: amount,
+        cost_price_poisha: 0,
+        cost_known: 0,
+        credit: 0,
+        customer_id: d.customerName ? await findOrCreateCustomer(db, w, d.customerName) : null,
+        note: d.note,
+        ...entry(),
+      });
     } else {
       const l = d.purchase!;
-      if (!l.productName || !l.quantity || l.buyPricePoisha === null) throw new Error('purchase line is not complete');
-      let productId = l.product?.id ?? (await findProduct(db, l.productName))?.id ?? null;
+      const stored = storedPurchase(l);
+      let productId = l.product?.id ?? (await findProduct(db, l.productName!))?.id ?? null;
       if (!productId) {
         productId = w.newId();
         await insert(db, 'products', { id: productId, name: l.productName, unit: l.unit, sell_price_poisha: l.sellPricePoisha, ...rowCols(w) });
@@ -544,9 +561,8 @@ export async function saveEntry(db: Db, w: Writer, d: EntryDraft, voiceLogId: st
       if (l.alias) await addProductAlias(db, w, l.alias, productId);
       await insert(db, 'purchases', {
         product_id: productId,
-        quantity: l.quantity,
+        ...stored,
         spoken_unit: l.unitWarning ? l.unit : null,
-        buy_price_poisha: l.buyPricePoisha,
         sell_price_poisha: l.sellPricePoisha,
         total_poisha: amount,
         paid_cash: 1, // supplier credit (মহাজন) is Phase 3
@@ -562,6 +578,20 @@ export async function saveEntry(db: Db, w: Writer, d: EntryDraft, voiceLogId: st
     });
   });
   return id;
+}
+
+/** A purchase line's quantity and unit price as stored. Money only = quantity 0, price 0. */
+function storedPurchase(l: PurchaseLine): { quantity: number; buy_price_poisha: number } {
+  if (!l.productName) throw new Error('purchase line is not complete');
+  if (l.amountOnly) return { quantity: 0, buy_price_poisha: 0 };
+  if (!l.quantity || l.buyPricePoisha === null) throw new Error('purchase line is not complete');
+  return { quantity: l.quantity, buy_price_poisha: l.buyPricePoisha };
+}
+
+/** The hidden product of goods sales, made on the first one. */
+async function ensureGoodsProduct(db: Db, w: Writer): Promise<void> {
+  const r = await db.getFirstAsync<{ id: string }>('SELECT id FROM products WHERE id = ?', GOODS_PRODUCT_ID);
+  if (!r) await insert(db, 'products', { id: GOODS_PRODUCT_ID, name: GOODS_PRODUCT_NAME, unit: 'piece', archived: 1, ...rowCols(w) });
 }
 
 // ── list import (ক্রেতার তালিকা আনুন) ────────────────────────────
@@ -683,7 +713,7 @@ export const customerHistory = (db: Db, customerId: string) =>
   db.getAllAsync<LedgerLine>(
     `SELECT l.id, l.basket_id, l.kind, l.amount_poisha, l.at AS created_at, l.note,
        (SELECT GROUP_CONCAT(name, ', ') FROM (
-          SELECT p.name FROM v_sales s JOIN products p ON p.id = s.product_id
+          SELECT COALESCE(s.note, p.name) AS name FROM v_sales s JOIN products p ON p.id = s.product_id
           WHERE l.basket_id IS NOT NULL AND s.basket_id = l.basket_id ORDER BY s.line_no)) AS products,
        v.transcript, ${CLIP_SQL} AS audio_path
      FROM v_ledger l LEFT JOIN voice_logs v ON v.id = l.voice_log_id
@@ -700,10 +730,10 @@ export const recentEntries = (db: Db, limit = 3) =>
   db.getAllAsync<RecentEntry>(
     `SELECT * FROM (
        SELECT 'sale' AS kind, COALESCE(s.basket_id, s.id) AS id,
-              GROUP_CONCAT(p.name, ', ') AS title,
+              GROUP_CONCAT(COALESCE(s.note, p.name), ', ') AS title,
               COUNT(*) AS lines,
-              CASE WHEN COUNT(*) = 1 THEN MIN(s.quantity) END AS quantity,
-              CASE WHEN COUNT(*) = 1 THEN MIN(p.unit) END AS unit,
+              CASE WHEN COUNT(*) = 1 AND MIN(s.product_id) <> '${GOODS_PRODUCT_ID}' THEN MIN(s.quantity) END AS quantity,
+              CASE WHEN COUNT(*) = 1 AND MIN(s.product_id) <> '${GOODS_PRODUCT_ID}' THEN MIN(p.unit) END AS unit,
               SUM(s.amount_poisha) AS amount_poisha,
               MAX(s.credit) AS credit,
               MAX(c.name) AS customer,
@@ -726,7 +756,7 @@ export const recentEntries = (db: Db, limit = 3) =>
        SELECT 'owner_withdrawal', o.id, COALESCE(o.person, 'মালিক'), 0, NULL, NULL, o.amount_poisha, 0, NULL, ${CLIP_SQL}, o.at
        FROM v_owner_withdrawals o LEFT JOIN voice_logs v ON v.id = o.voice_log_id
      UNION ALL
-       SELECT 'purchase', pu.id, p.name, 0, pu.quantity, COALESCE(pu.spoken_unit, p.unit), pu.total_poisha, 0, NULL, ${CLIP_SQL}, pu.at
+       SELECT 'purchase', pu.id, p.name, 0, NULLIF(pu.quantity, 0), CASE WHEN pu.quantity > 0 THEN COALESCE(pu.spoken_unit, p.unit) END, pu.total_poisha, 0, NULL, ${CLIP_SQL}, pu.at
        FROM v_purchases pu JOIN products p ON p.id = pu.product_id
        LEFT JOIN voice_logs v ON v.id = pu.voice_log_id
      )
@@ -891,7 +921,9 @@ export const historyRows = (db: Db, start: number, end: number) =>
   db.getAllAsync<RawEntry>(
     `SELECT * FROM (
        SELECT 'sales' AS "table", s.id, s.corrects_id, s.voided, COALESCE(s.entry_at, s.created_at) AS at, s.created_at,
-              NULL AS kind, s.basket_id, s.line_no, NULL AS sale_id, p.name AS title, s.quantity, p.unit AS unit,
+              NULL AS kind, s.basket_id, s.line_no, NULL AS sale_id, COALESCE(s.note, p.name) AS title,
+              CASE WHEN s.product_id <> '${GOODS_PRODUCT_ID}' THEN s.quantity END AS quantity,
+              CASE WHEN s.product_id <> '${GOODS_PRODUCT_ID}' THEN p.unit END AS unit,
               s.amount_poisha, s.credit, c.name AS customer, ${CLIP_SQL} AS audio_path
        FROM sales s JOIN products p ON p.id = s.product_id
        LEFT JOIN customers c ON c.id = s.customer_id LEFT JOIN voice_logs v ON v.id = s.voice_log_id
@@ -910,7 +942,7 @@ export const historyRows = (db: Db, start: number, end: number) =>
        FROM owner_withdrawals o LEFT JOIN voice_logs v ON v.id = o.voice_log_id
      UNION ALL
        SELECT 'purchases', pu.id, pu.corrects_id, pu.voided, COALESCE(pu.entry_at, pu.created_at), pu.created_at,
-              NULL, NULL, NULL, NULL, p.name, pu.quantity, COALESCE(pu.spoken_unit, p.unit), pu.total_poisha, 0, NULL, ${CLIP_SQL}
+              NULL, NULL, NULL, NULL, p.name, NULLIF(pu.quantity, 0), CASE WHEN pu.quantity > 0 THEN COALESCE(pu.spoken_unit, p.unit) END, pu.total_poisha, 0, NULL, ${CLIP_SQL}
        FROM purchases pu JOIN products p ON p.id = pu.product_id LEFT JOIN voice_logs v ON v.id = pu.voice_log_id
      ) WHERE at >= ? AND at < ?`,
     start,
@@ -1097,6 +1129,28 @@ export async function entryForFix(db: Db, table: FixTable, id: string): Promise<
   };
 }
 
+/** ✏️ on a sale: the draft's source when it is a goods sale, else null (fix it as a basket). */
+export async function goodsSaleForFix(db: Db, basketId: string): Promise<StoredEntry | null> {
+  const [r, ...more] = await basketRows(db, basketId);
+  if (!r || more.length || r.product_id !== GOODS_PRODUCT_ID) return null;
+  const c = r.customer_id ? await db.getFirstAsync<{ name: string }>('SELECT name FROM customers WHERE id = ?', r.customer_id) : null;
+  return {
+    table: 'sales',
+    id: r.id,
+    kind: null,
+    customer: c?.name ?? null,
+    amount_poisha: r.amount_poisha,
+    item: null,
+    person: null,
+    note: (r.note as string | null) ?? null,
+    product: null,
+    quantity: null,
+    spoken_unit: null,
+    buy_price_poisha: null,
+    sell_price_poisha: null,
+  };
+}
+
 /** Saves a fixed entry as one correction row (nothing when nothing changed). Returns whether it changed. */
 export async function saveEntryFix(db: Db, w: Writer, s: StoredEntry, d: EntryDraft): Promise<boolean> {
   if (d.problems.length || d.amountPoisha === null) throw new Error(`entry is not complete: ${d.problems.join(', ')}`);
@@ -1111,10 +1165,13 @@ export async function saveEntryFix(db: Db, w: Writer, s: StoredEntry, d: EntryDr
       changes = { item: d.item!, amount_poisha: d.amountPoisha, person: d.person, note: d.note };
     } else if (s.table === 'owner_withdrawals') {
       changes = { person: d.person, amount_poisha: d.amountPoisha, note: d.note };
+    } else if (s.table === 'sales') {
+      const customerId = d.customerName ? await findOrCreateCustomer(db, w, d.customerName) : null;
+      changes = { customer_id: customerId, sell_price_poisha: d.amountPoisha, amount_poisha: d.amountPoisha, note: d.note };
     } else {
       const l = d.purchase!;
-      if (!l.productName || !l.quantity || l.buyPricePoisha === null) throw new Error('purchase line is not complete');
-      let productId = l.product?.id ?? (await findProduct(db, l.productName))?.id ?? null;
+      const stored = storedPurchase(l);
+      let productId = l.product?.id ?? (await findProduct(db, l.productName!))?.id ?? null;
       if (!productId) {
         productId = w.newId();
         await insert(db, 'products', { id: productId, name: l.productName, unit: l.unit, sell_price_poisha: l.sellPricePoisha, ...rowCols(w) });
@@ -1124,9 +1181,8 @@ export async function saveEntryFix(db: Db, w: Writer, s: StoredEntry, d: EntryDr
       if (l.alias) await addProductAlias(db, w, l.alias, productId);
       changes = {
         product_id: productId,
-        quantity: l.quantity,
+        ...stored,
         spoken_unit: l.unitWarning ? l.unit : null,
-        buy_price_poisha: l.buyPricePoisha,
         sell_price_poisha: l.sellPricePoisha,
         total_poisha: d.amountPoisha,
       };

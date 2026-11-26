@@ -16,8 +16,10 @@ export interface StockRow {
   /** Sum of purchase quantities, in the product's unit. */
   bought: number;
   sold: number;
-  /** Number of purchase rows: 0 = never bought, so the stock is unknown. */
+  /** Number of purchase rows with a quantity: 0 = the stock is unknown. */
   purchases: number;
+  /** Money spent buying it where no quantity was said (Android parsing). */
+  spentPoisha: number;
 }
 
 export interface StockView {
@@ -30,6 +32,7 @@ export interface StockView {
   stock: number | null;
   known: boolean;
   low: boolean;
+  spentPoisha: number;
 }
 
 /**
@@ -62,6 +65,7 @@ export function stockView(r: StockRow): StockView {
     stock,
     known,
     low: stock !== null && stock <= LOW_STOCK[r.unit],
+    spentPoisha: r.spentPoisha,
   };
 }
 
@@ -70,6 +74,7 @@ const priceWords = (v: StockView) =>
 
 /** "চাল ৪২ কেজি আছে। বেচা দাম কেজি ৬০ টাকা।" — card tap and "চাল কত আছে?". */
 export function stockWords(v: StockView): string {
+  if (v.stock === null && v.spentPoisha > 0) return `${v.name} কিনতে মোট ${toBnDigits(Math.round(v.spentPoisha) / 100)} টাকা খরচ হয়েছে।${priceWords(v)}`;
   if (v.stock === null) return `${v.name} কেনার হিসাব নেই।${priceWords(v)} নতুন মাল বলে কেনা লিখুন।`;
   if (v.stock <= 0) return `${v.name} শেষ, আর নেই।${priceWords(v)}`;
   const qty = spokenQty(v.stock, v.unit);

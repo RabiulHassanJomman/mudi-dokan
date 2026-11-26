@@ -59,7 +59,8 @@ export function basketFromStored(lines: readonly StoredSaleLine[], knownCustomer
 
 /** A saved বাকি / জমা / খরচ / মালিক নিল / মাল কেনা (latest version). */
 export interface StoredEntry {
-  table: 'ledger' | 'expenses' | 'owner_withdrawals' | 'purchases';
+  /** sales: a goods sale only (id = its basket). Other sales are fixed as baskets. */
+  table: 'ledger' | 'expenses' | 'owner_withdrawals' | 'purchases' | 'sales';
   id: string;
   /** ledger: 'baki' | 'joma'. */
   kind: string | null;
@@ -79,10 +80,13 @@ const KIND_OF_TABLE: Record<Exclude<StoredEntry['table'], 'ledger'>, EntryKind> 
   expenses: 'expense',
   owner_withdrawals: 'owner_withdrawal',
   purchases: 'purchase',
+  sales: 'goods_sale',
 };
 
 export function entryFromStored(s: StoredEntry): EntryDraft {
   const kind: EntryKind = s.table === 'ledger' ? (s.kind === 'joma' ? 'joma' : 'baki') : KIND_OF_TABLE[s.table];
+  // money-only কেনা is stored as quantity 0
+  const amountOnly = s.quantity === 0;
   const d: EntryDraft = {
     kind,
     customerName: s.customer,
@@ -96,9 +100,10 @@ export function entryFromStored(s: StoredEntry): EntryDraft {
         ? {
             productName: s.product.name,
             product: s.product,
-            quantity: s.quantity,
+            quantity: amountOnly ? null : s.quantity,
+            ...(amountOnly ? { amountOnly } : {}),
             unit: s.spoken_unit ?? s.product.unit,
-            buyPricePoisha: s.buy_price_poisha,
+            buyPricePoisha: amountOnly ? null : s.buy_price_poisha,
             sellPricePoisha: s.sell_price_poisha,
             unitWarning: s.spoken_unit !== null && s.spoken_unit !== s.product.unit,
             alias: null,
