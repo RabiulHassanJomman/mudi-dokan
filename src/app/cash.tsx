@@ -14,6 +14,7 @@ import { speak, stopSpeaking } from '../lib/speak';
 import { useClipPlayer } from '../lib/useClipPlayer';
 import { colors, fontSize, radius, size, spacing } from '../theme/tokens';
 import { nav } from '../lib/nav';
+import { openVoice } from '../lib/voice';
 import { useDataVersion } from '../sync/app';
 
 const ROW_LOOK: Record<string, { icon: IconName; tile: string; ink: string }> = {
@@ -202,7 +203,7 @@ export default function CashScreen() {
       <View style={styles.actions}>
         <Pressable
           accessibilityRole="button"
-          onPress={() => go(() => nav.push({ pathname: '/listening', params: { tab: 'expense' } }))}
+          onPress={() => go(() => openVoice('expense'))}
           style={({ pressed }) => [styles.action, { backgroundColor: colors.baki }, pressed && styles.pressed]}
         >
           <Icon name="mic" size={30} color={colors.onColor} />

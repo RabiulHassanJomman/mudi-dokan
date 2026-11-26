@@ -21,6 +21,7 @@ import { speak } from '../../lib/speak';
 import { useClipPlayer } from '../../lib/useClipPlayer';
 import { colors, fontSize, productTiles, radius, size, spacing } from '../../theme/tokens';
 import { nav } from '../../lib/nav';
+import { openVoice } from '../../lib/voice';
 import { useDataVersion } from '../../sync/app';
 
 /** Tile picture and colours per entry type (sale lines keep their product picture). */
@@ -174,7 +175,7 @@ export default function SaleScreen() {
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="বলতে চাপুন"
-            onPress={() => nav.push({ pathname: '/listening', params: { tab: 'sale' } })}
+            onPress={() => openVoice('sale')}
             style={({ pressed }) => [styles.mic, pressed && { transform: [{ scale: 0.96 }] }]}
           >
             <Icon name="mic" size={84} color={colors.onColor} />

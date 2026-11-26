@@ -14,6 +14,7 @@ import { formatNumber, formatTaka } from '../../lib/bn';
 import { speak } from '../../lib/speak';
 import { colors, fontSize, radius, size, spacing } from '../../theme/tokens';
 import { nav } from '../../lib/nav';
+import { openVoice } from '../../lib/voice';
 import { useDataVersion } from '../../sync/app';
 
 const balanceWords = (c: CustomerBalance) => words(c.name, c.balance_poisha);
@@ -101,7 +102,7 @@ export default function BakiScreen() {
       <View style={styles.bottom}>
         <Pressable
           accessibilityRole="button"
-          onPress={() => nav.push({ pathname: '/listening', params: { tab: 'ledger' } })}
+          onPress={() => openVoice('ledger')}
           style={({ pressed }) => [styles.say, pressed && styles.pressed]}
         >
           <Icon name="mic" size={32} color={colors.onColor} />

@@ -9,11 +9,13 @@ Status
 • Android parsing A1 done (Nov 27): src/parser/fixed.ts (parseFixed), not wired into the app yet; `npm test` → 1125 passing. No APK built or run for A1: .env (Gemini key) is missing on this Mac and no phone was connected.
 • Android parsing A2 done (Nov 27): v15, goods sale + money-only purchase drafts, save and ✏️ logic; `npm test` → 1138 passing. No screen creates them yet. No APK or phone run (same reason as A1), so the v15 upgrade is untested on the phone.
 • Android parsing A3 done (Nov 27): confirm card (নগদ goods sale, goods edit, money-only কেনা), ✏️, মাল "খরচ ৳"; the card parses voice logs with engine android. `npm test` → 1147 passing; release APK builds but was not installed (no .env, so no Gemini key). Screens not seen on the phone; nothing creates android logs until A4.
-• Next: Android parsing step A4 (section below). Restore .env before installing an APK on the shop phone. After Android parsing: Gemini latency (debug log ms; prompt ≈1.8k tokens, 12 examples), then Fenrir TTS.
+• Android parsing A4 done (Nov 27): ⚙ কথা বোঝার উপায় (কিবোর্ডে বলা default / Gemini, shown only with a key); 🎤 opens the বলুন screen (src/app/say.tsx: example, big text box, keyboard up, মুছুন, হয়ে গেছে); missing parts said, text kept; খরচ in Android mode = number pad; হ্যাঁ/না by buttons only in Android mode. `npm test` → 1164 passing; release APK builds (no Gemini key, no .env). Not installed: no phone connected at build time. Unfinished: whole flow not tried with Ridmik on the Pixel 7; v15 upgrade not run on the phone.
+• Next: install the A4 APK on the Pixel 7 (`adb install -r`), then A5 (real speech with Ridmik). After Android parsing: Gemini latency (debug log ms; prompt ≈1.8k tokens, 12 examples), then Fenrir TTS.
 
-Android parsing (decided Nov 27; A1–A3 built)
+Android parsing (decided Nov 27; A1–A4 built)
 Setting (⚙, per phone): বোঝার উপায় = Android (default) / Gemini. Gemini mode stays as it is today.
-Android mode: phone STT (bn-BD) → new fixed-format parser → confirm card → হ্যাঁ/না. No Gemini call, no understand_queue.
+Android mode (changed Nov 27): the user speaks with the Ridmik Keyboard's voice typing (installed and default on the phone) → text box → "হয়ে গেছে" button → fixed-format parser → confirm card → হ্যাঁ/না buttons. No in-app recognizer, no Gemini call, no understand_queue, no audio clip (no ▶️, no Drive upload for these).
+Gemini: kept as the other setting for now; may be removed if Ridmik + parsing works well.
 
 Formats (the keyword picks the type; amount = number before টাকা; one total for all goods, no quantity or unit price)
 • বাকি: "সাজু বাকি নিয়েছে আদা, চাল, আটা ১০০ টাকা" → customer (required), goods, total. Saved: ledger baki, note = goods (v14).
@@ -33,11 +35,11 @@ Build steps (one at a time; each: tests first, test + tsc, APK on Pixel 7, Statu
 • A1 Parser: src/parser/fixed.ts, pure TS; parseCommand untouched. Tests: the four examples, বাকী, number words, Bangla/ASCII digits, honorifics, multi-word product names, each missing field, conflicting keywords.
 • A2 Data: v15 + upgrade test from v14 with real-looking rows; drafts and save for নগদ goods sale and amount-only purchase; cash, profit, stock, history, void and sync tests.
 • A3 Screens: confirm card (readback, edit goods/amount/customer), history, ✏️, মাল.
-• A4 Switch + voice: setting (default Android); Listening Android path (live text, থামুন, বিরতি, clip kept, voice_logs engine 'android'); ask-again screen with an example sentence. Works without a Gemini key.
-• A5 Real speech on Pixel 7 in the shop: check bn-BD offline, how STT writes numbers and names; add failures as fixtures.
+• A4 Switch + keyboard entry: setting (default Android); 🎤 in Android mode opens a big text box, focused, keyboard up (the user taps Ridmik's mic once: an app can't press it), example sentence shown and 🔊; big "হয়ে গেছে" button → voice_logs (engine 'android', source voice, no clip) → confirm card. Unclear → ask-again with what was understood, text kept to fix. হ্যাঁ/না by buttons only in Android mode. Works without a Gemini key.
+• A5 Real speech with Ridmik on the Pixel 7 in the shop: how Ridmik writes numbers (digits or words), names, commas; add failures as fixtures.
 
 Risks / to confirm
-• STT gives no commas: goods are split using known product names and aliases, else kept as spoken.
+• Ridmik may give no commas: goods are split using known product names and aliases, else kept as spoken.
 • Android mode does not handle questions, খরচ, মালিক নিল or voice undo (all four formats only). Pick, typing and Gemini mode still do.
 • Default Android changes the shop phone's behaviour on update.
 

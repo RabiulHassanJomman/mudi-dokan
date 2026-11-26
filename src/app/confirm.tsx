@@ -89,7 +89,10 @@ import { getDevice, writer } from '../device';
 import { UNIT_BN, formatNumber, formatQty, formatTaka, parseTakaInput, toBnDigits } from '../lib/bn';
 import { speak, stopSpeaking } from '../lib/speak';
 import { pickedCommand, pickText, type PickedItem } from '../domain/pick';
-import { parseCommand, parseFixed } from '../parser';
+import { parseCommand } from '../parser';
+import { readKeyboardText } from '../domain/keyboard';
+import { voiceMode } from '../lib/engine';
+import { voiceTarget } from '../lib/voice';
 import type { Intent, ParseContext, ParsedCommand } from '../parser/types';
 import { colors, fonts, fontSize, productTiles, radius, size, spacing } from '../theme/tokens';
 import { nav } from '../lib/nav';
@@ -182,6 +185,8 @@ export default function ConfirmScreen() {
   const fixRef = useRef<{ table: string; id: string; stored: StoredEntry | null } | null>(null);
   /** "ভুল হয়েছে": the entry to cancel. */
   const undoRef = useRef<RecentEntry | null>(null);
+  /** Android mode (Ridmik keyboard): no spoken হ্যাঁ / না. */
+  const buttonsOnly = voiceMode() === 'android';
   /** The হ্যাঁ/না listener is on (other mics on the card — names — must not answer it). */
   const answeringRef = useRef(false);
 
@@ -202,6 +207,8 @@ export default function ConfirmScreen() {
 
   // ── voice হ্যাঁ / না ───────────────────────────────────────────
   const listenForAnswer = useCallback(async () => {
+    // Android mode: হ্যাঁ / না by the buttons only (the phone's recognizer may be weak or missing)
+    if (buttonsOnly) return;
     const perm = await ExpoSpeechRecognitionModule.getPermissionsAsync();
     if (!perm.granted || decided.current) return;
     setAnswering(true);
@@ -294,11 +301,12 @@ export default function ConfirmScreen() {
           logId.current = await createVoiceLog(db, w, { transcript, source: 'typed', contextTab: tab, ...(transcript ? {} : { via: 'pick' as const }) });
         }
         if (heardByPhone) {
-          const cmd = parseFixed(transcript, {
+          // from a customer screen the name need not be said
+          const cmd = readKeyboardText(transcript, {
             knownProducts: names.products,
             knownCustomers: [...names.customers, ...Object.keys(aliasesNow)],
             productAliases: await productAliasMap(db),
-          });
+          }, { customer: params.customer });
           if (cmd.customer) cmd.customer = resolveCustomerAlias(cmd.customer, aliasesNow);
           await setParsed(db, w, logId.current!, fixedAsParsed(cmd), { by: 'android' });
           heardCustomer.current = cmd.customer ?? null;
@@ -747,10 +755,8 @@ export default function ConfirmScreen() {
   const again = () => {
     decided.current = true;
     if (logId.current) void setOutcome(db, writer(), logId.current, 'cancelled');
-    nav.replace({
-      pathname: '/listening',
-      params: { tab, ...(params.customer ? { customer: params.customer } : {}), ...(defaultKind ? { kind: defaultKind } : {}) },
-    });
+    const t = tab === 'purchase' || tab === 'ledger' || tab === 'expense' ? tab : 'sale';
+    nav.replace(voiceTarget(t, { ...(params.customer ? { customer: params.customer } : {}), ...(defaultKind ? { kind: defaultKind } : {}) }));
   };
 
   /** Voice did not work out: choose by picture instead. */

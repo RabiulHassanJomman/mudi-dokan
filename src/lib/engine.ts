@@ -7,6 +7,7 @@
 import { Storage } from 'expo-sqlite/kv-store';
 
 import { DEFAULT_MODEL } from '../gemini';
+import { effectiveMode, type VoiceMode } from '../domain/keyboard';
 
 const KEY_MODEL = 'gemini_model';
 
@@ -23,3 +24,14 @@ export function setGeminiModel(model: string): void {
   if (model.trim()) Storage.setItemSync(KEY_MODEL, model.trim());
   else Storage.removeItemSync(KEY_MODEL);
 }
+
+const KEY_VOICE_MODE = 'voice_mode';
+
+/** ⚙ বোঝার উপায়, this phone only. Not set = Android (Ridmik keyboard + fixed formats). */
+export function getVoiceModeSetting(): VoiceMode | null {
+  const v = Storage.getItemSync(KEY_VOICE_MODE);
+  return v === 'android' || v === 'gemini' ? v : null;
+}
+export const setVoiceMode = (m: VoiceMode): void => Storage.setItemSync(KEY_VOICE_MODE, m);
+/** The mode in use: Gemini only when chosen and the build has a key. */
+export const voiceMode = (): VoiceMode => effectiveMode(getVoiceModeSetting(), hasGemini());

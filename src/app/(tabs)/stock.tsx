@@ -14,6 +14,7 @@ import { formatNumber } from '../../lib/bn';
 import { speak, stopSpeaking } from '../../lib/speak';
 import { colors, fontSize, productTiles, radius, spacing } from '../../theme/tokens';
 import { nav } from '../../lib/nav';
+import { openVoice } from '../../lib/voice';
 import { useDataVersion } from '../../sync/app';
 
 /**
@@ -55,7 +56,7 @@ export default function StockScreen() {
       <View style={styles.bottom}>
         <Pressable
           accessibilityRole="button"
-          onPress={() => nav.push({ pathname: '/listening', params: { tab: 'purchase' } })}
+          onPress={() => openVoice('purchase')}
           style={({ pressed }) => [styles.say, pressed && styles.pressed]}
         >
           <Icon name="mic" size={32} color={colors.onColor} />

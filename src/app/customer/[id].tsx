@@ -18,6 +18,7 @@ import { speak } from '../../lib/speak';
 import { useClipPlayer } from '../../lib/useClipPlayer';
 import { colors, fontSize, radius, size, spacing } from '../../theme/tokens';
 import { nav } from '../../lib/nav';
+import { openVoice } from '../../lib/voice';
 import { useDataVersion } from '../../sync/app';
 
 const what = (l: LedgerLine) => (l.kind === 'joma' ? 'জমা দিল' : l.products ?? l.note ?? 'বাকি');
@@ -62,7 +63,7 @@ export default function CustomerScreen() {
     );
 
   const say = (kind: 'joma' | 'baki') =>
-    nav.push({ pathname: '/listening', params: { tab: 'ledger', customer: c.name, kind } });
+    openVoice('ledger', { customer: c.name, kind });
 
   const call = () => {
     if (c.phone) void Linking.openURL(`tel:${c.phone}`);

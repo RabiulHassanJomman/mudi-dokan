@@ -31,6 +31,7 @@ export default function RootLayout() {
           name="listening"
           options={{ presentation: 'fullScreenModal', animation: 'fade', contentStyle: { backgroundColor: colors.listening.bg } }}
         />
+        <Stack.Screen name="say" options={{ animation: 'fade' }} />
         <Stack.Screen name="confirm" options={{ animation: 'slide_from_bottom' }} />
         <Stack.Screen name="review" />
         <Stack.Screen name="debug-log" />
