@@ -86,7 +86,7 @@ export function EntryForm({ entry, known, onChange, onRenameProduct }: Props) {
 
       {entry.kind === 'goods_sale' && (
         <>
-          <Field label="কী কী বিক্রি?" value={entry.note} warn={bad('no_item')} placeholder="যেমন: আদা, চাল" onChange={(t) => onChange(setEntryNote(entry, t))} />
+          <Field label="কী কী বিক্রি?" value={entry.note} warn={false} placeholder="না দিলেও চলে" onChange={(t) => onChange(setEntryNote(entry, t))} />
           <CustomerPicker
             label="ক্রেতা (খালি রাখা যায়)"
             name={entry.customerName}

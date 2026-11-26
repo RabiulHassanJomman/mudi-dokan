@@ -33,6 +33,11 @@ describe('the four formats', () => {
   it('জমা', () => {
     ok('সাজু ৫০ টাকা জমা দিয়েছে', { kind: 'joma', customer: 'সাজু', amount: 50 });
   });
+  it('নগদ with only the amount', () => {
+    ok('নগদ বিক্রি ১০০ টাকা', { kind: 'cash_sale', amount: 100 });
+    ok('নগদ ১০০ টাকা', { kind: 'cash_sale', amount: 100 });
+    ok('১০০ টাকা নগদ বিক্রি হলো', { kind: 'cash_sale', amount: 100 });
+  });
   it('বাকি with only the name and the amount', () => {
     ok('সাজু বাকি ১০০ টাকা', { kind: 'baki', customer: 'সাজু', amount: 100 });
     ok('সাজু ১০০ টাকা বাকি নিয়েছে', { kind: 'baki', customer: 'সাজু', amount: 100 });
@@ -119,7 +124,6 @@ describe('ask again', () => {
     bad('৫০ টাকা জমা দিয়েছে', { kind: 'joma', problems: ['no_customer'] });
   });
   it('missing goods', () => {
-    bad('নগদ বিক্রি ১০০ টাকা', { kind: 'cash_sale', problems: ['no_goods'] });
     bad('১০০০ টাকার কেনা হয়েছে', { kind: 'purchase', problems: ['no_goods'] });
   });
   it('missing amount: a number without টাকা is not money', () => {

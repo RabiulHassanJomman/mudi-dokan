@@ -95,7 +95,6 @@ function problemsOf(d: Omit<EntryDraft, 'problems'>): EntryProblem[] {
     // the buyer is optional, but a name that is there must be a real one
     if (d.customerName && !d.customerOk) p.push('customer_unknown');
     if (noAmount) p.push('no_amount');
-    if (!d.note) p.push('no_item');
   } else if (d.purchase?.amountOnly) {
     if (!d.purchase.productName) p.push('no_product');
     if (noAmount) p.push('no_price');
@@ -336,7 +335,6 @@ export function entryReadback(d: EntryDraft): string {
     const who = d.customerName ? `${d.customerName}, ` : '';
     let s = `${who}নগদ বিক্রি${d.note ? `: ${d.note}` : ''}${d.amountPoisha !== null ? `, ${taka(d.amountPoisha)}` : ''}।`;
     if (has('customer_unknown')) s += ` ${d.customerName} নামে কাউকে চিনি না। নিচে বেছে নিন।`;
-    else if (has('no_item')) s += ' কী কী বিক্রি?';
     else if (has('no_amount')) s += ' কত টাকা?';
     return s + end;
   }

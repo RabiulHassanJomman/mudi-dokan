@@ -218,7 +218,8 @@ export function parseFixed(text: string, ctx: FixedContext = {}): FixedCommand {
   const problems: FixedProblem[] = [];
   if ((kind === 'baki' || kind === 'joma') && !customer) problems.push('no_customer');
   // a বাকি may be only the name and the amount ("সাজু বাকি ১০০ টাকা")
-  if ((kind === 'cash_sale' || kind === 'purchase') && !goods.length) problems.push('no_goods');
+  // only কেনা needs its product; বাকি and নগদ may be just the amount ("নগদ বিক্রি ১০০ টাকা")
+  if (kind === 'purchase' && !goods.length) problems.push('no_goods');
   if (kind === 'purchase' && goods.length > 1) problems.push('many_goods');
   if (amounts.length > 1) problems.push('two_amounts');
   else if (amount === undefined) problems.push('no_amount');

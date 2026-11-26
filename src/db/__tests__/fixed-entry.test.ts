@@ -177,3 +177,14 @@ it('বাকি without goods: a plain baki, read back without goods', async ()
   expect((await customerByName(p.db, 'সাজু'))!.balance_poisha).toBe(10000);
   expect(await todayTotals(p.db, START)).toEqual({ sales: 0, baki: 10000 });
 });
+
+it('নগদ বিক্রি without goods: a cash sale of the amount, shown as নগদ বিক্রি', async () => {
+  const p = await phoneOf('A', null);
+  const d = (await draftOf(p.db, 'নগদ বিক্রি ১০০ টাকা'))!;
+  expect(d).toMatchObject({ kind: 'goods_sale', note: null, amountPoisha: 10000, problems: [] });
+  const id = await say(p, 'নগদ বিক্রি ১০০ টাকা');
+  expect(await flows(p.db)).toMatchObject({ sales: 10000, cashSales: 10000 });
+  const [recent] = await recentEntries(p.db);
+  expect(recent).toMatchObject({ id, kind: 'sale', title: 'নগদ বিক্রি', quantity: null, amount_poisha: 10000 });
+  expect(buildHistory(await historyRows(p.db, START, START + 2 * 86_400_000))[0]).toMatchObject({ title: 'নগদ বিক্রি' });
+});

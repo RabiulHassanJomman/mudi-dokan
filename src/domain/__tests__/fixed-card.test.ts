@@ -10,6 +10,7 @@ describe('the voice log keeps the Android parse', () => {
   it.each([
     ['সাজু বাকি নিয়েছে চাল ১০০ টাকা', { intent: 'baki', customer: 'সাজু', amount: 100, note: 'চাল' }],
     ['নগদ বিক্রি চাল, ডাল ১০০ টাকা', { intent: 'sale', amount: 100, note: 'চাল, ডাল' }],
+    ['নগদ বিক্রি ১০০ টাকা', { intent: 'sale', amount: 100 }],
     ['১০০০ টাকার আলু কেনা হয়েছে', { intent: 'purchase', product: 'আলু', amount: 1000 }],
     ['সাজু ৫০ টাকা জমা দিয়েছে', { intent: 'joma', customer: 'সাজু', amount: 50 }],
     ['সাজু বাকি ১০০ টাকা', { intent: 'baki', customer: 'সাজু', amount: 100 }],
@@ -24,10 +25,11 @@ describe('the voice log keeps the Android parse', () => {
 });
 
 describe('editing the goods', () => {
-  it('a নগদ sale needs goods; the readback follows', () => {
+  it('a নগদ sale may be left without goods; the readback follows', () => {
     const d = draft('নগদ বিক্রি চাল ১০০ টাকা');
     expect(entryReadback(setEntryNote(d, 'চাল, ডাল'))).toBe('নগদ বিক্রি: চাল, ডাল, ১০০ টাকা। ঠিক আছে?');
-    expect(setEntryNote(d, '  ').problems).toEqual(['no_item']);
+    expect(setEntryNote(d, '  ')).toMatchObject({ note: null, problems: [] });
+    expect(entryReadback(setEntryNote(d, ''))).toBe('নগদ বিক্রি, ১০০ টাকা। ঠিক আছে?');
   });
   it('a বাকি may be left without goods', () => {
     const d = draft('সাজু বাকি নিয়েছে চাল ১০০ টাকা');

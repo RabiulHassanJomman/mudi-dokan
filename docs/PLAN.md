@@ -11,7 +11,8 @@ Status
 • Android parsing A3 done (Nov 27): confirm card (নগদ goods sale, goods edit, money-only কেনা), ✏️, মাল "খরচ ৳"; the card parses voice logs with engine android. `npm test` → 1147 passing; release APK builds but was not installed (no .env, so no Gemini key). Screens not seen on the phone; nothing creates android logs until A4.
 • Android parsing A4 done (Nov 27): ⚙ কথা বোঝার উপায় (কিবোর্ডে বলা default / Gemini, shown only with a key); 🎤 opens the বলুন screen (src/app/say.tsx: example, big text box, keyboard up, মুছুন, হয়ে গেছে); missing parts said, text kept; খরচ in Android mode = number pad; হ্যাঁ/না by buttons only in Android mode. `npm test` → 1164 passing; installed on Pixel 7 (Nov 27, v0.1.60, no Gemini key, no .env): v15 upgrade ran, old data shown, বলুন screen opens with Ridmik up and buttons above it; the what-is-missing warning shows above the text box, so the keyboard can't cover it (checked on the phone). Unfinished: no command spoken with Ridmik and saved yet.
 • বাকি without goods ("সাজু বাকি ১০০ টাকা") allowed (Nov 27): `npm test` → 1167 passing. Installed on Pixel 7 (v0.1.64): "সাজু বাকি 100 টাকা" opens the বাকি card (সাজু, ৳ ১০০, goods empty); tested with না, nothing saved.
-• Next: A5 (real speech with Ridmik in the shop). After Android parsing: Gemini latency (debug log ms; prompt ≈1.8k tokens, 12 examples), then Fenrir TTS.
+• নগদ বিক্রি without goods allowed (Nov 27): `npm test` → 1170 passing. Not built or installed yet; the phone still asks for goods on such a নগদ sale.
+• Next: build + install with the next APK; A5 (real speech with Ridmik in the shop). After Android parsing: Gemini latency (debug log ms; prompt ≈1.8k tokens, 12 examples), then Fenrir TTS.
 
 Android parsing (decided Nov 27; A1–A4 built)
 Setting (⚙, per phone): বোঝার উপায় = Android (default) / Gemini. Gemini mode stays as it is today.
@@ -20,7 +21,7 @@ Gemini: kept as the other setting for now; may be removed if Ridmik + parsing wo
 
 Formats (the keyword picks the type; amount = number before টাকা; one total for all goods, no quantity or unit price)
 • বাকি: "সাজু বাকি নিয়েছে আদা, চাল, আটা ১০০ টাকা" → customer (required), goods, total. Goods may be left out: "সাজু বাকি ১০০ টাকা" (Nov 27). Saved: ledger baki, note = goods or none (v14).
-• নগদ: "নগদ বিক্রি আদা, চাল ১০০ টাকা" → goods, total, customer optional. Saved: one sales row (see Data).
+• নগদ: "নগদ বিক্রি আদা, চাল ১০০ টাকা" → goods, total, customer optional. Goods may be left out: "নগদ বিক্রি ১০০ টাকা" (Nov 27), listed as "নগদ বিক্রি". Saved: one sales row (see Data).
 • কেনা: "১০০০ টাকার আলু কেনা হয়েছে" → one product, money spent. Saved: purchases row, quantity 0, paid from cash.
 • জমা: "সাজু ৫০ টাকা জমা দিয়েছে" → customer, amount. Saved: ledger joma.
 • Missing field, two type keywords or no match: show what was heard and understood, say what is missing (🔊), ask again. Nothing saved.

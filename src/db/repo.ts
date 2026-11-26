@@ -713,7 +713,7 @@ export const customerHistory = (db: Db, customerId: string) =>
   db.getAllAsync<LedgerLine>(
     `SELECT l.id, l.basket_id, l.kind, l.amount_poisha, l.at AS created_at, l.note,
        (SELECT GROUP_CONCAT(name, ', ') FROM (
-          SELECT COALESCE(s.note, p.name) AS name FROM v_sales s JOIN products p ON p.id = s.product_id
+          SELECT COALESCE(s.note, CASE WHEN s.product_id = '${GOODS_PRODUCT_ID}' THEN 'নগদ বিক্রি' ELSE p.name END) AS name FROM v_sales s JOIN products p ON p.id = s.product_id
           WHERE l.basket_id IS NOT NULL AND s.basket_id = l.basket_id ORDER BY s.line_no)) AS products,
        v.transcript, ${CLIP_SQL} AS audio_path
      FROM v_ledger l LEFT JOIN voice_logs v ON v.id = l.voice_log_id
@@ -730,7 +730,7 @@ export const recentEntries = (db: Db, limit = 3) =>
   db.getAllAsync<RecentEntry>(
     `SELECT * FROM (
        SELECT 'sale' AS kind, COALESCE(s.basket_id, s.id) AS id,
-              GROUP_CONCAT(COALESCE(s.note, p.name), ', ') AS title,
+              GROUP_CONCAT(COALESCE(s.note, CASE WHEN s.product_id = '${GOODS_PRODUCT_ID}' THEN 'নগদ বিক্রি' ELSE p.name END), ', ') AS title,
               COUNT(*) AS lines,
               CASE WHEN COUNT(*) = 1 AND MIN(s.product_id) <> '${GOODS_PRODUCT_ID}' THEN MIN(s.quantity) END AS quantity,
               CASE WHEN COUNT(*) = 1 AND MIN(s.product_id) <> '${GOODS_PRODUCT_ID}' THEN MIN(p.unit) END AS unit,
@@ -921,7 +921,7 @@ export const historyRows = (db: Db, start: number, end: number) =>
   db.getAllAsync<RawEntry>(
     `SELECT * FROM (
        SELECT 'sales' AS "table", s.id, s.corrects_id, s.voided, COALESCE(s.entry_at, s.created_at) AS at, s.created_at,
-              NULL AS kind, s.basket_id, s.line_no, NULL AS sale_id, COALESCE(s.note, p.name) AS title,
+              NULL AS kind, s.basket_id, s.line_no, NULL AS sale_id, COALESCE(s.note, CASE WHEN s.product_id = '${GOODS_PRODUCT_ID}' THEN 'নগদ বিক্রি' ELSE p.name END) AS title,
               CASE WHEN s.product_id <> '${GOODS_PRODUCT_ID}' THEN s.quantity END AS quantity,
               CASE WHEN s.product_id <> '${GOODS_PRODUCT_ID}' THEN p.unit END AS unit,
               s.amount_poisha, s.credit, c.name AS customer, ${CLIP_SQL} AS audio_path
