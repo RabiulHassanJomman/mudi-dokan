@@ -167,3 +167,13 @@ it('both phones get the goods text and the money-only purchase', async () => {
     expect(await p.db.getFirstAsync("SELECT COUNT(*) AS n FROM products WHERE id = 'goods-sale'")).toEqual({ n: 1 });
   }
 });
+
+it('বাকি without goods: a plain baki, read back without goods', async () => {
+  const p = await phoneOf('A', null);
+  const d = withEntryCustomer((await draftOf(p.db, 'সাজু বাকি ১০০ টাকা'))!, 'সাজু', true);
+  expect(d).toMatchObject({ kind: 'baki', note: null, amountPoisha: 10000, problems: [] });
+  expect(entryReadback(d)).toBe('সাজু, ১০০ টাকা বাকি। ঠিক আছে?');
+  await say(p, 'সাজু বাকি ১০০ টাকা', true);
+  expect((await customerByName(p.db, 'সাজু'))!.balance_poisha).toBe(10000);
+  expect(await todayTotals(p.db, START)).toEqual({ sales: 0, baki: 10000 });
+});

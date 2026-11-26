@@ -12,6 +12,7 @@ describe('the voice log keeps the Android parse', () => {
     ['নগদ বিক্রি চাল, ডাল ১০০ টাকা', { intent: 'sale', amount: 100, note: 'চাল, ডাল' }],
     ['১০০০ টাকার আলু কেনা হয়েছে', { intent: 'purchase', product: 'আলু', amount: 1000 }],
     ['সাজু ৫০ টাকা জমা দিয়েছে', { intent: 'joma', customer: 'সাজু', amount: 50 }],
+    ['সাজু বাকি ১০০ টাকা', { intent: 'baki', customer: 'সাজু', amount: 100 }],
   ])('%s', (said, expected) => {
     expect(fixedAsParsed(parseFixed(said))).toMatchObject({ ...expected, missing: [], confidence: 'high', raw: said });
   });

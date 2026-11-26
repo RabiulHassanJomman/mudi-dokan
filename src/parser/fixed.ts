@@ -3,6 +3,7 @@
  * The keyword picks the type; the number next to টাকা is the one total.
  *
  *   বাকি   "সাজু বাকি নিয়েছে আদা, চাল, আটা ১০০ টাকা"
+ *          "সাজু বাকি ১০০ টাকা" (goods may be left out)
  *   নগদ   "নগদ বিক্রি আদা, চাল ১০০ টাকা"
  *   কেনা   "১০০০ টাকার আলু কেনা হয়েছে"
  *   জমা    "সাজু ৫০ টাকা জমা দিয়েছে"
@@ -216,7 +217,8 @@ export function parseFixed(text: string, ctx: FixedContext = {}): FixedCommand {
 
   const problems: FixedProblem[] = [];
   if ((kind === 'baki' || kind === 'joma') && !customer) problems.push('no_customer');
-  if (kind !== 'joma' && !goods.length) problems.push('no_goods');
+  // a বাকি may be only the name and the amount ("সাজু বাকি ১০০ টাকা")
+  if ((kind === 'cash_sale' || kind === 'purchase') && !goods.length) problems.push('no_goods');
   if (kind === 'purchase' && goods.length > 1) problems.push('many_goods');
   if (amounts.length > 1) problems.push('two_amounts');
   else if (amount === undefined) problems.push('no_amount');

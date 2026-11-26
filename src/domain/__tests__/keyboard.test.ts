@@ -57,7 +57,8 @@ describe('what to say when it is not clear', () => {
     expect(words(text)).toBe(said);
   });
   it('several problems: all of them', () => {
-    expect(words('বাকি নিয়েছে')).toBe('কার নাম বলুন। কী কী মাল, বলুন। কত টাকা বলুন। যেমন: ১০০ টাকা।');
+    expect(words('নগদ বিক্রি')).toBe('কী কী মাল, বলুন। কত টাকা বলুন। যেমন: ১০০ টাকা।');
+    expect(words('বাকি নিয়েছে')).toBe('কার নাম বলুন। কত টাকা বলুন। যেমন: ১০০ টাকা।');
   });
   it('a complete sentence: nothing', () => {
     expect(words('নগদ বিক্রি চাল ১০০ টাকা')).toBe('');
