@@ -14,6 +14,7 @@
 import * as K from './keywords';
 import { tokenize } from './normalize';
 import { parseNumber } from './numbers';
+import { fixSpelling } from './spelling';
 import { nfc, wordSet } from './util';
 
 export type FixedKind = 'baki' | 'cash_sale' | 'purchase' | 'joma';
@@ -59,7 +60,7 @@ const kindOf = (t: string): FixedKind | undefined => KIND_WORDS.find(([, words])
 
 /** The sentence's verbs and glue: neither a name nor goods. */
 const VERBS = wordSet([
-  ...K.TAKE, ...K.GAVE, ...K.SALE, ...K.TODAY,
+  ...K.TAKE, ...K.GAVE, ...K.SALE, ...K.TODAY, 'নিয়েছেন', 'দিয়েছেন', 'নিলেন', 'দিলেন',
   'হয়েছে', 'হইছে', 'হলো', 'হল', 'হয়', 'করলাম', 'করেছি', 'করেছে', 'করল', 'করলো', 'করলেন', 'করেছেন', 'করা',
   'দিলাম', 'দিয়েছি', 'দিছি', 'দিয়ে', 'গেল', 'গেলো', 'গেছে', 'নিলাম', 'নিয়েছি', 'নিছি',
   'মোট', 'টোটাল',
@@ -79,7 +80,9 @@ interface Word {
 /** Tokens, remembering where the text had commas. */
 function words(text: string): Word[] {
   // "1,500" stays one number
-  return text.split(/[,،](?![0-9০-৯])|(?<![0-9০-৯])[,،]/).flatMap((part) => tokenize(part).map((t, n) => ({ text: t, starts: n === 0 })));
+  return text
+    .split(/[,،](?![0-9০-৯])|(?<![0-9০-৯])[,،]/)
+    .flatMap((part) => tokenize(part).map((t, n) => ({ text: fixSpelling(t), starts: n === 0 })));
 }
 
 interface Taken {

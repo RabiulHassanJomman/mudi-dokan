@@ -62,6 +62,7 @@ export default function SayScreen() {
         said,
         { knownProducts: names.products, knownCustomers: [...names.customers, ...Object.keys(aliases)], productAliases: await productAliasMap(db) },
         { customer },
+        aliases,
       );
       const w = writer();
       const logId = await createVoiceLog(db, w, { transcript: said, source: 'voice', contextTab: tabParam, engine: 'android' });

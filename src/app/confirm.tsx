@@ -306,8 +306,7 @@ export default function ConfirmScreen() {
             knownProducts: names.products,
             knownCustomers: [...names.customers, ...Object.keys(aliasesNow)],
             productAliases: await productAliasMap(db),
-          }, { customer: params.customer });
-          if (cmd.customer) cmd.customer = resolveCustomerAlias(cmd.customer, aliasesNow);
+          }, { customer: params.customer }, aliasesNow);
           await setParsed(db, w, logId.current!, fixedAsParsed(cmd), { by: 'android' });
           heardCustomer.current = cmd.customer ?? null;
           const products = await findProducts(db, cmd.goods);

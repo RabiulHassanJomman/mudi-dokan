@@ -3,6 +3,8 @@
  * keyboard's voice typing into a text box; the fixed formats read it. Pure TS.
  */
 import { parseFixed, type FixedCommand, type FixedContext } from '../parser/fixed';
+import { distance } from './customers';
+import { nameKey, phoneticKey } from './names';
 
 export type VoiceMode = 'android' | 'gemini';
 export type VoiceTab = 'sale' | 'purchase' | 'ledger' | 'expense';
@@ -35,12 +37,65 @@ export const EXAMPLE_BN: Readonly<Record<Exclude<VoiceTab, 'expense'>, readonly 
   ledger: ['সাজু বাকি নিয়েছে আদা, চাল, আটা ১০০ টাকা', 'সাজু ৫০ টাকা জমা দিয়েছে'],
 };
 
+// "সাজুর", "সাজুকে": the name is the stem
+const CASE_ENDINGS = ['কে', 'ের', 'র'].map((e) => e.normalize('NFC'));
+/** A close spelling: edits ≤ this share of the longer name. */
+const CLOSE = 0.34;
+
 /**
- * The typed text → the command. From a customer screen (জমা নিন / বাকি দিন) the customer is
- * known, so a বাকি / জমা without a name gets that one.
+ * The heard customer name → the shop's customer it most likely is (the list was imported):
+ * a learned alias, the same name, the same name without a case ending, the same sound
+ * (শাজু = সাজু), or the one clearly closest spelling. Kept as heard when no one, or two
+ * equally, fit: the card then asks (closest names or নতুন ক্রেতা).
  */
-export function readKeyboardText(text: string, ctx: FixedContext, defaults: { customer?: string } = {}): FixedCommand {
-  const cmd = parseFixed(text, ctx);
+export function matchCustomer(heard: string | undefined, known: readonly string[], aliases: Readonly<Record<string, string>>): string | undefined {
+  if (!heard?.trim() || !known.length) return heard;
+  const h = nameKey(heard);
+  const stems = [h, ...CASE_ENDINGS.filter((e) => h.length > e.length + 1 && h.endsWith(e)).map((e) => h.slice(0, -e.length))];
+  const byKey = new Map(known.map((k) => [nameKey(k), k]));
+  const byAlias = new Map(Object.entries(aliases).map(([a, k]) => [nameKey(a), k]));
+  for (const st of stems) {
+    const hit = byAlias.get(st) ?? byKey.get(st);
+    if (hit) return hit;
+  }
+  const one = (found: string[]) => (new Set(found).size === 1 ? found[0] : undefined);
+  for (const st of stems) {
+    const sound = phoneticKey(st);
+    const same = sound.length >= 2 ? one(known.filter((k) => phoneticKey(k) === sound)) : undefined;
+    if (same) return same;
+  }
+  let best: { k: string; score: number } | null = null;
+  let tie = false;
+  for (const st of stems) {
+    for (const k of known) {
+      const kk = nameKey(k);
+      const score = distance(st, kk) / Math.max([...st].length, [...kk].length);
+      if (score > CLOSE) continue;
+      if (!best || score < best.score) {
+        best = { k, score };
+        tie = false;
+      } else if (score === best.score && k !== best.k) tie = true;
+    }
+  }
+  return best && !tie ? best.k : heard;
+}
+
+/**
+ * The typed text → the command, its customer matched to the list (matchCustomer). From a
+ * customer screen (জমা নিন / বাকি দিন) the customer is known, so a বাকি / জমা without a name
+ * gets that one.
+ */
+export function readKeyboardText(
+  text: string,
+  ctx: FixedContext,
+  defaults: { customer?: string } = {},
+  customerAliases: Readonly<Record<string, string>> = {},
+): FixedCommand {
+  const parsed = parseFixed(text, ctx);
+  // ctx.knownCustomers may carry alias spellings too (they help the parser find the name)
+  const customers = (ctx.knownCustomers ?? []).filter((k) => !Object.hasOwn(customerAliases, k));
+  const matched = matchCustomer(parsed.customer, customers, customerAliases);
+  const cmd = matched ? { ...parsed, customer: matched } : parsed;
   const name = defaults.customer?.trim();
   if (!name || cmd.customer || !cmd.problems.includes('no_customer')) return cmd;
   return { ...cmd, customer: name, problems: cmd.problems.filter((p) => p !== 'no_customer') };
