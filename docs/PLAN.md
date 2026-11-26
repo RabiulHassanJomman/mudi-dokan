@@ -6,14 +6,43 @@ Status
 • Last build: release APK (built Nov 15, installed on Pixel 7; has home detail sheet, live-text fix, বিরতি/চালিয়ে যান on Listening, spinner while Gemini thinks). Hidden voice-test screen (⚙ › version long-press › 🔊) lists Bangla TTS voices; on-device voices are robotic; Gemini TTS "Fenrir" chosen from samples, not built in yet. `npm test` → 1081 passing. firestore.rules deployed (Nov 15).
 • Unfinished: pause/resume not yet tested on the phone (Android 13+ joins one WAV per resume; recognizer may still end by itself after a few quiet seconds); real Bangla voice not yet tested for baki/joma/khoroch/kena, step-5 voice queries, queue review; cloud "wipe all phones" not tested on real Firestore; background backup at night not seen running; restore not tried on phone. Fenrir TTS not integrated (plan: cache clips, speak with robotic voice first if not cached, never wait on network).
 • Known bugs: "তিন তলার" parsed as number; বস্তা-type units stored 1:1; two customers with same name can't be split; deep-link tap right after launch can crash (adb only); both phones take nightly backup.
-• Next: find where command latency comes from (debug log ms; each prompt ≈1.8k tokens, 12 examples; Gemini 3.5 caches repeated prefixes by itself, no request field needed); then Fenrir TTS.
+• Next: Android parsing (section below), step A1. Not started. After it: Gemini latency (debug log ms; prompt ≈1.8k tokens, 12 examples), then Fenrir TTS.
+
+Android parsing (decided Nov 27, not built yet)
+Setting (⚙, per phone): বোঝার উপায় = Android (default) / Gemini. Gemini mode stays as it is today.
+Android mode: phone STT (bn-BD) → new fixed-format parser → confirm card → হ্যাঁ/না. No Gemini call, no understand_queue.
+
+Formats (the keyword picks the type; amount = number before টাকা; one total for all goods, no quantity or unit price)
+• বাকি: "সাজু বাকি নিয়েছে আদা, চাল, আটা ১০০ টাকা" → customer (required), goods, total. Saved: ledger baki, note = goods (v14).
+• নগদ: "নগদ বিক্রি আদা, চাল ১০০ টাকা" → goods, total, customer optional. Saved: one sales row (see Data).
+• কেনা: "১০০০ টাকার আলু কেনা হয়েছে" → one product, money spent. Saved: purchases row, quantity 0, paid from cash.
+• জমা: "সাজু ৫০ টাকা জমা দিয়েছে" → customer, amount. Saved: ledger joma.
+• Missing field, two type keywords or no match: show what was heard and understood, say what is missing (🔊), ask again. Nothing saved.
+
+Data
+• Stock is a record of money spent in this mode: no quantity, sales never reduce it. Gemini and Pick entries keep stock = purchases − sales.
+• v15 (new migration): sales.note (goods text); remake v_sales (and v_stock). A নগদ sale uses one fixed hidden product (fixed id, archived, "খুচরা মাল"), quantity 1, cost_known 0. So cash, history, undo, sync, backup work without a new table or firestore.rules change.
+• Quantity 0 purchase: মাল screen shows টাকা spent (not "শেষ"), history and ✏️ show and edit the total only, average cost ignores it (already filters quantity > 0).
+• Unchanged behaviour: a goods-only বাকি counts in আজ বাকি, not in আজ বিক্রি.
+
+Build steps (one at a time; each: tests first, test + tsc, APK on Pixel 7, Status, commit, push, stop)
+• A1 Parser: src/parser/fixed.ts, pure TS; parseCommand untouched. Tests: the four examples, বাকী, number words, Bangla/ASCII digits, honorifics, multi-word product names, each missing field, conflicting keywords.
+• A2 Data: v15 + upgrade test from v14 with real-looking rows; drafts and save for নগদ goods sale and amount-only purchase; cash, profit, stock, history, void and sync tests.
+• A3 Screens: confirm card (readback, edit goods/amount/customer), history, ✏️, মাল.
+• A4 Switch + voice: setting (default Android); Listening Android path (live text, থামুন, বিরতি, clip kept, voice_logs engine 'android'); ask-again screen with an example sentence. Works without a Gemini key.
+• A5 Real speech on Pixel 7 in the shop: check bn-BD offline, how STT writes numbers and names; add failures as fixtures.
+
+Risks / to confirm
+• STT gives no commas: goods are split using known product names and aliases, else kept as spoken.
+• Android mode does not handle questions, খরচ, মালিক নিল or voice undo (all four formats only). Pick, typing and Gemini mode still do.
+• Default Android changes the shop phone's behaviour on update.
 
 Rules that still matter
 • Every row: id (UUID), device_id, updated_at. Money = INTEGER poisha. Quantity REAL in product unit.
 • Entry tables (purchases, sales, ledger, expenses, owner_withdrawals, day_close) are append-only (UPDATE/DELETE triggers). Correction = new row with corrects_id; delete = voided correction. v_ views show the latest, non-voided version. Customers/products are archived, never deleted.
 • Stock = purchases − sales; balance and cash are computed, never stored or synced.
 • Nothing saves without confirmation (✅ / "হ্যাঁ"). Bangla UI, targets ≥ 52 px, 🔊 on every screen.
-• Engine: Gemini only (clip → Gemini → confirm card). No Android STT. Rule parser (pure TS, no RN imports, unit-tested) only handles typed text and হ্যাঁ/না. Offline/429/error → understand_queue, reviewed later. Key is in the APK (EXPO_PUBLIC_GEMINI_KEY): billing stays off; real release needs a proxy.
+• Engine today: Gemini only (clip → Gemini → confirm card). Decided Nov 27: Android parsing becomes a second, default engine (section above). Rule parser (pure TS, no RN imports, unit-tested) handles typed text and হ্যাঁ/না. Gemini offline/429/error → understand_queue, reviewed later. Key is in the APK (EXPO_PUBLIC_GEMINI_KEY): billing stays off; real release needs a proxy.
 • Sync: SQLite is truth, Firestore only transport at shops/{uid}/{table}/{rowId}. Entries = UUID union; mutable tables = LWW by updated_at. Merge duplicates via merged_into + alias + correction. Daily write cap 18K.
 • Migrations: one append-only MIGRATIONS list (now v14, verified from SCHEMA_VERSION); never edit a shipped one; add an upgrade test with real-looking rows.
 • Release: `npm run apk` only, dedicated release key (~/.mudi-dokan/keys, MUDI_RELEASE_* in ~/.gradle/gradle.properties), install with `adb install -r`, never uninstall. Keep key backups off this Mac.
