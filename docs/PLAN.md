@@ -13,6 +13,7 @@ Status
 • বাকি without goods ("সাজু বাকি ১০০ টাকা") allowed (Nov 27): `npm test` → 1167 passing. Installed on Pixel 7 (v0.1.64): "সাজু বাকি 100 টাকা" opens the বাকি card (সাজু, ৳ ১০০, goods empty); tested with না, nothing saved.
 • নগদ বিক্রি without goods allowed (Nov 27): `npm test` → 1170 passing. Installed with the next build.
 • Spelling fixes + customer matching (Nov 27): src/parser/spelling.ts (বাকে→বাকি, নগত→নগদ, টেকা/তাকা→টাকা, নিসে→নিয়েছে …, add more there); the heard name is matched to the imported customer list (domain/keyboard.matchCustomer: alias, exact, without -র/-ের/-কে, same sound, one clearly closest spelling; else the card asks). `npm test` → 1209 passing. Installed on Pixel 7 (v0.1.67): "শানি বাকে 100 টেকা" → বাকি, সানি, ৳ ১০০; "নগত 100 টাকা" → নগদ বিক্রি ৳ ১০০ without goods (both cancelled with না, nothing saved).
+• More spelling fixes (Nov 27): ~70 more variants in src/parser/spelling.ts (বাখী/বাখিতে, ধাড়, নকত/নগতে, সোধ/পরিসোধ, টাখা/টাহার/টেকায়, বিকরী, কিনসি/আনসি, নিয়েসে/দিয়েচে/হইসে, আইজ, আফা/মিঞা). Real words (জামা, জুমা, কিনা, কেননা, নিচে) are left alone. `npm test` → 1238 passing. Not built or installed yet.
 • Next: A5 (real speech with Ridmik in the shop; new misspellings go into spelling.ts). After Android parsing: Gemini latency (debug log ms; prompt ≈1.8k tokens, 12 examples), then Fenrir TTS.
 
 Android parsing (decided Nov 27; A1–A4 built)
