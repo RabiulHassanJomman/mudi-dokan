@@ -40,6 +40,8 @@ export default function SayScreen() {
   const scroll = useRef<React.ComponentRef<typeof ScrollView>>(null);
   const input = useRef<React.ComponentRef<typeof TextInput>>(null);
   const listeningRef = useRef(false);
+  /** Between the tap and start(): a second call must not start the recognizer again (it cuts off the first). */
+  const starting = useRef(false);
   const leaving = useRef(false);
   /** This listen's recording: its file once audioend says so; waiters for it. */
   const clip = useRef<{ uri: string | null; ended: boolean; waiters: (() => void)[] } | null>(null);
@@ -52,8 +54,18 @@ export default function SayScreen() {
     if (words) void speak(words);
   }, []);
 
-  const listen = useCallback(async () => {
-    if (listeningRef.current || leaving.current) return;
+  const listen = useCallback(async (why: string) => {
+    console.log(`MUDI_SAY listen ${why}${listeningRef.current || starting.current ? ' (already on)' : ''}`);
+    if (listeningRef.current || starting.current || leaving.current) return;
+    starting.current = true;
+    try {
+      await startListening();
+    } finally {
+      starting.current = false;
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function startListening() {
     stopSpeaking();
     input.current?.blur();
     const perm = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
@@ -77,7 +89,7 @@ export default function SayScreen() {
       // Android 13+ only; older phones give no file (the entry is kept without a clip)
       recordingOptions: { persist: true, outputDirectory: Paths.document.uri, outputFileName: `voice_${Date.now()}.wav` },
     });
-  }, [showProblem]);
+  }
 
   const stopListening = useCallback(() => {
     if (!listeningRef.current) return;
@@ -114,7 +126,7 @@ export default function SayScreen() {
 
   useEffect(() => {
     // a moment after the screen opens, so the tap that opened it isn't heard
-    const t = setTimeout(() => void listen(), 300);
+    const t = setTimeout(() => void listen('open'), 300);
     return () => {
       leaving.current = true;
       clearTimeout(t);
@@ -240,7 +252,7 @@ export default function SayScreen() {
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={listening ? 'থামুন' : 'মাইক চেপে বলুন'}
-            onPress={() => (listening ? stopListening() : void listen())}
+            onPress={() => (listening ? stopListening() : void listen('tap'))}
             style={({ pressed }) => [styles.mic, listening && styles.micOn, pressed && styles.pressed]}
           >
             <Icon name="mic" size={34} color={listening ? colors.onColor : colors.saleDark} strokeWidth={2.4} />
