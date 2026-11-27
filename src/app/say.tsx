@@ -254,7 +254,7 @@ export default function SayScreen() {
       const words = fixedProblemWords(cmd);
       // only a command that goes to the card keeps its clip; no wait for the recorder to close the
       // file (that took ~1.7 s): the card doesn't need it, and the upload waits QUEUE_DELAY_MS
-      const audioPath = words ? null : await oneClip();
+      const audioPath = words ? null : oneClip();
       const logId = await createVoiceLog(db, w, { transcript: said, source: 'voice', contextTab: tabParam, audioPath });
       const lookup = words && canLookup ? customerLookup(said, names.customers, aliases) : null;
       const found = lookup ? await customerByName(db, lookup) : null;
@@ -286,20 +286,35 @@ export default function SayScreen() {
   }
 
   /**
-   * The sentence's recording for its log (the log owns it then). One part: its file at once (no wait
-   * for the recorder, ~1.7 s; the upload waits QUEUE_DELAY_MS). Parts from চালিয়ে যান: wait until
-   * each is closed, join them into the first file.
+   * The sentence's recording for its log (the log owns it then): the first part's file, at once (the
+   * card doesn't need it; the upload waits QUEUE_DELAY_MS, 2 min). Parts from চালিয়ে যান are joined
+   * into that file in the background, after the card has opened.
    */
-  async function oneClip(): Promise<string | null> {
+  function oneClip(): string | null {
     const parts = clips.current.filter((c) => c.uri);
     clips.current = [];
     const first = parts[0];
     if (!first?.uri) return null;
-    if (parts.length === 1) return first.uri;
+    if (parts.length > 1) void joinParts(parts, first.uri);
+    return first.uri;
+  }
+
+  /**
+   * Waits until each part's file is closed, joins them into the first. Runs on after this screen has
+   * gone, so it listens for the recorder itself (the screen's 'audioend' handler goes with the screen).
+   */
+  async function joinParts(parts: NonNullable<Clip>[], into: string) {
+    const sub = ExpoSpeechRecognitionModule.addListener('audioend', (e) => {
+      const c = parts.find((x) => !x.ended);
+      if (!c) return;
+      c.uri = e.uri ?? c.uri;
+      c.ended = true;
+      for (const w of c.waiters.splice(0)) w();
+    });
     try {
       const closed = Promise.all(parts.map((c) => (c.ended ? null : new Promise<void>((r) => c.waiters.push(r)))));
       // after a stop, Google sometimes never ends its segmented session, so the recorder never closes
-      // the last file (stuck on দেখছি…): abort ends it, and the file is closed then
+      // the last file: abort ends it, and the file is closed then
       if (!(await within(closed, CLOSE_WAIT_MS))) {
         console.log('MUDI_SAY recorder still open: abort');
         ExpoSpeechRecognitionModule.abort();
@@ -307,15 +322,16 @@ export default function SayScreen() {
       }
       // a part still open has no proper file: it is left out of the join
       const ready = parts.filter((c) => c.ended);
-      if (!ready.length) return first.uri;
+      if (!ready.length) return;
       const bytes = await Promise.all(ready.map((c) => new File(c.uri!).bytes().catch(() => new Uint8Array())));
       const joined = joinWav(bytes);
-      if (joined) new File(first.uri).write(joined);
+      if (joined) new File(into).write(joined);
       for (const c of parts.slice(1)) dropClip(c);
     } catch (e) {
       console.warn('joining the recording failed', e);
+    } finally {
+      sub.remove();
     }
-    return first.uri;
   }
 
   const clear = () => {
