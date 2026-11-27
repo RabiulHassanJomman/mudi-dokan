@@ -12,7 +12,7 @@ import { useDeleteEntry, usePartyDelete } from '../../components/DeleteEntry';
 import { deleteWords } from '../../domain/delete';
 import { customerHistory, getCustomer, setCustomerPhone, type CustomerBalance, type LedgerLine } from '../../db/repo';
 import { writer } from '../../device';
-import { balanceWords } from '../../domain/customers';
+import { bakiSummary, bakiSummaryWords, balanceWords } from '../../domain/customers';
 import { dayLabel, formatNumber, formatTaka, toBnDigits } from '../../lib/bn';
 import { speak } from '../../lib/speak';
 import { useClipPlayer } from '../../lib/useClipPlayer';
@@ -52,10 +52,12 @@ export default function CustomerScreen() {
 
   if (!c) return <SafeAreaView style={styles.screen} />;
   const owed = c.balance_poisha;
+  const sum = bakiSummary(rows);
+  const sayHisab = () => void speak(bakiSummaryWords(c.name, sum));
 
   const readScreen = () =>
     void speak(
-      `${c.name}।${c.note ? ` ${c.note}।` : ''} ${owed > 0 ? `পাবো ${formatNumber(owed / 100)} টাকা।` : owed < 0 ? `অগ্রিম ${formatNumber(-owed / 100)} টাকা।` : 'কোনো বাকি নেই।'} ` +
+      `${bakiSummaryWords(c.name, sum)}${c.note ? ` ${c.note}।` : ''} ` +
         rows
           .slice(0, 3)
           .map((r) => `${dayLabel(r.created_at)}, ${what(r)}, ${formatNumber(r.amount_poisha / 100)} টাকা।`)
@@ -127,6 +129,53 @@ export default function CustomerScreen() {
           </Txt>
         </View>
       </Pressable>
+
+      {rows.length > 0 && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`${c.name} এর হিসাবের সারাংশ শুনুন`}
+          onPress={sayHisab}
+          style={({ pressed }) => [styles.summary, pressed && styles.pressed]}
+        >
+          <View style={styles.sumRow}>
+            <View style={styles.sumCell}>
+              <Txt size={fontSize.caption} weight="medium" color={colors.muted}>
+                {`মোট বাকি নিয়েছে · ${formatNumber(sum.bakiCount)} বার`}
+              </Txt>
+              <Txt size={fontSize.label} weight="bold" color={colors.bakiInk}>
+                {formatTaka(sum.bakiPoisha)}
+              </Txt>
+            </View>
+            <View style={styles.sumCell}>
+              <Txt size={fontSize.caption} weight="medium" color={colors.muted}>
+                {`জমা দিয়েছে · ${formatNumber(sum.jomaCount)} বার`}
+              </Txt>
+              <Txt size={fontSize.label} weight="bold" color={colors.saleDark}>
+                {formatTaka(sum.jomaPoisha)}
+              </Txt>
+            </View>
+          </View>
+          <View style={styles.sumRow}>
+            <View style={styles.sumCell}>
+              <Txt size={fontSize.caption} weight="medium" color={colors.muted}>
+                বাকি কত দিন
+              </Txt>
+              <Txt size={fontSize.label} weight="bold" color={sum.owedDays !== null && sum.owedDays >= 30 ? colors.bakiInk : colors.ink}>
+                {sum.owedDays === null ? '—' : sum.owedDays === 0 ? 'আজ থেকে' : `${formatNumber(sum.owedDays)} দিন`}
+              </Txt>
+            </View>
+            <View style={styles.sumCell}>
+              <Txt size={fontSize.caption} weight="medium" color={colors.muted}>
+                শেষ জমা
+              </Txt>
+              <Txt size={fontSize.label} weight="bold" numberOfLines={1}>
+                {sum.lastJoma ? `${dayLabel(sum.lastJoma.at)} · ${formatTaka(sum.lastJoma.poisha)}` : 'এখনো নেই'}
+              </Txt>
+            </View>
+            <Icon name="speaker" size={22} color={colors.sale} strokeWidth={2} />
+          </View>
+        </Pressable>
+      )}
 
       <View style={styles.actions}>
         <Pressable accessibilityRole="button" onPress={() => say('joma')} style={({ pressed }) => [styles.action, { backgroundColor: colors.sale }, pressed && styles.pressed]}>
@@ -241,6 +290,9 @@ const styles = StyleSheet.create({
   },
   round: { width: size.iconButton, height: size.iconButton, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' },
   hero: { backgroundColor: colors.surface, borderRadius: radius.hero, padding: spacing.screen, flexDirection: 'row', alignItems: 'center', gap: spacing.lg },
+  summary: { backgroundColor: colors.surface, borderRadius: radius.card, paddingVertical: spacing.sm, paddingHorizontal: spacing.md, gap: spacing.sm, minHeight: 52 },
+  sumRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  sumCell: { flex: 1 },
   actions: { flexDirection: 'row', gap: spacing.sm },
   action: { flex: 1, height: size.bigAction, borderRadius: radius.button, alignItems: 'center', justifyContent: 'center', gap: 2 },
   h2: { marginHorizontal: 4 },

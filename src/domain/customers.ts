@@ -150,3 +150,83 @@ export function customerAliasToLearn(
   if (Object.keys(aliases).some((a) => key(a) === key(h))) return null;
   return h;
 }
+
+export interface SummaryLine {
+  kind: 'baki' | 'joma';
+  amount_poisha: number;
+  created_at: number;
+}
+
+export interface BakiSummary {
+  bakiPoisha: number;
+  bakiCount: number;
+  jomaPoisha: number;
+  jomaCount: number;
+  /** বাকি − জমা (same as the customer's balance); < 0 = paid ahead. */
+  balancePoisha: number;
+  /** The oldest baki not yet paid off (জমা pays the oldest first); null when nothing is owed. */
+  owedSince: number | null;
+  /** Calendar days since owedSince (0 = today); null when nothing is owed. */
+  owedDays: number | null;
+  lastJoma: { at: number; poisha: number } | null;
+}
+
+const startOfDay = (t: number) => {
+  const d = new Date(t);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+};
+
+/** "সাজুর হিসাব" card: totals, how long the baki has been owed, the last জমা. Rows in any order. */
+export function bakiSummary(rows: readonly SummaryLine[], now = Date.now()): BakiSummary {
+  const asc = [...rows].sort((a, b) => a.created_at - b.created_at);
+  let bakiPoisha = 0;
+  let bakiCount = 0;
+  let jomaPoisha = 0;
+  let jomaCount = 0;
+  let lastJoma: BakiSummary['lastJoma'] = null;
+  for (const r of asc) {
+    if (r.kind === 'baki') {
+      bakiPoisha += r.amount_poisha;
+      bakiCount++;
+    } else {
+      jomaPoisha += r.amount_poisha;
+      jomaCount++;
+      lastJoma = { at: r.created_at, poisha: r.amount_poisha };
+    }
+  }
+  const balancePoisha = bakiPoisha - jomaPoisha;
+  // all জমা pays the oldest baki first; the first baki it doesn't cover is owed since then
+  let owedSince: number | null = null;
+  if (balancePoisha > 0) {
+    let paid = jomaPoisha;
+    for (const r of asc) {
+      if (r.kind !== 'baki') continue;
+      if (paid >= r.amount_poisha) paid -= r.amount_poisha;
+      else {
+        owedSince = r.created_at;
+        break;
+      }
+    }
+  }
+  const owedDays = owedSince === null ? null : Math.round((startOfDay(now) - startOfDay(owedSince)) / 86_400_000);
+  return { bakiPoisha, bakiCount, jomaPoisha, jomaCount, balancePoisha, owedSince, owedDays, lastJoma };
+}
+
+const taka = (poisha: number) => `${formatNumber(poisha / 100)} টাকা`;
+
+/** The summary card read aloud. */
+export function bakiSummaryWords(name: string, s: BakiSummary, now = Date.now()): string {
+  const head = `${genitive(name)} হিসাব।`;
+  if (!s.bakiCount && !s.jomaCount) return `${head} এখনো কোনো বাকি বা জমা নেই।`;
+  const parts = [head];
+  if (s.bakiCount) parts.push(`মোট বাকি নিয়েছে ${taka(s.bakiPoisha)}, ${formatNumber(s.bakiCount)} বার।`);
+  parts.push(s.jomaCount ? `জমা দিয়েছে ${taka(s.jomaPoisha)}, ${formatNumber(s.jomaCount)} বার।` : 'এখনো কোনো জমা দেয়নি।');
+  if (s.balancePoisha > 0) {
+    const since = s.owedDays ? `${formatNumber(s.owedDays)} দিন ধরে` : 'আজ থেকে';
+    parts.push(`এখন পাবো ${taka(s.balancePoisha)}, ${since}।`);
+  } else if (s.balancePoisha < 0) parts.push(`অগ্রিম দিয়েছে ${taka(-s.balancePoisha)}।`);
+  else parts.push('কোনো বাকি নেই।');
+  if (s.lastJoma) parts.push(`শেষ জমা ${dayLabel(s.lastJoma.at, now)}, ${taka(s.lastJoma.poisha)}।`);
+  return parts.join(' ');
+}
