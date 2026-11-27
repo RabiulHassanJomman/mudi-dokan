@@ -4,7 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { File, Paths } from 'expo-file-system';
-import { useAudioPlayer } from 'expo-audio';
+import { createAudioPlayer, useAudioPlayer } from 'expo-audio';
 import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-speech-recognition';
 
 import { Icon } from '../components/Icon';
@@ -90,6 +90,13 @@ export default function SayScreen() {
       starting.current = false;
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // the mic closed (card, বিরতি, or gave up; not the quiet restarts, which stay listening): the falling chime
+  const wasListening = useRef(false);
+  useEffect(() => {
+    if (wasListening.current && !listening) playEndChime();
+    wasListening.current = listening;
+  }, [listening]);
 
   async function playBeep() {
     try {
@@ -506,9 +513,21 @@ const styles = StyleSheet.create({
  */
 const QUIET_RETRIES = 3;
 
-/** "Speak now": a two-note rising chime before each listen (not the quiet restarts), which starts when it is over. */
+/** "Speak now": a soft two-note rising chime (scripts/make-chimes.py) before each listen (not the quiet restarts), which starts when it is over. */
 const BEEP = require('../../assets/sounds/chime.wav') as number; // eslint-disable-line @typescript-eslint/no-require-imports
 const BEEP_MS = 330;
+/** "Done listening": the same chime falling. Kept outside the screen, so it plays on while the card opens. */
+const END_CHIME = require('../../assets/sounds/chime-end.wav') as number; // eslint-disable-line @typescript-eslint/no-require-imports
+let endPlayer: ReturnType<typeof createAudioPlayer> | null = null;
+function playEndChime() {
+  try {
+    endPlayer ??= createAudioPlayer(END_CHIME);
+    endPlayer.seekTo(0);
+    endPlayer.play();
+  } catch {
+    // no chime: nothing else changes
+  }
+}
 /** How long to wait for the recorder to close a part's file before aborting (and again after). */
 const CLOSE_WAIT_MS = 1500;
 
