@@ -26,7 +26,7 @@ type Tab = keyof typeof EXAMPLE_BN;
  * the same one the Ridmik keyboard's mic uses). When the speaker stops, the text goes to the
  * confirm card; if something is missing it is said, and the text stays to see or fix by
  * keyboard (the clip is kept for it). 🎤 starts over (clears the text and its clip). Tapping the text box opens the keyboard
- * (Ridmik's mic still works there). A beep says the mic is open. বিরতি stops listening without
+ * (Ridmik's mic still works there). A two-note chime says the mic is open. বিরতি stops listening without
  * going to the card; চালিয়ে যান listens on and adds to the same text (the parts' WAVs are joined).
  * The clip (WAV, Android 13+) goes with the voice log → Drive; a command not understood
  * keeps none. Cancelled ones are dropped by the upload queue and deleted by retention.
@@ -479,9 +479,9 @@ const styles = StyleSheet.create({
  */
 const QUIET_RETRIES = 3;
 
-/** "Speak now": played before each listen (not the quiet restarts), which starts when it is over. */
-const BEEP = require('../../assets/sounds/beep.wav') as number; // eslint-disable-line @typescript-eslint/no-require-imports
-const BEEP_MS = 220;
+/** "Speak now": a two-note rising chime before each listen (not the quiet restarts), which starts when it is over. */
+const BEEP = require('../../assets/sounds/chime.wav') as number; // eslint-disable-line @typescript-eslint/no-require-imports
+const BEEP_MS = 330;
 
 type Clip = { uri: string | null; ended: boolean; waiters: (() => void)[] } | null;
 
