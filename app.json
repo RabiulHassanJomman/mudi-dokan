@@ -50,7 +50,8 @@
           "speechRecognitionPermission": "কথা শুনে হিসাব লিখতে অনুমতি লাগবে।",
           "androidSpeechServicePackages": [
             "com.google.android.googlequicksearchbox",
-            "com.google.android.as"
+            "com.google.android.as",
+            "com.google.android.tts"
           ]
         }
       ],

@@ -109,3 +109,28 @@ export function fixedProblemWords(cmd: FixedCommand): string {
   }
   return out.join(' ');
 }
+
+/** The big 🎤 (the phone's recognizer, bn-BD): heard text goes after what is in the box. */
+export const joinHeard = (before: string, heard: string): string => [before.trim(), heard.trim()].filter(Boolean).join(' ');
+
+const TRY_AGAIN = 'মাইক চেপে আবার বলুন।';
+
+/** Recognizer error code → what the screen shows and says ('' = say nothing: the user stopped it). */
+export function heardErrorWords(code: string): string {
+  switch (code) {
+    case 'aborted':
+      return '';
+    case 'no-speech':
+    case 'speech-timeout':
+      return `কিছু শুনিনি। ${TRY_AGAIN}`;
+    case 'not-allowed':
+      return 'মাইকের অনুমতি নেই। অনুমতি দিন, অথবা কিবোর্ডের মাইকে বলুন।';
+    case 'service-not-allowed':
+    case 'language-not-supported':
+      return 'এই ফোনে কথা শোনার ব্যবস্থা নেই। লেখার ঘরে চেপে কিবোর্ডের মাইকে বলুন।';
+    case 'network':
+      return `ইন্টারনেট নেই। ${TRY_AGAIN}`;
+    default:
+      return `শোনা গেল না। ${TRY_AGAIN}`;
+  }
+}

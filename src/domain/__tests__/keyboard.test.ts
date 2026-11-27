@@ -1,5 +1,5 @@
 /** Android mode: said with the Ridmik keyboard's voice typing, read by the fixed formats. */
-import { EXAMPLE_BN, fixedProblemWords, readKeyboardText, voiceRoute } from '../keyboard';
+import { EXAMPLE_BN, fixedProblemWords, heardErrorWords, joinHeard, readKeyboardText, voiceRoute } from '../keyboard';
 import { parseFixed } from '../../parser/fixed';
 
 describe('which screen the 🎤 opens', () => {
@@ -58,4 +58,32 @@ it('every tab has an example that parses', () => {
   for (const tab of ['sale', 'purchase', 'ledger'] as const) {
     for (const ex of EXAMPLE_BN[tab]) expect({ ex, problems: parseFixed(ex).problems }).toEqual({ ex, problems: [] });
   }
+});
+
+describe('listening in the app (the big 🎤, bn-BD)', () => {
+  it('heard text goes after what is already in the box', () => {
+    expect(joinHeard('', 'সাজু বাকি ১০০ টাকা')).toBe('সাজু বাকি ১০০ টাকা');
+    expect(joinHeard('সাজু বাকি', ' ১০০ টাকা ')).toBe('সাজু বাকি ১০০ টাকা');
+    expect(joinHeard('সাজু বাকি ', '')).toBe('সাজু বাকি');
+  });
+
+  it('nothing heard: say so, and how to try again', () => {
+    expect(heardErrorWords('no-speech')).toBe('কিছু শুনিনি। মাইক চেপে আবার বলুন।');
+    expect(heardErrorWords('speech-timeout')).toBe('কিছু শুনিনি। মাইক চেপে আবার বলুন।');
+  });
+
+  it('no permission or no recognizer: use the keyboard', () => {
+    expect(heardErrorWords('not-allowed')).toMatch(/অনুমতি/);
+    expect(heardErrorWords('service-not-allowed')).toMatch(/কিবোর্ড/);
+    expect(heardErrorWords('language-not-supported')).toMatch(/কিবোর্ড/);
+  });
+
+  it('no internet and other failures', () => {
+    expect(heardErrorWords('network')).toMatch(/ইন্টারনেট/);
+    expect(heardErrorWords('busy')).toBe('শোনা গেল না। মাইক চেপে আবার বলুন।');
+  });
+
+  it('stopped by the user: nothing to say', () => {
+    expect(heardErrorWords('aborted')).toBe('');
+  });
 });
