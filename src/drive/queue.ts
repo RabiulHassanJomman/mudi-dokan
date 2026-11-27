@@ -20,7 +20,7 @@ export const BACKOFF_MS = [30_000, 120_000, 600_000, 1_800_000, 7_200_000, 21_60
 export const backoffMs = (attempts: number) => BACKOFF_MS[Math.min(Math.max(attempts, 1), BACKOFF_MS.length) - 1]!;
 
 /**
- * A new clip waits this long: the confirm card and Gemini may still read the WAV. A log still
+ * A new clip waits this long: the confirm card may still read the WAV. A log still
  * 'pending' (card open) waits until PENDING_GRACE_MS after it was made.
  */
 export const QUEUE_DELAY_MS = 2 * 60_000;

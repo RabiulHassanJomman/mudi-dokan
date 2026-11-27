@@ -1,29 +1,17 @@
 /** Android mode: said with the Ridmik keyboard's voice typing, read by the fixed formats. */
-import { EXAMPLE_BN, effectiveMode, fixedProblemWords, readKeyboardText, voiceRoute } from '../keyboard';
+import { EXAMPLE_BN, fixedProblemWords, readKeyboardText, voiceRoute } from '../keyboard';
 import { parseFixed } from '../../parser/fixed';
 
 describe('which screen the 🎤 opens', () => {
-  it('Android is the default; Gemini only with a key', () => {
-    expect(effectiveMode(null, true)).toBe('android');
-    expect(effectiveMode('gemini', true)).toBe('gemini');
-    expect(effectiveMode('gemini', false)).toBe('android');
-    expect(effectiveMode('android', true)).toBe('android');
-  });
-
-  it('Android mode: the keyboard screen, carrying the customer', () => {
-    expect(voiceRoute('android', 'sale')).toEqual({ pathname: '/say', params: { tab: 'sale' } });
-    expect(voiceRoute('android', 'ledger', { customer: 'সাজু', kind: 'joma' })).toEqual({
+  it('the keyboard screen, carrying the customer', () => {
+    expect(voiceRoute('sale')).toEqual({ pathname: '/say', params: { tab: 'sale' } });
+    expect(voiceRoute('ledger', { customer: 'সাজু', kind: 'joma' })).toEqual({
       pathname: '/say', params: { tab: 'ledger', customer: 'সাজু', kind: 'joma' },
     });
   });
 
-  it('Android mode has no খরচ sentence: the number pad', () => {
-    expect(voiceRoute('android', 'expense')).toEqual({ pathname: '/confirm', params: { text: '', tab: 'expense' } });
-  });
-
-  it('Gemini mode: Listening as before', () => {
-    expect(voiceRoute('gemini', 'purchase')).toEqual({ pathname: '/listening', params: { tab: 'purchase' } });
-    expect(voiceRoute('gemini', 'expense')).toEqual({ pathname: '/listening', params: { tab: 'expense' } });
+  it('no খরচ sentence: the number pad', () => {
+    expect(voiceRoute('expense')).toEqual({ pathname: '/confirm', params: { text: '', tab: 'expense' } });
   });
 });
 

@@ -262,12 +262,11 @@ export interface NewVoiceLog {
   sttError?: string | null;
   /** 'pick' = chosen on ছবি দেখে (no speech, no parser): left out of the accuracy. */
   via?: 'pick';
-  /** Voice only: the engine setting when it was spoken (Gemini experiment). */
-  engine?: Engine;
-  /** Gemini mode: the recognizer failed (sttError kept) but Gemini understood it → still pending. */
-  keepPending?: boolean;
+  /** Voice only: 'android' = said with the Ridmik keyboard. */
+  engine?: 'android';
 }
 
+/** Stored engine; 'gemini' / 'both' only on logs made before Gemini was removed (Nov 27). */
 export type Engine = 'android' | 'gemini' | 'both';
 
 export async function createVoiceLog(db: Db, w: Writer, v: NewVoiceLog): Promise<string> {
@@ -283,7 +282,7 @@ export async function createVoiceLog(db: Db, w: Writer, v: NewVoiceLog): Promise
     context_tab: v.contextTab,
     alternatives_json: v.alternatives?.length ? JSON.stringify(v.alternatives) : null,
     stt_error: v.sttError ?? null,
-    outcome: v.sttError && !v.keepPending ? 'stt_error' : 'pending',
+    outcome: v.sttError ? 'stt_error' : 'pending',
     via: v.via ?? null,
     engine: v.engine ?? null,
     device_name: w.deviceName,
@@ -315,7 +314,7 @@ export interface VoiceLogRow {
   via: 'pick' | null;
   /** Parsed intent, replaced by the confirmed one on save. */
   intent: string | null;
-  /** v7 (Gemini experiment): engine setting, whose result parsed_json is, each engine's result. */
+  /** v7 (Gemini experiment, removed Nov 27): columns kept; old logs may still have them filled. */
   engine: Engine | null;
   parsed_by: 'android' | 'gemini' | null;
   android_json: string | null;
@@ -335,15 +334,14 @@ export const getVoiceLog = (db: Db, id: string) =>
   db.getFirstAsync<VoiceLogRow>('SELECT * FROM voice_logs WHERE id = ?', id);
 
 /**
- * parsed = what the confirm card shows. `by` + `android`: the Gemini experiment (v7) also
- * keeps the rule parse of the Android transcript, whoever was shown.
+ * parsed = what the confirm card shows; `by` = who read it ('android' = the fixed formats).
  */
 export async function setParsed(
   db: Db,
   w: Writer,
   id: string,
   parsed: ParsedCommand,
-  extra: { by?: 'android' | 'gemini'; android?: ParsedCommand | null } = {},
+  extra: { by?: 'android'; android?: ParsedCommand | null } = {},
 ): Promise<void> {
   await db.runAsync(
     `UPDATE voice_logs SET parsed_json = ?, intent = ?, parsed_by = COALESCE(?, parsed_by),
@@ -352,35 +350,6 @@ export async function setParsed(
     parsed.intent,
     extra.by ?? null,
     extra.android ? JSON.stringify(extra.android) : null,
-    w.now(),
-    id,
-  );
-}
-
-/** What Gemini made of the clip (the call may finish after the entry was saved). */
-export interface GeminiLogResult {
-  model: string;
-  parsed: ParsedCommand | null;
-  transcript: string | null;
-  error: string | null;
-  ms: number;
-  usage: { promptTokens: number; audioTokens: number; outputTokens: number; thoughtTokens: number } | null;
-}
-
-export async function setGeminiResult(db: Db, w: Writer, id: string, g: GeminiLogResult): Promise<void> {
-  await db.runAsync(
-    `UPDATE voice_logs SET gemini_json = ?, gemini_transcript = ?, gemini_error = ?, gemini_model = ?, gemini_ms = ?,
-       gemini_prompt_tokens = ?, gemini_audio_tokens = ?, gemini_output_tokens = ?, gemini_thought_tokens = ?, updated_at = ?
-     WHERE id = ?`,
-    g.parsed ? JSON.stringify(g.parsed) : null,
-    g.transcript,
-    g.parsed ? null : g.error ?? 'no result',
-    g.model,
-    Math.round(g.ms),
-    g.usage?.promptTokens ?? null,
-    g.usage?.audioTokens ?? null,
-    g.usage?.outputTokens ?? null,
-    g.usage?.thoughtTokens ?? null,
     w.now(),
     id,
   );
@@ -1228,7 +1197,7 @@ export const TABLE_OF: Record<RecentEntry['kind'], EntryTable> = {
 
 // ── debug log, wipe ────────────────────────────────────────────
 
-/** The hidden debug log (⚙, long-press the version): the last commands with what Gemini made of them. */
+/** The hidden debug log (⚙, long-press the version): the last commands with what the app made of them. */
 export const DEBUG_LOG_LIMIT = 200;
 export const debugLog = (db: Db, limit = DEBUG_LOG_LIMIT) =>
   db.getAllAsync<VoiceLogRow>("SELECT * FROM voice_logs WHERE source = 'voice' ORDER BY created_at DESC LIMIT ?", limit);

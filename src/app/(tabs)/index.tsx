@@ -8,7 +8,6 @@ import { Icon, productIcon, type IconName } from '../../components/Icon';
 import { ScreenHeader } from '../../components/ScreenHeader';
 import { Txt } from '../../components/Txt';
 import { buildLabel } from '../../lib/buildInfo';
-import { PendingCard } from '../../components/PendingCard';
 import { useDeleteEntry } from '../../components/DeleteEntry';
 import { TABLE_OF } from '../../db/repo';
 import { entryDeleteText } from '../../domain/delete';
@@ -192,7 +191,6 @@ export default function SaleScreen() {
           </Pressable>
         </View>
 
-        <PendingCard />
 
         {recent.map((r) => {
           const line = recentLine(r);

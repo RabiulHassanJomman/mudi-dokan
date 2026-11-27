@@ -1,28 +1,23 @@
 /** "সাজুর বাকি তেল, আটা, ময়দা, সুজি, মোট ৫০০ টাকা": a baki with the goods as a note, no stock change. */
-import { entryFromParse, entryReadback, withEntryCustomer } from '../../domain/entry';
-import { convertGemini } from '../../gemini/convert';
+import { entryFromFixed, entryReadback, withEntryCustomer } from '../../domain/entry';
+import { parseFixed } from '../../parser';
 import { createVoiceLog, customerBalances, customerHistory, customerByName, ensureDevice, saveEntry, stockList, voidEntry } from '../repo';
 import { FakeCloud } from '../../sync/__tests__/fakeRemote';
 import { DAY0, phoneOf, syncPhone } from './shopHelpers';
 import { migratedDb, testWriter } from './nodeDb';
 
 const SAID = 'সাজুর বাকি তেল, আটা, ময়দা, সুজি, মোট ৫০০ টাকা';
-const GEMINI = {
-  transcript: SAID, intent: 'baki', customer: 'সাজু', credit: false, amount: 500, item: null, person: null,
-  note: 'তেল, আটা, ময়দা, সুজি', items: [],
-};
 
 async function saveIt(db: Awaited<ReturnType<typeof migratedDb>>, w: ReturnType<typeof testWriter>, known: string[]) {
-  const { parsed } = convertGemini(GEMINI, { knownProducts: ['তেল'], productAliases: {} });
-  let d = entryFromParse(parsed, { products: new Map(), knownCustomers: known, tab: 'sale' })!;
+  const cmd = parseFixed(SAID, { knownProducts: ['তেল'], knownCustomers: known });
+  let d = entryFromFixed(cmd, { products: new Map(), knownCustomers: known })!;
   if (!known.includes('সাজু')) d = withEntryCustomer(d, 'সাজু', true);
-  const log = await createVoiceLog(db, w, { transcript: SAID, source: 'voice', contextTab: 'sale', engine: 'gemini' });
+  const log = await createVoiceLog(db, w, { transcript: SAID, source: 'voice', contextTab: 'sale' });
   return { draft: d, id: await saveEntry(db, w, d, log, []) };
 }
 
 it('the confirm text reads the customer, the amount, বাকি and the goods; nothing is saved before হ্যাঁ', async () => {
-  const { parsed } = convertGemini(GEMINI, { knownProducts: [], productAliases: {} });
-  const d = withEntryCustomer(entryFromParse(parsed, { products: new Map(), knownCustomers: [], tab: 'sale' })!, 'সাজু', true);
+  const d = withEntryCustomer(entryFromFixed(parseFixed(SAID), { products: new Map(), knownCustomers: [] })!, 'সাজু', true);
   expect(d).toMatchObject({ kind: 'baki', customerName: 'সাজু', amountPoisha: 50000, note: 'তেল, আটা, ময়দা, সুজি', problems: [] });
   expect(entryReadback(d)).toBe('সাজু, ৫০০ টাকা বাকি: তেল, আটা, ময়দা, সুজি। ঠিক আছে?');
 });

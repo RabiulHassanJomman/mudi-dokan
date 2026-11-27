@@ -6,12 +6,7 @@ import { parseFixed, type FixedCommand, type FixedContext } from '../parser/fixe
 import { distance } from './customers';
 import { nameKey, phoneticKey } from './names';
 
-export type VoiceMode = 'android' | 'gemini';
 export type VoiceTab = 'sale' | 'purchase' | 'ledger' | 'expense';
-
-/** The setting (null = never set) → the mode in use. Gemini needs a key in the build. */
-export const effectiveMode = (setting: VoiceMode | null, hasKey: boolean): VoiceMode =>
-  setting === 'gemini' && hasKey ? 'gemini' : 'android';
 
 export interface Carry {
   customer?: string;
@@ -19,13 +14,12 @@ export interface Carry {
 }
 
 export type VoiceRoute =
-  | { pathname: '/say' | '/listening'; params: { tab: VoiceTab } & Carry }
+  | { pathname: '/say'; params: { tab: VoiceTab } & Carry }
   | { pathname: '/confirm'; params: { text: ''; tab: 'expense' } };
 
-/** Where 🎤 goes. Android mode has no খরচ sentence, so খরচ opens the number pad. */
-export function voiceRoute(mode: VoiceMode, tab: VoiceTab, carry: Carry = {}): VoiceRoute {
+/** Where 🎤 goes. There is no খরচ sentence, so খরচ opens the number pad. */
+export function voiceRoute(tab: VoiceTab, carry: Carry = {}): VoiceRoute {
   const params = { tab, ...(carry.customer ? { customer: carry.customer } : {}), ...(carry.kind ? { kind: carry.kind } : {}) };
-  if (mode === 'gemini') return { pathname: '/listening', params };
   if (tab === 'expense') return { pathname: '/confirm', params: { text: '', tab: 'expense' } };
   return { pathname: '/say', params };
 }

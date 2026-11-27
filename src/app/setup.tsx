@@ -32,7 +32,6 @@ import { parseSpokenAmount } from '../parser';
 import { colors, fonts, fontSize, radius, size, spacing } from '../theme/tokens';
 import { nav } from '../lib/nav';
 import { buildLabel } from '../lib/buildInfo';
-import { hasGemini, setVoiceMode, voiceMode } from '../lib/engine';
 
 const DANGER_INK = '#B3261E';
 
@@ -54,7 +53,6 @@ const PROBLEM_TEXT: Record<SetupProblem, string> = {
 export default function SetupScreen() {
   const db = useSQLiteContext();
   const editing = useLocalSearchParams<{ edit?: string }>().edit === '1';
-  const [heardBy, setHeardBy] = useState(voiceMode());
   const voice = useVoiceOnce();
   const synced = useDataVersion();
   const status = useSyncStatus();
@@ -364,39 +362,6 @@ export default function SetupScreen() {
         </Section>
         )}
 
-        {/* settings only: how a spoken command is understood (this phone). Android = Ridmik keyboard */}
-        {editing && hasGemini() && (
-          <View style={styles.modeBox}>
-            <Txt size={fontSize.label} weight="bold">
-              কথা বোঝার উপায়
-            </Txt>
-            <View accessibilityRole="radiogroup" style={styles.modeRow}>
-              <Chip
-                label="কিবোর্ডে বলা"
-                on={heardBy === 'android'}
-                color={colors.saleDark}
-                tint={colors.saleTint}
-                onPress={() => {
-                  setVoiceMode('android');
-                  setHeardBy('android');
-                  void speak('কিবোর্ডে বলা। কিবোর্ডের মাইক চেপে বলবেন।');
-                }}
-              />
-              <Chip
-                label="Gemini"
-                on={heardBy === 'gemini'}
-                color={colors.stock}
-                tint={colors.stockTint}
-                onPress={() => {
-                  setVoiceMode('gemini');
-                  setHeardBy('gemini');
-                  void speak('Gemini। অ্যাপের মাইকে বলবেন, ইন্টারনেট লাগবে।');
-                }}
-              />
-            </View>
-          </View>
-        )}
-
         {/* settings only (step 8): backup and the voice clips on Drive */}
         {editing && (
           <View style={styles.linkRow}>
@@ -529,8 +494,6 @@ function Chip({ label, on, color, tint, onPress }: { label: string; on: boolean;
 
 const styles = StyleSheet.create({
   linkRow: { flexDirection: 'row', gap: spacing.sm },
-  modeBox: { backgroundColor: colors.surface, borderRadius: radius.card, padding: spacing.lg, gap: spacing.sm },
-  modeRow: { flexDirection: 'row', gap: spacing.sm },
   linkButton: {
     flex: 1,
     minHeight: 64,

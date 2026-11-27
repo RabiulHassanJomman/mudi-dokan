@@ -6,11 +6,10 @@
   "scripts": {
     "start": "expo start --dev-client",
     "android": "expo run:android",
-    "apk": "expo prebuild -p android --no-install && (cd android && ANDROID_HOME=${ANDROID_HOME:-$HOME/Library/Android/sdk} ./gradlew assembleRelease) && node scripts/apk-gemini-check.mjs",
+    "apk": "expo prebuild -p android --no-install && (cd android && ANDROID_HOME=${ANDROID_HOME:-$HOME/Library/Android/sdk} ./gradlew assembleRelease)",
     "test": "jest",
     "typecheck": "tsc --noEmit",
     "doctor": "expo-doctor",
-    "eval:gemini": "tsx scripts/eval-gemini.ts",
     "eval:import": "tsx scripts/eval-import.ts"
   },
   "devDependencies": {

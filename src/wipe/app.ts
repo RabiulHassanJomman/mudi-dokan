@@ -3,7 +3,6 @@ import NetInfo from '@react-native-community/netinfo';
 
 import { getDevice } from '../device';
 import { backupBeforeWipe, removeDriveFolder } from '../drive/app';
-import { bumpQueue } from '../lib/understand';
 import { dataChanged, startSync } from '../sync/app';
 import { signOut } from '../sync/auth';
 import { afterLocalWipe } from './files';
@@ -36,7 +35,6 @@ export async function wipeEverything(scope: WipeScope): Promise<WipeStatus> {
   }
   await afterLocalWipe(files);
   dataChanged();
-  bumpQueue();
   return 'ok';
 }
 

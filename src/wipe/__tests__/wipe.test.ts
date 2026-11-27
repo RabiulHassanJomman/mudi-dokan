@@ -7,7 +7,6 @@ import { DAY0, asNewCustomer, enter, phoneOf, sell, syncPhone, type Phone } from
 import { SYNC_TABLES } from '../../sync/tables';
 import { SyncController } from '../../sync/controller';
 import { FakeCloud } from '../../sync/__tests__/fakeRemote';
-import { enqueueUnderstanding } from '../../queue/understand';
 import { enqueueClip } from '../../drive/queue';
 
 const SHOP_DAY = '2026-11-12';
@@ -42,7 +41,8 @@ describe('wipe this phone only (wipeAllData)', () => {
     await syncPhone(a);
     await ensureDevice(a.db, { ...a.w, deviceId: 'dev-other', deviceName: 'কর্মচারী' }, 'staff');
     const log = (await a.db.getFirstAsync<{ id: string }>('SELECT id FROM voice_logs LIMIT 1'))!.id;
-    await enqueueUnderstanding(a.db, log, 'sale', DAY0);
+    // a clip left waiting for Gemini before it was removed (the table stays on old phones)
+    await a.db.runAsync("INSERT INTO understand_queue (voice_log_id, tab, queued_at) VALUES (?, 'sale', ?)", log, DAY0);
     await enqueueClip(a.db, log, DAY0);
     await a.engine.setMeta('drive:folder:Mudi Dokan', 'folder-1');
 

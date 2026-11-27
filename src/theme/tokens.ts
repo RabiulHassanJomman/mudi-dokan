@@ -25,7 +25,6 @@ export const colors = {
   saleDark: '#0A4D39',
   saleTint: '#E3F1EB',
   micRing: '#CFE7DD',
-  listening: { bg: '#0A4D39', ringOuter: '#0F5E46', ringInner: '#137255', close: '#136B51', bars: '#9FD3BF' },
 
   // বাকি / খরচ (orange)
   baki: '#B85C12',

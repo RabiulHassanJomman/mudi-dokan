@@ -3,7 +3,7 @@ import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
-import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-speech-recognition';
+import { ExpoSpeechRecognitionModule } from 'expo-speech-recognition';
 
 import { ConfirmSheet } from '../components/ConfirmSheet';
 import { CustomerPicker } from '../components/CustomerPicker';
@@ -32,8 +32,7 @@ import {
   type BasketDraft,
   type ItemDraft,
 } from '../domain/basket';
-import { classifyAnswer, heardPrefix } from '../domain/confirmWords';
-import { nextReady, queuedAtOf } from '../queue/understand';
+import { heardPrefix } from '../domain/confirmWords';
 import { balanceWords, customerAliasToLearn, historyWords, owedList, resolveCustomerAlias, suggestCustomers, totalBakiWords } from '../domain/customers';
 import {
   canSaveEntry,
@@ -91,7 +90,6 @@ import { speak, stopSpeaking } from '../lib/speak';
 import { pickedCommand, pickText, type PickedItem } from '../domain/pick';
 import { parseCommand } from '../parser';
 import { readKeyboardText } from '../domain/keyboard';
-import { voiceMode } from '../lib/engine';
 import { voiceTarget } from '../lib/voice';
 import type { Intent, ParseContext, ParsedCommand } from '../parser/types';
 import { colors, fonts, fontSize, productTiles, radius, size, spacing } from '../theme/tokens';
@@ -152,12 +150,10 @@ const INTENT_BN: Record<Intent, string> = {
 export default function ConfirmScreen() {
   const db = useSQLiteContext();
   /**
-   * logId = voice (from Listening); text = typed; pick = chosen on ছবি দেখে (JSON PickedItem).
+   * logId = voice (from the বলুন screen); text = typed; pick = chosen on ছবি দেখে (JSON PickedItem).
    * customer / kind: from the customer screen (জমা নিন / বাকি দিন), used when not said.
    */
-  const params = useLocalSearchParams<{ logId?: string; text?: string; tab?: string; pick?: string; customer?: string; kind?: string; fix?: string; review?: string }>();
-  /** From "অপেক্ষার হিসাব মিলিয়ে নিন": after হ্যাঁ/না the next waiting one opens; backing out keeps it waiting. */
-  const review = params.review === '1';
+  const params = useLocalSearchParams<{ logId?: string; text?: string; tab?: string; pick?: string; customer?: string; kind?: string; fix?: string }>();
   /** ✏️ from History: "sales:<basket id>" or "<table>:<row id>" — the card edits a saved entry. */
   const fixing = !!params.fix;
   const tab = params.tab ?? 'sale';
@@ -173,10 +169,7 @@ export default function ConfirmScreen() {
   /** The parsed sale had a customer: keep the name box on a cash sale too. */
   const [showCustomer, setShowCustomer] = useState(false);
   const how: How = params.pick || params.text === '' ? 'pick' : params.logId ? 'voice' : 'typed';
-  const [answering, setAnswering] = useState(false);
   const [saving, setSaving] = useState(false);
-  /** Experiment: the card shows Gemini's result (gemini mode). */
-  const [byGemini, setByGemini] = useState(false);
   /** The product name sheet: a basket line's key, or null for the purchase. */
   const [renaming, setRenaming] = useState<{ key: string | null; name: string } | null>(null);
   /** ✏️ fix: "এটা বাতিল করবো?" */
@@ -185,10 +178,6 @@ export default function ConfirmScreen() {
   const fixRef = useRef<{ table: string; id: string; stored: StoredEntry | null } | null>(null);
   /** "ভুল হয়েছে": the entry to cancel. */
   const undoRef = useRef<RecentEntry | null>(null);
-  /** Android mode (Ridmik keyboard): no spoken হ্যাঁ / না. */
-  const buttonsOnly = voiceMode() === 'android';
-  /** The হ্যাঁ/না listener is on (other mics on the card — names — must not answer it). */
-  const answeringRef = useRef(false);
 
   const logId = useRef<string | null>(null);
   const first = useRef<BasketDraft | null>(null);
@@ -196,8 +185,6 @@ export default function ConfirmScreen() {
   const firstEntry = useRef<EntryDraft | null>(null);
   const latestEntry = useRef<EntryDraft | null>(null);
   const decided = useRef(false);
-  /** When it was said, if that was before now (the queue): the saved entry's time. */
-  const entryAt = useRef<number | null>(null);
   /** For learning customer aliases: the heard customer, the shop's customers and aliases at load. */
   const heardCustomer = useRef<string | null>(null);
   const customersBefore = useRef<string[]>([]);
@@ -205,53 +192,15 @@ export default function ConfirmScreen() {
   latest.current = basket;
   latestEntry.current = entry;
 
-  // ── voice হ্যাঁ / না ───────────────────────────────────────────
-  const listenForAnswer = useCallback(async () => {
-    // Android mode: হ্যাঁ / না by the buttons only (the phone's recognizer may be weak or missing)
-    if (buttonsOnly) return;
-    const perm = await ExpoSpeechRecognitionModule.getPermissionsAsync();
-    if (!perm.granted || decided.current) return;
-    setAnswering(true);
-    answeringRef.current = true;
-    ExpoSpeechRecognitionModule.start({ lang: 'bn-BD', interimResults: false, maxAlternatives: 3, continuous: false });
-  }, []);
-
-  const stopListening = useCallback(() => {
-    if (!answeringRef.current) return;
-    answeringRef.current = false;
-    setAnswering(false);
-    ExpoSpeechRecognitionModule.abort();
-  }, []);
-
-  /** Read the card aloud; when it can be saved, listen for হ্যাঁ / না. */
-  const sayAndListen = useCallback(
-    async (text: string, ready: boolean) => {
-      stopListening();
-      await speak(text);
-      if (ready && !decided.current) void listenForAnswer();
-    },
-    [listenForAnswer, stopListening],
-  );
+  /** Read the card aloud (হ্যাঁ / না by the buttons). */
   const readAloud = () => {
     if (state.kind === 'answer') void speak(state.answer.text ?? answerPrompt(state.answer));
-    else if (state.kind === 'undo') void sayAndListen(undoWords(state.target), !!state.target);
+    else if (state.kind === 'undo') void speak(undoWords(state.target));
     else if (fixing && entry) void speak(`ঠিক করুন। ${entryReadback(entry).replace(/ ঠিক আছে\?$/, '')} বদলে হ্যাঁ চাপুন।`);
     else if (fixing && basket) void speak(`ঠিক করুন। ${readback(basket).replace(/ ঠিক আছে\?$/, '')} বদলে হ্যাঁ চাপুন।`);
-    else if (entry) void sayAndListen(entryReadback(entry), canSaveEntry(entry));
-    else if (basket) void sayAndListen(readback(basket), canSave(basket));
+    else if (entry) void speak(entryReadback(entry));
+    else if (basket) void speak(readback(basket));
   };
-
-  useSpeechRecognitionEvent('result', (e) => {
-    if (!e.isFinal || !answeringRef.current) return;
-    answeringRef.current = false;
-    const answers = e.results.map((r) => classifyAnswer(r.transcript));
-    if (answers.includes('no')) void onNo();
-    else if (answers.includes('yes')) void onYes();
-  });
-  useSpeechRecognitionEvent('end', () => {
-    answeringRef.current = false;
-    setAnswering(false);
-  });
 
   // ── load: log row → parse → products → basket ──────────────────
   useEffect(() => {
@@ -280,21 +229,13 @@ export default function ConfirmScreen() {
         parsed = pickedCommand(pick);
         logId.current = await createVoiceLog(db, w, { transcript, source: 'typed', contextTab: tab, parsed, via: 'pick' });
       } else {
-        /**
-         * A voice command: Gemini's checked answer (stored on the log) is the card; heard by the
-         * phone (Android parsing): the fixed formats. Typed text: the rule parser.
-         */
-        let fromGemini: ParsedCommand | null = null;
+        /** A voice command (Ridmik keyboard): the fixed formats. Typed text: the rule parser. */
         let heardByPhone = false;
         if (params.logId) {
           logId.current = params.logId;
           const log = await getVoiceLog(db, params.logId);
-          fromGemini = log?.gemini_json ? (JSON.parse(log.gemini_json) as ParsedCommand) : null;
-          transcript = fromGemini?.raw ?? log?.gemini_transcript ?? log?.transcript ?? '';
-          setByGemini(!!fromGemini);
-          heardByPhone = log?.engine === 'android' && !fromGemini;
-          // said earlier (waited in the queue): the entry keeps that time
-          entryAt.current = await queuedAtOf(db, params.logId);
+          transcript = log?.transcript ?? '';
+          heardByPhone = true;
         } else {
           transcript = params.text ?? '';
           // empty = the number-pad fallback (voice failed): nothing to parse
@@ -319,7 +260,7 @@ export default function ConfirmScreen() {
           void speak('কিছু বুঝিনি। আবার বলুন।');
           return;
         }
-        const rule = fromGemini ? null : parseCommand(transcript, {
+        parsed = parseCommand(transcript, {
           tab: PARSE_TABS.find((t) => t === tab),
           knownProducts: names.products,
           // learned spellings help split "কোরিম চাল ২ কেজি"; resolved to the customer below
@@ -330,10 +271,9 @@ export default function ConfirmScreen() {
           // "রফিক ৫০০ নিল" = owner withdrawal when রফিক's phone is মালিক; "মালিক" is built in
           ownerNames: await ownerNames(db),
         });
-        parsed = (fromGemini ?? rule)!;
-        // a learned spelling → the customer (Gemini also gets the aliases, this catches the rest)
+        // a learned spelling → the customer
         if (parsed.customer) parsed = { ...parsed, customer: resolveCustomerAlias(parsed.customer, aliasesNow) };
-        await setParsed(db, w, logId.current, parsed, params.logId ? { by: 'gemini' } : {});
+        await setParsed(db, w, logId.current, parsed);
       }
       heardCustomer.current = parsed.customer ?? null;
       if (!alive) return;
@@ -394,7 +334,7 @@ export default function ConfirmScreen() {
           await setOutcome(db, w, logId.current, 'unsupported');
           decided.current = true;
         }
-        void sayAndListen(undoWords(target ?? null), !!target);
+        void speak(undoWords(target ?? null));
         return;
       }
       if (parsed.intent === 'total_baki_query' || parsed.intent === 'all_stock_query') {
@@ -439,7 +379,7 @@ export default function ConfirmScreen() {
       first.current = b;
       setBasket(b);
       setState({ kind: 'ready', transcript });
-      void sayAndListen(readback(b), canSave(b));
+      void speak(readback(b));
     })();
     return () => {
       alive = false;
@@ -453,7 +393,7 @@ export default function ConfirmScreen() {
     firstEntry.current = e;
     setEntry(e);
     setState({ kind: 'entry', transcript });
-    void sayAndListen(entryReadback(e), canSaveEntry(e));
+    void speak(entryReadback(e));
   }
 
   // ── questions ──────────────────────────────────────────────────
@@ -521,7 +461,6 @@ export default function ConfirmScreen() {
     const b = latest.current;
     const e = latestEntry.current;
     if ((b && !canSave(b)) || (e && !canSaveEntry(e))) return void speak(b ? readback(b) : entryReadback(e!));
-    stopListening();
     setSaving(true);
     decided.current = true;
     try {
@@ -552,7 +491,6 @@ export default function ConfirmScreen() {
   async function confirmUndo() {
     const t = undoRef.current;
     if (!t || decided.current || saving) return;
-    stopListening();
     setSaving(true);
     decided.current = true;
     if (await cancelEntry(TABLE_OF[t.kind], t.id)) {
@@ -597,7 +535,6 @@ export default function ConfirmScreen() {
     return [...new Set([...close, ...filterProducts(catalog, t).map((p) => p.name)])];
   };
   const openRename = (key: string | null, name: string | null) => {
-    stopListening();
     setRenaming({ key, name: name ?? '' });
   };
 
@@ -638,7 +575,6 @@ export default function ConfirmScreen() {
   async function chooseLineProduct(key: string | null, name: string) {
     const p = await findProduct(db, name);
     if (!p) return;
-    stopListening();
     if (key === null) {
       const e = latestEntry.current;
       if (e) setEntry(choosePurchaseProduct(e, p));
@@ -656,22 +592,13 @@ export default function ConfirmScreen() {
     () => () => {
       if (!keepSpeaking.current) stopSpeaking();
       ExpoSpeechRecognitionModule.abort();
-      // backing out of a waiting one keeps it waiting; every other card counts as না
-      if (!decided.current && logId.current && !review) void setOutcome(db, writer(), logId.current, 'cancelled');
+      if (!decided.current && logId.current) void setOutcome(db, writer(), logId.current, 'cancelled');
     },
-    [db, review],
+    [db],
   );
 
   // ── actions ────────────────────────────────────────────────────
   const leave = () => {
-    if (review) {
-      // the next waiting answer, else back home
-      void nextReady(db).then((n) => {
-        if (n) nav.replace({ pathname: '/confirm', params: { logId: n.id, tab: n.tab, review: '1' } });
-        else nav.replace('/');
-      });
-      return;
-    }
     if (nav.canGoBack()) nav.back();
     else nav.replace('/');
   };
@@ -683,7 +610,6 @@ export default function ConfirmScreen() {
     if (e) return saveTheEntry(e);
     const b = latest.current;
     if (!b || !logId.current || decided.current || saving) return;
-    stopListening();
     if (!canSave(b)) {
       void speak(readback(b));
       return;
@@ -691,7 +617,7 @@ export default function ConfirmScreen() {
     setSaving(true);
     decided.current = true;
     try {
-      await saveBasket(db, writer(), b, logId.current, first.current ? diffBaskets(first.current, b) : [], entryAt.current);
+      await saveBasket(db, writer(), b, logId.current, first.current ? diffBaskets(first.current, b) : []);
       await learnCustomerAlias(heardCustomer.current, b.customerName);
       void speak('রাখা হয়েছে।');
       leave();
@@ -705,7 +631,6 @@ export default function ConfirmScreen() {
 
   async function saveTheEntry(e: EntryDraft) {
     if (!logId.current || decided.current || saving) return;
-    stopListening();
     if (!canSaveEntry(e)) {
       void speak(entryReadback(e));
       return;
@@ -713,7 +638,7 @@ export default function ConfirmScreen() {
     setSaving(true);
     decided.current = true;
     try {
-      await saveEntry(db, writer(), e, logId.current, firstEntry.current ? diffEntries(firstEntry.current, e) : [], entryAt.current);
+      await saveEntry(db, writer(), e, logId.current, firstEntry.current ? diffEntries(firstEntry.current, e) : []);
       await learnCustomerAlias(heardCustomer.current, e.customerName);
       void speak('রাখা হয়েছে।');
       leave();
@@ -729,12 +654,10 @@ export default function ConfirmScreen() {
     if (fixRef.current) {
       // leaving a fix changes nothing
       decided.current = true;
-      stopListening();
       void speak('কিছু বদলায়নি।');
       return leave();
     }
     if (decided.current || !logId.current) return leave();
-    stopListening();
     decided.current = true;
     await setOutcome(db, writer(), logId.current, 'cancelled');
     void speak(undoRef.current ? 'ঠিক আছে, কিছু বাতিল হয়নি।' : 'বাতিল।');
@@ -742,11 +665,9 @@ export default function ConfirmScreen() {
   }
 
   const edit = (next: BasketDraft) => {
-    stopListening();
     setBasket(next);
   };
   const editEntry = (next: EntryDraft) => {
-    stopListening();
     setEntry(next);
   };
   const ready = state.kind === 'undo' ? !!state.target : entry ? canSaveEntry(entry) : basket ? canSave(basket) : false;
@@ -768,11 +689,6 @@ export default function ConfirmScreen() {
   // ── render ─────────────────────────────────────────────────────
   const decideBar = (
     <>
-      {answering && (
-        <Txt size={fontSize.body} weight="bold" color={colors.saleDark} style={styles.center}>
-          বলুন: হ্যাঁ / না
-        </Txt>
-      )}
       <View style={styles.decide}>
         <Pressable
           accessibilityRole="button"
@@ -838,7 +754,7 @@ export default function ConfirmScreen() {
 
       {state.kind === 'answer' && (
         <ScrollView contentContainerStyle={styles.body}>
-          <Heard text={state.transcript} how={how} gemini={byGemini} />
+          <Heard text={state.transcript} how={how} />
           <View style={styles.card}>
             {state.answer.text !== null ? (
               <Txt wrap size={fontSize.headingLg} weight="bold" style={styles.center}>
@@ -968,7 +884,7 @@ export default function ConfirmScreen() {
       {state.kind === 'undo' && (
         <>
           <ScrollView contentContainerStyle={styles.body}>
-            <Heard text={state.transcript} how={how} gemini={byGemini} />
+            <Heard text={state.transcript} how={how} />
             {state.target ? (
               <>
                 <Txt wrap size={fontSize.headingLg} weight="bold" style={styles.center}>
@@ -995,7 +911,7 @@ export default function ConfirmScreen() {
       {state.kind === 'ready' && basket && (
         <>
           <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
-            {fixing ? <FixBanner /> : <Heard text={state.transcript} how={how} gemini={byGemini} />}
+            {fixing ? <FixBanner /> : <Heard text={state.transcript} how={how} />}
             {basket.items.length === 0 ? (
               <View style={styles.card}>
                 <Txt wrap size={fontSize.headingLg} weight="bold" style={styles.center}>
@@ -1075,7 +991,7 @@ export default function ConfirmScreen() {
       {state.kind === 'entry' && entry && (
         <>
           <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
-            {fixing ? <FixBanner /> : !!state.transcript && <Heard text={state.transcript} how={how} gemini={byGemini} />}
+            {fixing ? <FixBanner /> : !!state.transcript && <Heard text={state.transcript} how={how} />}
             {entry.purchase && !entry.purchase.product && entry.purchase.productName && (
               <ProductSuggest
                 spoken={entry.purchase.productName}
@@ -1164,11 +1080,10 @@ function VoidButton({ onPress }: { onPress: () => void }) {
 }
 
 /** "শুনেছি" (voice), "লিখেছি" (typed), "বেছে নিয়েছি" (ছবি দেখে). */
-function Heard({ text, how, gemini }: { text: string; how: How; gemini?: boolean }) {
+function Heard({ text, how }: { text: string; how: How }) {
   return (
     <Txt wrap size={fontSize.captionLg} weight="medium" color={colors.muted} style={styles.center}>
-      {heardPrefix(how)}
-      {gemini ? ' (Gemini)' : ''}: “{text}”
+      {heardPrefix(how)}: “{text}”
     </Txt>
   );
 }

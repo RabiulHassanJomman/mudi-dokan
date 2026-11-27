@@ -9,14 +9,13 @@ import { Txt } from '../components/Txt';
 import { DEBUG_LOG_LIMIT, debugLog, type VoiceLogRow } from '../db/repo';
 import { whenBn } from '../drive/words';
 import { buildLabel } from '../lib/buildInfo';
-import { geminiKey, getGeminiModel } from '../lib/engine';
 import { nav } from '../lib/nav';
 import { useClipPlayer } from '../lib/useClipPlayer';
 import { colors, fontSize, radius, size, spacing } from '../theme/tokens';
 
 /**
  * Hidden (⚙ › long-press the version): the last 200 spoken commands, for troubleshooting only.
- * What Gemini heard, what it made of it, how long it took, the error if any. No scores.
+ * What was written (Ridmik / typed), what the app made of it, the error if any. No scores.
  */
 export default function DebugLogScreen() {
   const db = useSQLiteContext();
@@ -33,16 +32,14 @@ export default function DebugLogScreen() {
     const payload = {
       app: 'mudi-dokan',
       build: buildLabel(),
-      model: getGeminiModel(),
       exported_at: new Date().toISOString(),
       commands: rows.map((r) => ({
         at: new Date(r.created_at).toISOString(),
         tab: r.context_tab,
         outcome: r.outcome,
-        transcript: r.gemini_transcript ?? r.transcript,
-        gemini: r.gemini_json ? (JSON.parse(r.gemini_json) as unknown) : null,
-        error: r.gemini_error ?? r.stt_error,
-        ms: r.gemini_ms,
+        transcript: r.transcript,
+        parsed: r.parsed_json ? (JSON.parse(r.parsed_json) as unknown) : null,
+        error: r.stt_error,
       })),
     };
     void Share.share({ title: 'মুদি দোকান ডিবাগ লগ', message: JSON.stringify(payload, null, 1) });
@@ -72,7 +69,7 @@ export default function DebugLogScreen() {
         </Pressable>
       </View>
       <Txt wrap size={fontSize.caption} weight="medium" color={colors.muted}>
-        {`${buildLabel()} · ${getGeminiModel()} · key ${geminiKey() ? 'আছে' : 'নেই'} · শেষ ${DEBUG_LOG_LIMIT}টা`}
+        {`${buildLabel()} · শেষ ${DEBUG_LOG_LIMIT}টা`}
       </Txt>
       <FlatList
         data={rows}
@@ -84,8 +81,8 @@ export default function DebugLogScreen() {
           </Txt>
         }
         renderItem={({ item: r }) => {
-          const err = r.gemini_error ?? r.stt_error;
-          const intent = r.gemini_json ? (JSON.parse(r.gemini_json) as { intent?: string }).intent : null;
+          const err = r.stt_error;
+          const intent = r.intent;
           return (
             <View style={styles.row}>
               {r.audio_path ? (
@@ -102,10 +99,10 @@ export default function DebugLogScreen() {
               )}
               <View style={styles.flex}>
                 <Txt wrap size={fontSize.body} weight="bold">
-                  {r.gemini_transcript || r.transcript || '—'}
+                  {r.transcript || '—'}
                 </Txt>
                 <Txt wrap size={fontSize.caption} weight="medium" color={colors.muted}>
-                  {`${whenBn(r.created_at)} · ${r.context_tab ?? ''} · ${intent ?? '—'} · ${r.outcome}${r.gemini_ms ? ` · ${r.gemini_ms} ms` : ''}`}
+                  {`${whenBn(r.created_at)} · ${r.context_tab ?? ''} · ${intent ?? '—'} · ${r.outcome}`}
                 </Txt>
                 {!!err && (
                   <Txt wrap size={fontSize.caption} weight="medium" color={colors.bakiInk}>

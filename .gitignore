@@ -31,7 +31,7 @@ npm-debug.*
 .env*.local
 coverage/
 
-# eval (scripts/eval-gemini.ts) output
+# old eval output
 eval/results/
 .env
 

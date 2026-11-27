@@ -3,9 +3,8 @@
  * word or number was not used by any rule, a product isn't known, or the item
  * count is uncertain.
  */
-import { hybridParse, shouldEscalate } from '../router';
 import { parseCommand } from '../parse';
-import type { ParseContext, ParsedCommand } from '../types';
+import type { ParseContext } from '../types';
 
 const ctx: ParseContext = {
   tab: 'sale',
@@ -67,38 +66,5 @@ describe('low confidence', () => {
   });
   it('unknown intent', () => {
     expect(c('হ্যালো', { tab: 'ledger' })).toMatchObject({ confidence: 'low', lowReasons: ['unknown_intent'] });
-  });
-});
-
-describe('router', () => {
-  const fake = (out: Partial<ParsedCommand>) => jest.fn(async () => ({ ...c('x'), ...out }) as ParsedCommand);
-
-  it('shouldEscalate = low confidence', () => {
-    expect(shouldEscalate(c('চাল ২ কেজি'))).toBe(false);
-    expect(shouldEscalate(c('চিংড়ি ২ কেজি'))).toBe(true);
-  });
-
-  it('high: the LLM is not called', async () => {
-    const llm = fake({ intent: 'joma' });
-    const r = await hybridParse('চাল ২ কেজি ১২০ টাকা', ctx, llm);
-    expect(r.source).toBe('rule');
-    expect(r.result.intent).toBe('sale');
-    expect(llm).not.toHaveBeenCalled();
-  });
-
-  it('low: the LLM answer is used', async () => {
-    const llm = fake({ intent: 'sale', items: [{ product: 'সাবান', quantity: { value: 2, unit: 'piece' } }] });
-    const r = await hybridParse('লাক্স সাবান দুইটা', ctx, llm);
-    expect(r.source).toBe('llm');
-    expect(r.result.items).toEqual([{ product: 'সাবান', quantity: { value: 2, unit: 'piece' } }]);
-    expect(llm).toHaveBeenCalledWith('লাক্স সাবান দুইটা', ctx);
-  });
-
-  it('low, but the LLM fails: falls back to the rule result', async () => {
-    const r = await hybridParse('লাক্স সাবান দুইটা', ctx, async () => {
-      throw new Error('offline');
-    });
-    expect(r).toMatchObject({ source: 'rule', llmError: 'offline' });
-    expect(r.result.items?.[0]?.product).toBe('লাক্স সাবান');
   });
 });

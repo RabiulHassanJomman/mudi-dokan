@@ -20,7 +20,7 @@ import { useDataVersion } from '../../sync/app';
 /**
  * মাল (Stock.dc.html): every product with its stock (kena − becha, never stored) and
  * selling price; low stock = orange border + ! badge. Tap a card = TTS. "নতুন মাল বলুন"
- * opens Listening on the purchase tab.
+ * opens the বলুন screen on the purchase tab.
  */
 export default function StockScreen() {
   const db = useSQLiteContext();

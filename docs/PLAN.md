@@ -14,12 +14,12 @@ Status
 • নগদ বিক্রি without goods allowed (Nov 27): `npm test` → 1170 passing. Installed with the next build.
 • Spelling fixes + customer matching (Nov 27): src/parser/spelling.ts (বাকে→বাকি, নগত→নগদ, টেকা/তাকা→টাকা, নিসে→নিয়েছে …, add more there); the heard name is matched to the imported customer list (domain/keyboard.matchCustomer: alias, exact, without -র/-ের/-কে, same sound, one clearly closest spelling; else the card asks). `npm test` → 1209 passing. Installed on Pixel 7 (v0.1.67): "শানি বাকে 100 টেকা" → বাকি, সানি, ৳ ১০০; "নগত 100 টাকা" → নগদ বিক্রি ৳ ১০০ without goods (both cancelled with না, nothing saved).
 • More spelling fixes (Nov 27): ~70 more variants in src/parser/spelling.ts (বাখী/বাখিতে, ধাড়, নকত/নগতে, সোধ/পরিসোধ, টাখা/টাহার/টেকায়, বিকরী, কিনসি/আনসি, নিয়েসে/দিয়েচে/হইসে, আইজ, আফা/মিঞা). Real words (জামা, জুমা, কিনা, কেননা, নিচে) are left alone. `npm test` → 1238 passing. Not built or installed yet.
-• Next: A5 (real speech with Ridmik in the shop; new misspellings go into spelling.ts). After Android parsing: Gemini latency (debug log ms; prompt ≈1.8k tokens, 12 examples), then Fenrir TTS.
+• Gemini removed (Nov 27, decision changed): no Gemini engine, setting, Listening screen, waiting queue / অপেক্ষার হিসাব review, customer-import tidy-up, eval script or APK key check. 🎤 always opens the বলুন screen (Ridmik); হ্যাঁ/না by buttons only on every card. DB columns and understand_queue stay (migrations are append-only); clips waiting there from before are no longer understood. `npm test` → 1152 passing. Not built or installed yet.
+• Next: A5 (real speech with Ridmik in the shop; new misspellings go into spelling.ts). After Android parsing: Fenrir TTS.
 
-Android parsing (decided Nov 27; A1–A4 built)
-Setting (⚙, per phone): বোঝার উপায় = Android (default) / Gemini. Gemini mode stays as it is today.
+Android parsing (decided Nov 27; A1–A4 built; the only engine since Gemini was removed Nov 27)
 Android mode (changed Nov 27): the user speaks with the Ridmik Keyboard's voice typing (installed and default on the phone) → text box → "হয়ে গেছে" button → fixed-format parser → confirm card → হ্যাঁ/না buttons. No in-app recognizer, no Gemini call, no understand_queue, no audio clip (no ▶️, no Drive upload for these).
-Gemini: kept as the other setting for now; may be removed if Ridmik + parsing works well.
+Gemini: removed (Nov 27).
 
 Formats (the keyword picks the type; amount = number before টাকা; one total for all goods, no quantity or unit price)
 • বাকি: "সাজু বাকি নিয়েছে আদা, চাল, আটা ১০০ টাকা" → customer (required), goods, total. Goods may be left out: "সাজু বাকি ১০০ টাকা" (Nov 27). Saved: ledger baki, note = goods or none (v14).
@@ -29,7 +29,7 @@ Formats (the keyword picks the type; amount = number before টাকা; one to
 • Missing field, two type keywords or no match: show what was heard and understood, say what is missing (🔊), ask again. Nothing saved.
 
 Data
-• Stock is a record of money spent in this mode: no quantity, sales never reduce it. Gemini and Pick entries keep stock = purchases − sales.
+• Stock is a record of money spent for spoken কেনা: no quantity, sales never reduce it. Pick and typed entries (and old Gemini ones) keep stock = purchases − sales.
 • v15 (new migration): sales.note (goods text); remake v_sales (and v_stock). A নগদ sale uses one fixed hidden product (fixed id, archived, "খুচরা মাল"), quantity 1, cost_known 0. So cash, history, undo, sync, backup work without a new table or firestore.rules change.
 • A product first bought money-only gets unit পিস (no unit was said).
 • Quantity 0 purchase: মাল screen shows টাকা spent (not "শেষ"), history and ✏️ show and edit the total only, average cost ignores it (already filters quantity > 0).
@@ -45,15 +45,14 @@ Build steps (one at a time; each: tests first, test + tsc, APK on Pixel 7, Statu
 Risks / to confirm
 • Name matching can pick the wrong person when a new customer's name is one letter off an existing one (রাজু → সাজু if only সাজু is listed); the card shows the name, and the user can change it.
 • Ridmik may give no commas: goods are split using known product names and aliases, else kept as spoken.
-• Android mode does not handle questions, খরচ, মালিক নিল or voice undo (all four formats only). Pick, typing and Gemini mode still do.
-• Default Android changes the shop phone's behaviour on update.
+• Spoken entry does not handle questions, খরচ, মালিক নিল or voice undo (the four formats only). Pick and typing still do.
 
 Rules that still matter
 • Every row: id (UUID), device_id, updated_at. Money = INTEGER poisha. Quantity REAL in product unit.
 • Entry tables (purchases, sales, ledger, expenses, owner_withdrawals, day_close) are append-only (UPDATE/DELETE triggers). Correction = new row with corrects_id; delete = voided correction. v_ views show the latest, non-voided version. Customers/products are archived, never deleted.
 • Stock = purchases − sales; balance and cash are computed, never stored or synced.
 • Nothing saves without confirmation (✅ / "হ্যাঁ"). Bangla UI, targets ≥ 52 px, 🔊 on every screen.
-• Engine today: Gemini only (clip → Gemini → confirm card). Decided Nov 27: Android parsing becomes a second, default engine (section above). Rule parser (pure TS, no RN imports, unit-tested) handles typed text and হ্যাঁ/না. Gemini offline/429/error → understand_queue, reviewed later. Key is in the APK (EXPO_PUBLIC_GEMINI_KEY): billing stays off; real release needs a proxy.
+• Engine: Ridmik keyboard text → fixed formats (section above); works offline, no key. Rule parser (pure TS, no RN imports, unit-tested) handles typed text. Gemini removed Nov 27.
 • Sync: SQLite is truth, Firestore only transport at shops/{uid}/{table}/{rowId}. Entries = UUID union; mutable tables = LWW by updated_at. Merge duplicates via merged_into + alias + correction. Daily write cap 18K.
 • Migrations: one append-only MIGRATIONS list (now v15, verified from SCHEMA_VERSION); never edit a shipped one; add an upgrade test with real-looking rows.
 • Release: `npm run apk` only, dedicated release key (~/.mudi-dokan/keys, MUDI_RELEASE_* in ~/.gradle/gradle.properties), install with `adb install -r`, never uninstall. Keep key backups off this Mac.
@@ -61,9 +60,9 @@ Rules that still matter
 
 Screens
 1. Setup — Google sign-in (optional), your name, role মালিক/কর্মচারী, opening cash.
-2. Main (বিক্রি) — হাতে ক্যাশ card, আজ বিক্রি / আজ বাকি tiles, big 🎤, লিখুন, last entries, waiting-queue banner.
-3. Listening — recording, live level, থামুন, ✕.
-4. Confirm — readback card with ± quantity, price, নগদ/বাকি, ক্রেতা, হ্যাঁ/না, 🔊.
+2. Main (বিক্রি) — হাতে ক্যাশ card, আজ বিক্রি / আজ বাকি tiles, big 🎤, লিখুন, last entries.
+3. বলুন — example, big text box with Ridmik up, মুছুন, হয়ে গেছে.
+4. Confirm — readback card with ± quantity, price, নগদ/বাকি, ক্রেতা, হ্যাঁ/না buttons, 🔊.
 5. Pick — pictures grid, search, number pad, unit chips; typed/fallback entry.
 6. Stock (মাল) — product grid, low-stock marker, নতুন মাল বলুন, 🗑 archive.
 7. Baki — customer list, মোট পাবো, বাকি/জমা বলুন.
@@ -72,11 +71,9 @@ Screens
 10. Cash — expected cash, today's expenses, খরচ বলুন, গুনে মিলান.
 11. CashCount — note counter, কম/বেশি, দিন শেষ করুন.
 12. Settings (⚙) — shop info, customer import, sync status, Drive, backup/restore, সব তথ্য মুছুন, hidden debug log.
-13. Merge ("এই দুইটা কি একই?") and queue review (অপেক্ষার হিসাব মিলিয়ে নিন).
+13. Merge ("এই দুইটা কি একই?").
 
 Open questions / before wider release
-• Move Gemini key behind a server proxy (Firebase Function); APK key is extractable.
-• Tell shopkeepers audio goes to Google; check Gemini free-tier rate limits at real volume.
 • Test on a phone with real Bangla speech in a noisy shop; target ≥ 80% correct without edits.
 • Does staff need a separate login or hidden cost/profit? (devices.role exists.)
 • Import the old POS 226-product Excel catalog? Barcode now or later?

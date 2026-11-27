@@ -68,8 +68,7 @@ export interface Candidate {
   label: string;
 }
 
-/** 'ai' (exp/gemini-audio only): Gemini's tidy-up said it is probably this customer. */
-export type MatchHow = 'exact' | 'alias' | 'phone' | 'phonetic' | 'fuzzy' | 'ai';
+export type MatchHow = 'exact' | 'alias' | 'phone' | 'phonetic' | 'fuzzy';
 export interface NameMatch {
   how: MatchHow;
   candidate: Candidate;
