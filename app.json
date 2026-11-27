@@ -65,6 +65,8 @@
         {
           "android": {
             "kotlinVersion": "2.4.20",
+            "buildArchs": ["armeabi-v7a", "arm64-v8a"],
+            "useLegacyPackaging": true,
             "extraProguardRules": "# expo-background-task (WorkManager): R8 stripped Room's generated DB constructor → crash at start\n-keep class * extends androidx.room.RoomDatabase { <init>(); }\n-keep class androidx.work.impl.** { *; }\n"
           }
         }
