@@ -1,9 +1,9 @@
 /**
  * Audio retention (step 8), once a day on every phone. Pure TS.
  *
- * A clip older than RETENTION_DAYS is deleted from this phone and from Drive, unless one of
- * its entries (sale or বাকি/জমা) belongs to a customer who still owes (current baki > 0):
- * that voice is the proof until the baki is paid; the next daily run after that deletes it.
+ * A clip older than RETENTION_DAYS (30, decided Nov 27) is deleted from this phone and from
+ * Drive, an unpaid baki's too. Only saved entries keep their clip: a clip whose command was
+ * cancelled (না), not understood or not heard goes at the next run after UNSAVED_GRACE_MS.
  * Deleted everywhere → audio_status 'expired' (synced: other phones drop their cached copy
  * and hide ▶️). If Drive can't be reached, only the phone's copy goes; Drive is tried again
  * the next day.
@@ -12,26 +12,32 @@ import type { Db } from '../db/repo';
 import type { DriveApi } from './api';
 import { setMeta } from './meta';
 
-export const RETENTION_DAYS = 90;
+export const RETENTION_DAYS = 30;
 export const DAY_MS = 86_400_000;
+/** A command not saved: its clip waits this long (the card may still be open), then goes. */
+export const UNSAVED_GRACE_MS = 3_600_000;
 export const META_RETENTION_AT = 'drive:retention_at';
+
+const UNSAVED = new Set(['cancelled', 'unsupported', 'stt_error']);
 
 export interface ClipInfo {
   id: string;
   created_at: number;
   audio_status: string;
-  /** Customers of the entries this voice made (merged ones as the customer kept). */
-  customer_ids: readonly string[];
+  /** voice_logs.outcome */
+  outcome: string;
 }
 
-/**
- * Which clips to delete now. `owes` = customer id → current baki (poisha).
- * Already expired: always (only a leftover copy on this phone is still there).
- */
-export function clipsToExpire(clips: readonly ClipInfo[], owes: ReadonlyMap<string, number>, now: number, days = RETENTION_DAYS): string[] {
+/** Which clips to delete now. Already expired: always (only a leftover copy on this phone is still there). */
+export function clipsToExpire(clips: readonly ClipInfo[], now: number, days = RETENTION_DAYS): string[] {
   const cutoff = now - days * DAY_MS;
   return clips
-    .filter((c) => c.audio_status === 'expired' || (c.created_at < cutoff && !c.customer_ids.some((id) => (owes.get(id) ?? 0) > 0)))
+    .filter(
+      (c) =>
+        c.audio_status === 'expired' ||
+        c.created_at < cutoff ||
+        (UNSAVED.has(c.outcome) && c.created_at < now - UNSAVED_GRACE_MS),
+    )
     .map((c) => c.id);
 }
 
@@ -47,49 +53,27 @@ export interface RetentionResult {
   expired: number;
   localDeleted: number;
   driveDeleted: number;
-  /** Kept past 90 days as proof of a baki not yet paid. */
-  keptForBaki: number;
 }
 
-/** Clips that still exist somewhere (phone or Drive) and are old enough, or expired with a copy left here. */
-async function candidates(db: Db, cutoff: number) {
-  return db.getAllAsync<{ id: string; created_at: number; audio_status: string; audio_path: string | null; drive_file_id: string | null; customers: string | null }>(
-    `SELECT v.id, v.created_at, v.audio_status, v.audio_path, v.drive_file_id,
-       (SELECT GROUP_CONCAT(cid) FROM (
-          SELECT COALESCE(c.merged_into, c.id) AS cid FROM sales s JOIN customers c ON c.id = s.customer_id WHERE s.voice_log_id = v.id
-          UNION
-          SELECT COALESCE(c.merged_into, c.id) FROM ledger l JOIN customers c ON c.id = l.party_id WHERE l.voice_log_id = v.id
-       )) AS customers
+/** Clips that still exist somewhere (phone or Drive): old enough, not saved, or expired with a copy left here. */
+async function candidates(db: Db, cutoff: number, unsavedBefore: number) {
+  return db.getAllAsync<ClipInfo & { audio_path: string | null; drive_file_id: string | null }>(
+    `SELECT v.id, v.created_at, v.audio_status, v.outcome, v.audio_path, v.drive_file_id
      FROM voice_logs v
      WHERE (v.audio_status = 'expired' AND v.audio_path IS NOT NULL)
-        OR (v.audio_status != 'expired' AND v.created_at < ? AND (v.audio_path IS NOT NULL OR v.drive_file_id IS NOT NULL))`,
+        OR (v.audio_status != 'expired' AND (v.audio_path IS NOT NULL OR v.drive_file_id IS NOT NULL)
+            AND (v.created_at < ? OR (v.outcome IN ('cancelled','unsupported','stt_error') AND v.created_at < ?)))`,
     cutoff,
+    unsavedBefore,
   );
-}
-
-/** Current baki per customer (> 0 only); a merged duplicate's counts for the customer kept. */
-async function owing(db: Db): Promise<Map<string, number>> {
-  const rows = await db.getAllAsync<{ id: string; bal: number }>(
-    `SELECT COALESCE(c.merged_into, c.id) AS id, SUM(CASE l.kind WHEN 'baki' THEN l.amount_poisha ELSE -l.amount_poisha END) AS bal
-     FROM v_ledger l JOIN customers c ON c.id = l.party_id
-     WHERE l.party_type = 'customer' GROUP BY COALESCE(c.merged_into, c.id) HAVING bal > 0`,
-  );
-  return new Map(rows.map((r) => [r.id, r.bal]));
 }
 
 export async function runRetention(deps: RetentionDeps): Promise<RetentionResult> {
   const { db, api } = deps;
   const now = (deps.now ?? Date.now)();
-  const rows = await candidates(db, now - RETENTION_DAYS * DAY_MS);
-  const owes = await owing(db);
-  const infos: ClipInfo[] = rows.map((r) => ({
-    id: r.id,
-    created_at: r.created_at,
-    audio_status: r.audio_status,
-    customer_ids: r.customers ? r.customers.split(',') : [],
-  }));
-  const go = new Set(clipsToExpire(infos, owes, now));
-  const res: RetentionResult = { expired: 0, localDeleted: 0, driveDeleted: 0, keptForBaki: rows.length - go.size };
+  const rows = await candidates(db, now - RETENTION_DAYS * DAY_MS, now - UNSAVED_GRACE_MS);
+  const go = new Set(clipsToExpire(rows, now));
+  const res: RetentionResult = { expired: 0, localDeleted: 0, driveDeleted: 0 };
 
   for (const r of rows) {
     if (!go.has(r.id)) continue;

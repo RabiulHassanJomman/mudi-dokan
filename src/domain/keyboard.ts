@@ -110,9 +110,6 @@ export function fixedProblemWords(cmd: FixedCommand): string {
   return out.join(' ');
 }
 
-/** The big 🎤 (the phone's recognizer, bn-BD): heard text goes after what is in the box. */
-export const joinHeard = (before: string, heard: string): string => [before.trim(), heard.trim()].filter(Boolean).join(' ');
-
 const TRY_AGAIN = 'মাইক চেপে আবার বলুন।';
 
 /** Recognizer error code → what the screen shows and says ('' = say nothing: the user stopped it). */

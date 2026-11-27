@@ -657,7 +657,7 @@ export async function setCustomerPhone(db: Db, w: Writer, id: string, phone: str
 /**
  * ▶️ for a voice log `v`: the clip on this phone (audio_path), else 'drive:<voice log id>'
  * (downloaded on tap, src/drive/app.ts resolveClip), else null (no clip: ▶️ hidden).
- * An expired clip (90-day retention) is gone everywhere.
+ * An expired clip (30-day retention) is gone everywhere.
  */
 export const CLIP_SQL = `CASE WHEN v.audio_status = 'expired' THEN NULL WHEN v.audio_path IS NOT NULL THEN v.audio_path
   WHEN v.drive_file_id IS NOT NULL THEN 'drive:' || v.id END`;

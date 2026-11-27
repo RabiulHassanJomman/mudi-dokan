@@ -148,7 +148,7 @@ export default function DriveScreen() {
         </Pressable>
 
         <Txt wrap size={fontSize.caption} weight="medium" color={colors.muted}>
-          ৯০ দিনের পুরনো রেকর্ড ফোন আর Drive থেকে মুছে যায়। যে ক্রেতার বাকি আছে, তার রেকর্ড বাকি শোধ না হওয়া পর্যন্ত থাকে।
+          ৩০ দিনের পুরনো রেকর্ড ফোন আর Drive থেকে মুছে যায়। শুধু রাখা হিসাবের রেকর্ড থাকে।
         </Txt>
       </ScrollView>
 

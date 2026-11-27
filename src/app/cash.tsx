@@ -179,7 +179,7 @@ export default function CashScreen() {
                     <Icon name="play" size={20} color={colors.sale} />
                   </Pressable>
                 ) : (
-                  // no clip (typed, Android < 13, or past 90 days): ▶️ hidden, the row keeps its shape
+                  // no clip (typed, Android < 13, or past 30 days): ▶️ hidden, the row keeps its shape
                   <View style={[styles.play, styles.noClip]} />
                 )}
               </Pressable>

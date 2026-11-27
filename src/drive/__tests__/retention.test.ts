@@ -1,5 +1,5 @@
 import { migratedDb } from '../../db/__tests__/nodeDb';
-import { DAY_MS, RETENTION_DAYS, clipsToExpire, runRetention } from '../retention';
+import { DAY_MS, RETENTION_DAYS, UNSAVED_GRACE_MS, clipsToExpire, runRetention } from '../retention';
 import { getMetaNumber } from '../meta';
 import { FakeDrive } from './fakeDrive';
 
@@ -73,56 +73,59 @@ const statuses = async (db: Db) =>
   );
 
 describe('clipsToExpire (pure)', () => {
-  const owes = new Map([['c1', 100]]);
-  it('older than 90 days goes, unless a customer of it still owes', () => {
+  const clip = (id: string, created_at: number, audio_status = 'uploaded', outcome = 'saved') => ({ id, created_at, audio_status, outcome });
+  it('older than 30 days goes, even for a customer who still owes', () => {
+    expect(RETENTION_DAYS).toBe(30);
+    expect(
+      clipsToExpire([clip('a', OLD), clip('b', OLD, 'local', 'saved_edited'), clip('d', NEW, 'local'), clip('e', NEW, 'expired')], NOW),
+    ).toEqual(['a', 'b', 'e']);
+  });
+  it('exactly 30 days is kept', () => {
+    expect(clipsToExpire([clip('a', NOW - RETENTION_DAYS * DAY_MS, 'local')], NOW)).toEqual([]);
+  });
+  it('only saved entries keep their clip: cancelled / not understood go after an hour', () => {
+    const hourAgo = NOW - UNSAVED_GRACE_MS - 1;
     expect(
       clipsToExpire(
-        [
-          { id: 'a', created_at: OLD, audio_status: 'uploaded', customer_ids: [] },
-          { id: 'b', created_at: OLD, audio_status: 'uploaded', customer_ids: ['c1'] },
-          { id: 'c', created_at: OLD, audio_status: 'local', customer_ids: ['c2'] },
-          { id: 'd', created_at: NEW, audio_status: 'local', customer_ids: [] },
-          { id: 'e', created_at: NEW, audio_status: 'expired', customer_ids: ['c1'] },
-        ],
-        owes,
+        [clip('n', hourAgo, 'local', 'cancelled'), clip('u', hourAgo, 'local', 'unsupported'), clip('s', hourAgo, 'local', 'stt_error'), clip('p', hourAgo, 'local', 'pending'), clip('fresh', NOW - 60_000, 'local', 'cancelled')],
         NOW,
       ),
-    ).toEqual(['a', 'c', 'e']);
-  });
-  it('exactly 90 days is kept', () => {
-    expect(clipsToExpire([{ id: 'a', created_at: NOW - RETENTION_DAYS * DAY_MS, audio_status: 'local', customer_ids: [] }], owes, NOW)).toEqual([]);
+    ).toEqual(['n', 'u', 's']);
   });
 });
 
 describe('runRetention', () => {
-  it('deletes old clips on the phone and Drive, keeps the proof of an unpaid baki', async () => {
+  it('deletes clips older than 30 days on the phone and Drive, an unpaid baki too', async () => {
     const { db, drive, disk } = await shop();
     const before = drive.files.size;
     const r = await runRetention({ db, api: drive, removeFile: async (u) => void disk.delete(u), now: () => NOW });
-    expect(r).toEqual({ expired: 2, localDeleted: 2, driveDeleted: 2, keptForBaki: 2 });
+    expect(r).toEqual({ expired: 4, localDeleted: 4, driveDeleted: 4 });
     expect(await statuses(db)).toEqual({
       'v-cash': 'expired',
       'v-exp': 'expired',
-      'v-karim': 'uploaded+local', // করিম still owes
-      'v-merged': 'uploaded+local', // owed by the merged customer
+      'v-karim': 'expired', // still owes, but 30 days is the limit
+      'v-merged': 'expired',
       'v-new': 'uploaded+local',
-      'v-rahim': 'expired', // paid back
+      'v-rahim': 'expired',
     });
-    expect(drive.files.size).toBe(before - 2);
+    expect(drive.files.size).toBe(before - 4);
     expect(disk.has('file:///doc/v-rahim.aac')).toBe(false);
     expect(disk.has('file:///doc/v-exp.aac')).toBe(false);
-    expect(disk.has('file:///doc/v-karim.aac')).toBe(true);
+    expect(disk.has('file:///doc/v-karim.aac')).toBe(false);
     expect(await getMetaNumber(db, 'drive:retention_at')).toBe(NOW);
     // expired is synced: updated_at moved
     expect((await db.getFirstAsync<{ updated_at: number }>("SELECT updated_at FROM voice_logs WHERE id = 'v-rahim'"))!.updated_at).toBe(NOW);
   });
 
-  it('when করিম pays, the next daily run deletes his clip', async () => {
-    const { db, drive, disk } = await shop();
-    await runRetention({ db, api: drive, removeFile: async (u) => void disk.delete(u), now: () => NOW });
-    await insert(db, 'ledger', { ...entry('l9', NOW), party_id: 'c-karim', kind: 'joma', amount_poisha: 10000 });
-    await runRetention({ db, api: drive, removeFile: async (u) => void disk.delete(u), now: () => NOW + DAY_MS });
-    expect((await statuses(db))['v-karim']).toBe('expired');
+  it('a cancelled entry\'s new clip goes at the next run (no Drive needed)', async () => {
+    const db = await migratedDb();
+    const at = NOW - UNSAVED_GRACE_MS - 1;
+    await insert(db, 'voice_logs', { ...row('v1', at), transcript: 'x', device_name: 'আব্বু', audio_path: 'file:///a.wav', audio_status: 'local', outcome: 'cancelled' });
+    await insert(db, 'voice_logs', { ...row('v2', at), transcript: 'y', device_name: 'আব্বু', audio_path: 'file:///b.wav', audio_status: 'local', outcome: 'saved' });
+    const gone: string[] = [];
+    const r = await runRetention({ db, api: null, removeFile: async (u) => void gone.push(u), now: () => NOW });
+    expect(r).toMatchObject({ expired: 1, localDeleted: 1 });
+    expect(gone).toEqual(['file:///a.wav']);
   });
 
   it('offline / not signed in: only the phone copy goes; Drive is retried next time', async () => {
@@ -135,7 +138,7 @@ describe('runRetention', () => {
     expect((await statuses(db))['v-rahim']).toBe('uploaded');
     drive.failNext = 0;
     const r2 = await runRetention({ db, api: drive, removeFile: async (u) => void disk.delete(u), now: () => NOW });
-    expect(r2).toMatchObject({ expired: 2, driveDeleted: 2 });
+    expect(r2).toMatchObject({ expired: 4, driveDeleted: 4 });
   });
 
   it('a clip never uploaded (no account) just expires', async () => {

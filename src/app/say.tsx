@@ -3,6 +3,7 @@ import { KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, TextInput, Vie
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
+import { File, Paths } from 'expo-file-system';
 import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-speech-recognition';
 
 import { Icon } from '../components/Icon';
@@ -11,7 +12,7 @@ import { Txt } from '../components/Txt';
 import { createVoiceLog, customerAliasMap, knownNames, productAliasMap, setOutcome, setParsed } from '../db/repo';
 import { writer } from '../device';
 import { fixedAsParsed } from '../domain/entry';
-import { EXAMPLE_BN, fixedProblemWords, heardErrorWords, joinHeard, readKeyboardText } from '../domain/keyboard';
+import { EXAMPLE_BN, fixedProblemWords, heardErrorWords, readKeyboardText } from '../domain/keyboard';
 import { nav } from '../lib/nav';
 import { speak, stopSpeaking } from '../lib/speak';
 import { colors, fonts, fontSize, radius, spacing } from '../theme/tokens';
@@ -21,9 +22,11 @@ type Tab = keyof typeof EXAMPLE_BN;
 /**
  * বলুন: opens listening in Bangla (the phone's own recognizer, bn-BD: on most phones Google's,
  * the same one the Ridmik keyboard's mic uses). When the speaker stops, the text goes to the
- * confirm card; if something is missing it is said, and the text stays to add to or fix.
- * 🎤 listens again (adds to the text). Tapping the text box opens the keyboard (Ridmik's mic
- * still works there). No clip is kept.
+ * confirm card; if something is missing it is said, and the text stays to see or fix by
+ * keyboard (the clip is kept for it). 🎤 starts over (clears the text and its clip). Tapping the text box opens the keyboard
+ * (Ridmik's mic still works there).
+ * The clip (WAV, Android 13+) goes with the voice log → Drive; a command not understood
+ * keeps none. Cancelled ones are dropped by the upload queue and deleted by retention.
  */
 export default function SayScreen() {
   const db = useSQLiteContext();
@@ -36,12 +39,10 @@ export default function SayScreen() {
   const [listening, setListening] = useState(false);
   const scroll = useRef<React.ComponentRef<typeof ScrollView>>(null);
   const input = useRef<React.ComponentRef<typeof TextInput>>(null);
-  /** The text in the box when this listen started: what is heard goes after it. */
-  const before = useRef('');
   const listeningRef = useRef(false);
-  const textRef = useRef(text);
-  textRef.current = text;
   const leaving = useRef(false);
+  /** This listen's recording: its file once audioend says so; waiters for it. */
+  const clip = useRef<{ uri: string | null; ended: boolean; waiters: (() => void)[] } | null>(null);
 
   const intro = `${customer ? `${customer}। ` : ''}মাইক চেপে বলুন। যেমন: ${examples.join('। অথবা: ')}।`;
 
@@ -61,11 +62,21 @@ export default function SayScreen() {
       return;
     }
     if (leaving.current) return;
+    // a new try starts clean: the old text and its clip go
+    dropClip(clip.current);
+    clip.current = { uri: null, ended: false, waiters: [] };
+    setText('');
     setProblem('');
-    before.current = textRef.current;
     listeningRef.current = true;
     setListening(true);
-    ExpoSpeechRecognitionModule.start({ lang: 'bn-BD', interimResults: true, maxAlternatives: 1, continuous: false });
+    ExpoSpeechRecognitionModule.start({
+      lang: 'bn-BD',
+      interimResults: true,
+      maxAlternatives: 1,
+      continuous: false,
+      // Android 13+ only; older phones give no file (the entry is kept without a clip)
+      recordingOptions: { persist: true, outputDirectory: Paths.document.uri, outputFileName: `voice_${Date.now()}.wav` },
+    });
   }, [showProblem]);
 
   const stopListening = useCallback(() => {
@@ -75,14 +86,20 @@ export default function SayScreen() {
 
   useSpeechRecognitionEvent('result', (e) => {
     if (!listeningRef.current) return;
-    const heard = e.results[0]?.transcript ?? '';
-    const next = joinHeard(before.current, heard);
-    setText(next);
+    const heard = (e.results[0]?.transcript ?? '').trim();
+    setText(heard);
     if (e.isFinal) {
       listeningRef.current = false;
       setListening(false);
-      if (heard.trim()) void done(next);
+      if (heard) void done(heard);
     }
+  });
+  useSpeechRecognitionEvent('audioend', (e) => {
+    const c = clip.current;
+    if (!c || c.ended) return;
+    c.uri = e.uri;
+    c.ended = true;
+    for (const w of c.waiters.splice(0)) w();
   });
   useSpeechRecognitionEvent('error', (e) => {
     if (!listeningRef.current) return;
@@ -103,6 +120,9 @@ export default function SayScreen() {
       clearTimeout(t);
       if (listeningRef.current) ExpoSpeechRecognitionModule.abort();
       stopSpeaking();
+      // left without a saved command: the clip isn't kept (one handed to a log is null here)
+      dropClip(clip.current);
+      clip.current = null;
     };
   }, [listen]);
 
@@ -124,9 +144,13 @@ export default function SayScreen() {
         aliases,
       );
       const w = writer();
-      const logId = await createVoiceLog(db, w, { transcript: said, source: 'voice', contextTab: tabParam, engine: 'android' });
       const words = fixedProblemWords(cmd);
+      // only a command that goes to the card keeps its clip
+      const audioPath = words ? null : await clipFile(clip.current);
+      if (!words && audioPath) clip.current = null; // the log owns it now
+      const logId = await createVoiceLog(db, w, { transcript: said, source: 'voice', contextTab: tabParam, engine: 'android', audioPath });
       if (words) {
+        // the clip stays until a new try or leaving: fixed by keyboard, it still goes with the entry
         // kept in the debug log: what was heard and what was missing
         await setParsed(db, w, logId, fixedAsParsed(cmd), { by: 'android' });
         await setOutcome(db, w, logId, 'unsupported');
@@ -295,3 +319,27 @@ const styles = StyleSheet.create({
   disabled: { opacity: 0.5 },
   pressed: { opacity: 0.85 },
 });
+
+type Clip = { uri: string | null; ended: boolean; waiters: (() => void)[] } | null;
+
+/** The recording's file, once the recorder has closed it (waits up to 2 s for audioend). */
+async function clipFile(c: Clip): Promise<string | null> {
+  if (!c) return null;
+  if (!c.ended) await Promise.race([new Promise<void>((r) => c.waiters.push(r)), new Promise((r) => setTimeout(r, 2000))]);
+  return c.uri;
+}
+
+/** Delete a recording nobody keeps (now, or when the recorder closes it). */
+function dropClip(c: Clip): void {
+  if (!c) return;
+  const del = () => {
+    if (!c.uri) return;
+    try {
+      new File(c.uri).delete();
+    } catch {
+      // already gone
+    }
+  };
+  if (c.ended) del();
+  else c.waiters.push(del);
+}

@@ -1,5 +1,5 @@
 /** Android mode: said with the Ridmik keyboard's voice typing, read by the fixed formats. */
-import { EXAMPLE_BN, fixedProblemWords, heardErrorWords, joinHeard, readKeyboardText, voiceRoute } from '../keyboard';
+import { EXAMPLE_BN, fixedProblemWords, heardErrorWords, readKeyboardText, voiceRoute } from '../keyboard';
 import { parseFixed } from '../../parser/fixed';
 
 describe('which screen the 🎤 opens', () => {
@@ -61,12 +61,6 @@ it('every tab has an example that parses', () => {
 });
 
 describe('listening in the app (the big 🎤, bn-BD)', () => {
-  it('heard text goes after what is already in the box', () => {
-    expect(joinHeard('', 'সাজু বাকি ১০০ টাকা')).toBe('সাজু বাকি ১০০ টাকা');
-    expect(joinHeard('সাজু বাকি', ' ১০০ টাকা ')).toBe('সাজু বাকি ১০০ টাকা');
-    expect(joinHeard('সাজু বাকি ', '')).toBe('সাজু বাকি');
-  });
-
   it('nothing heard: say so, and how to try again', () => {
     expect(heardErrorWords('no-speech')).toBe('কিছু শুনিনি। মাইক চেপে আবার বলুন।');
     expect(heardErrorWords('speech-timeout')).toBe('কিছু শুনিনি। মাইক চেপে আবার বলুন।');

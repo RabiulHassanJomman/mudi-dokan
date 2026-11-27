@@ -108,6 +108,11 @@ export async function runUploadQueue(deps: UploadDeps): Promise<RunResult> {
       await drop(id);
       continue;
     }
+    // only saved entries keep their clip (retention deletes the file on the phone)
+    if (r.outcome === 'cancelled' || r.outcome === 'unsupported' || r.outcome === 'stt_error') {
+      await drop(id);
+      continue;
+    }
     if (r.outcome === 'pending' && now() - (r.created_at ?? 0) < PENDING_GRACE_MS) {
       await db.runAsync('UPDATE audio_queue SET next_at = ? WHERE voice_log_id = ?', (r.created_at ?? now()) + PENDING_GRACE_MS, id);
       continue;

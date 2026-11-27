@@ -132,6 +132,18 @@ describe('upload queue', () => {
     expect(gone && expired).toBeTruthy();
   });
 
+  it('only saved entries go to Drive: a cancelled or not-understood clip is dropped, not uploaded', async () => {
+    const s = await setup();
+    for (const outcome of ['cancelled', 'unsupported'] as const) {
+      s.disk.set(`file:///doc/${outcome}.wav`, 'RIFF-pcm');
+      const id = await createVoiceLog(s.db, s.w, { transcript: 'x', source: 'voice', contextTab: 'sale', audioPath: `file:///doc/${outcome}.wav` });
+      await setOutcome(s.db, s.w, id, outcome);
+    }
+    const r = await runUploadQueue({ db: s.db, api: s.drive, files: fakeFiles(s.disk), now: () => T0 + QUEUE_DELAY_MS + 60_000 });
+    expect(r).toEqual({ uploaded: 0, failed: 0, dropped: 2, left: 0 });
+    expect(s.drive.files.size).toBe(0);
+  });
+
   it('one folder lookup per month per run; pending count', async () => {
     const s = await setup();
     for (let i = 0; i < 3; i++) await clip(s, `file:///doc/v${i}.wav`);

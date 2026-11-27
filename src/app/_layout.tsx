@@ -69,7 +69,7 @@ function SyncBoot() {
   const db = useSQLiteContext();
   useEffect(() => {
     void startSync().catch((e) => console.warn('sync start failed', e));
-    // step 8: voice clips to Drive, nightly backup, 90-day audio retention
+    // step 8: voice clips to Drive, nightly backup, 30-day audio retention
     startDrive();
     void registerDriveTask();
     return onFirstSync(() => {

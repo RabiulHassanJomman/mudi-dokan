@@ -237,7 +237,7 @@ export default function SaleScreen() {
                   <Icon name="play" size={22} color={colors.sale} />
                 </Pressable>
               ) : (
-                // no clip (typed, or past 90 days): ▶️ hidden, the row keeps its shape
+                // no clip (typed, or past 30 days): ▶️ hidden, the row keeps its shape
                 <View style={[styles.play, styles.noClip]} />
               )}
               <Pressable
