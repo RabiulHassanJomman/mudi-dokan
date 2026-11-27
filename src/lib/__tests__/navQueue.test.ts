@@ -82,3 +82,25 @@ describe('navQueue: no crash before the navigator is mounted', () => {
     expect(isNotReadyError(new Error('bad href'))).toBe(false);
   });
 });
+
+describe('navQueue: what it logs (to find the stuck-after-install bug)', () => {
+  it('each call, a wait for the router, and a tap dropped after maxWaitMs', () => {
+    const f = fakeRouter();
+    const c = clock();
+    const log: string[] = [];
+    const nav = createNavQueue(f.r, { now: c.now, setTimer: c.setTimer, retryMs: 100, maxWaitMs: 300, log: (m) => log.push(m) });
+    nav.push('/say' as never);
+    for (let i = 0; i < 5; i++) c.advance(100);
+    expect(f.calls).toEqual([]);
+    expect(log).toEqual(['nav push "/say"', 'nav waiting: router not ready', 'nav dropped after 400 ms: push "/say"']);
+  });
+
+  it('ready changes are logged', () => {
+    const f = fakeRouter();
+    const log: string[] = [];
+    const nav = createNavQueue(f.r, { log: (m) => log.push(m) });
+    nav.setReady(true);
+    nav.setReady(false);
+    expect(log).toEqual(['nav ready true', 'nav ready false']);
+  });
+});

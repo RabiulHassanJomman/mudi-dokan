@@ -23,6 +23,8 @@ export interface NavQueueOptions {
   maxWaitMs?: number;
   now?: () => number;
   setTimer?: (fn: () => void, ms: number) => unknown;
+  /** Diagnostics (logcat in release): each call, waits, drops, ready changes. */
+  log?: (msg: string) => void;
 }
 
 export function createNavQueue<R extends RouterLike>(router: R, opts: NavQueueOptions = {}) {
@@ -30,9 +32,10 @@ export function createNavQueue<R extends RouterLike>(router: R, opts: NavQueueOp
   const maxWaitMs = opts.maxWaitMs ?? 5000;
   const now = opts.now ?? Date.now;
   const setTimer = opts.setTimer ?? ((fn, ms) => setTimeout(fn, ms));
+  const log = opts.log ?? (() => undefined);
   let ready = false;
   let timer = false;
-  const waiting: { run: () => void; at: number }[] = [];
+  const waiting: { run: () => void; at: number; what: string }[] = [];
 
   /** Runs queued calls in order; stops at the first that still isn't possible. */
   function flush() {
@@ -40,6 +43,7 @@ export function createNavQueue<R extends RouterLike>(router: R, opts: NavQueueOp
       const next = waiting[0]!;
       if (now() - next.at > maxWaitMs) {
         waiting.shift();
+        log(`nav dropped after ${now() - next.at} ms: ${next.what}`);
         continue;
       }
       try {
@@ -67,25 +71,27 @@ export function createNavQueue<R extends RouterLike>(router: R, opts: NavQueueOp
   }
 
   /** Run now when possible, else queue (calls keep their order). */
-  function run(fn: () => void) {
+  function run(what: string, fn: () => void) {
+    log(`nav ${what}`);
     if (waiting.length) {
-      waiting.push({ run: fn, at: now() });
+      waiting.push({ run: fn, at: now(), what });
       return schedule();
     }
     try {
       fn();
     } catch (e) {
       if (!isNotReadyError(e)) throw e;
+      log('nav waiting: router not ready');
       ready = false;
-      waiting.push({ run: fn, at: now() });
+      waiting.push({ run: fn, at: now(), what });
       schedule();
     }
   }
 
   return {
-    push: (href: Parameters<R['push']>[0]) => run(() => router.push(href)),
-    replace: (href: Parameters<R['replace']>[0]) => run(() => router.replace(href)),
-    back: () => run(() => router.back()),
+    push: (href: Parameters<R['push']>[0]) => run(`push ${JSON.stringify(href)}`, () => router.push(href)),
+    replace: (href: Parameters<R['replace']>[0]) => run(`replace ${JSON.stringify(href)}`, () => router.replace(href)),
+    back: () => run('back', () => router.back()),
     /** false while the navigator isn't ready. */
     canGoBack: () => {
       try {
@@ -97,6 +103,7 @@ export function createNavQueue<R extends RouterLike>(router: R, opts: NavQueueOp
     },
     /** The root navigator mounted (useRootNavigationState has a key): run what waited. */
     setReady(r: boolean) {
+      if (r !== ready) log(`nav ready ${r}`);
       ready = r;
       if (r) flush();
     },

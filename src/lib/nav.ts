@@ -7,4 +7,5 @@ import { router } from 'expo-router';
 
 import { createNavQueue } from './navQueue';
 
-export const nav = createNavQueue(router);
+// logged with a tag so `adb logcat | grep MUDI_NAV` finds it in a release build
+export const nav = createNavQueue(router, { log: (m) => console.log(`MUDI_NAV ${m}`) });
