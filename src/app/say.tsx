@@ -9,10 +9,10 @@ import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-spe
 import { Icon } from '../components/Icon';
 import { ScreenHeader } from '../components/ScreenHeader';
 import { Txt } from '../components/Txt';
-import { createVoiceLog, customerAliasMap, knownNames, productAliasMap, setOutcome, setParsed } from '../db/repo';
+import { createVoiceLog, customerAliasMap, customerByName, knownNames, productAliasMap, setOutcome, setParsed } from '../db/repo';
 import { writer } from '../device';
 import { fixedAsParsed } from '../domain/entry';
-import { EXAMPLE_BN, clipUri, fixedProblemWords, heardErrorWords, joinPieces, readKeyboardText } from '../domain/keyboard';
+import { EXAMPLE_BN, LOOKUP_EXAMPLE_BN, clipUri, customerLookup, fixedProblemWords, heardErrorWords, joinPieces, readKeyboardText } from '../domain/keyboard';
 import { nav } from '../lib/nav';
 import { speak, stopSpeaking } from '../lib/speak';
 import { colors, fonts, fontSize, radius, spacing } from '../theme/tokens';
@@ -32,7 +32,9 @@ export default function SayScreen() {
   const db = useSQLiteContext();
   const { tab: tabParam = 'sale', customer, kind } = useLocalSearchParams<{ tab?: string; customer?: string; kind?: string }>();
   const tab: Tab = tabParam === 'purchase' || tabParam === 'ledger' ? tabParam : 'sale';
-  const examples = EXAMPLE_BN[tab];
+  /** বাকি tab, no customer chosen: a name alone opens that customer's হিসাব. */
+  const canLookup = tab === 'ledger' && !customer;
+  const examples = canLookup ? [...EXAMPLE_BN.ledger, LOOKUP_EXAMPLE_BN] : EXAMPLE_BN[tab];
   const [text, setText] = useState('');
   const [problem, setProblem] = useState('');
   const [busy, setBusy] = useState(false);
@@ -196,6 +198,16 @@ export default function SayScreen() {
       const audioPath = words ? null : (clip.current?.uri ?? null);
       if (audioPath) clip.current = null; // the log owns it now
       const logId = await createVoiceLog(db, w, { transcript: said, source: 'voice', contextTab: tabParam, audioPath });
+      const lookup = words && canLookup ? customerLookup(said, names.customers, aliases) : null;
+      const found = lookup ? await customerByName(db, lookup) : null;
+      if (found) {
+        // not an entry: show (and read) that customer's summary; kept in the debug log
+        await setOutcome(db, w, logId, 'unsupported', { intent: 'customer_history_query' });
+        leaving.current = true;
+        stopSpeaking();
+        nav.replace({ pathname: '/customer/[id]', params: { id: found.id, summary: '1' } });
+        return;
+      }
       if (words) {
         // the clip stays until a new try or leaving: fixed by keyboard, it still goes with the entry
         // kept in the debug log: what was heard and what was missing

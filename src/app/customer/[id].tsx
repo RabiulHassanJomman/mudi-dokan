@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { FlatList, Linking, Pressable, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams } from 'expo-router';
@@ -32,7 +32,9 @@ export default function CustomerScreen() {
   /** Rows from another phone came in: reload. */
   const synced = useDataVersion();
   const play = useClipPlayer();
-  const { id } = useLocalSearchParams<{ id: string }>();
+  /** summary=1: opened by saying the name in the বাকি tab: read the summary once it loads. */
+  const { id, summary } = useLocalSearchParams<{ id: string; summary?: string }>();
+  const toRead = useRef(summary === '1');
   const [c, setC] = useState<CustomerBalance | null>(null);
   const [rows, setRows] = useState<LedgerLine[]>([]);
   const [phoneOpen, setPhoneOpen] = useState(false);
@@ -41,14 +43,22 @@ export default function CustomerScreen() {
   const delCustomer = usePartyDelete('customer', () => nav.back());
 
   const load = useCallback(async () => {
-    setC(await getCustomer(db, id));
-    setRows(await customerHistory(db, id));
+    // both together, so the summary read on open never sees the customer without their rows
+    const [cust, hist] = await Promise.all([getCustomer(db, id), customerHistory(db, id)]);
+    setRows(hist);
+    setC(cust);
   }, [db, id]);
   useFocusEffect(
     useCallback(() => {
       void load();
     }, [load, synced, reload]),
   );
+
+  useEffect(() => {
+    if (!c || !toRead.current) return;
+    toRead.current = false;
+    void speak(bakiSummaryWords(c.name, bakiSummary(rows)));
+  }, [c, rows]);
 
   if (!c) return <SafeAreaView style={styles.screen} />;
   const owed = c.balance_poisha;

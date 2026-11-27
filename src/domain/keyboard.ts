@@ -3,6 +3,8 @@
  * keyboard's voice typing into a text box; the fixed formats read it. Pure TS.
  */
 import { parseFixed, type FixedCommand, type FixedContext } from '../parser/fixed';
+import { BAKI, BAKI_OF, HISTORY, HONORIFIC_SET, HOW_MUCH, MONEY, OWED, SHOW } from '../parser/keywords';
+import { fixSpelling } from '../parser/spelling';
 import { distance } from './customers';
 import { nameKey, phoneticKey } from './names';
 
@@ -30,6 +32,9 @@ export const EXAMPLE_BN: Readonly<Record<Exclude<VoiceTab, 'expense'>, readonly 
   purchase: ['১০০০ টাকার আলু কেনা হয়েছে'],
   ledger: ['সাজু বাকি নিয়েছে আদা, চাল, আটা ১০০ টাকা', 'সাজু ৫০ টাকা জমা দিয়েছে'],
 };
+
+/** বাকি tab (no customer yet): saying a name opens that customer's হিসাব (customerLookup). */
+export const LOOKUP_EXAMPLE_BN = 'সাজুর হিসাব';
 
 // "সাজুর", "সাজুকে": the name is the stem
 const CASE_ENDINGS = ['কে', 'ের', 'র'].map((e) => e.normalize('NFC'));
@@ -141,3 +146,25 @@ export const clipUri = (dir: string, name: string): string => `file://${dir.repl
 /** The text of one listen: its final pieces in order, then the piece still being heard. */
 export const joinPieces = (finals: readonly string[], current = ''): string =>
   [...finals, current].map((p) => p.trim()).filter(Boolean).join(' ');
+
+/** Words around a name that ask for that customer's হিসাব: "সাজুর বাকি কত", "করিমের কাছে কত পাবো". */
+const LOOKUP_WORDS = [HISTORY, SHOW, BAKI, BAKI_OF, HOW_MUCH, OWED, HONORIFIC_SET, MONEY];
+const LOOKUP_EXTRA = new Set(['কাছে', 'কি', 'কী', 'আছে', 'এর', 'টা'].map((w) => w.normalize('NFC')));
+
+/**
+ * বাকি tab › বলুন: a customer's name alone, or with হিসাব / বাকি কত / খাতা দেখাও → that customer
+ * (matchCustomer: alias, case ending, sound, close spelling); else null. An amount (digits) or
+ * any other word (জমা, নিল, …) means it is not a lookup.
+ */
+export function customerLookup(said: string, known: readonly string[], aliases: Readonly<Record<string, string>>): string | null {
+  if (!known.length || /[0-9০-৯]/.test(said)) return null;
+  const tokens = said
+    .normalize('NFC')
+    .split(/[\s.,;:।?!\-–]+/)
+    .filter(Boolean)
+    .map(fixSpelling);
+  const name = tokens.filter((t) => !LOOKUP_EXTRA.has(t) && !LOOKUP_WORDS.some((set) => set.has(t))).join(' ');
+  if (!name) return null;
+  const hit = matchCustomer(name, known, aliases);
+  return hit && known.includes(hit) ? hit : null;
+}
