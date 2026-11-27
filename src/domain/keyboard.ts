@@ -131,3 +131,9 @@ export function heardErrorWords(code: string): string {
       return `শোনা গেল না। ${TRY_AGAIN}`;
   }
 }
+
+/**
+ * Where expo-speech-recognition writes a recording (resolveFilePathFromConfig: folder without
+ * file:// and trailing /, then /name), as the file:// uri its audioend event reports.
+ */
+export const clipUri = (dir: string, name: string): string => `file://${dir.replace(/^file:\/\//, '').replace(/\/+$/, '')}/${name}`;

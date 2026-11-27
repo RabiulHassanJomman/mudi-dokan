@@ -1,5 +1,5 @@
 /** Android mode: said with the Ridmik keyboard's voice typing, read by the fixed formats. */
-import { EXAMPLE_BN, fixedProblemWords, heardErrorWords, readKeyboardText, voiceRoute } from '../keyboard';
+import { EXAMPLE_BN, clipUri, fixedProblemWords, heardErrorWords, readKeyboardText, voiceRoute } from '../keyboard';
 import { parseFixed } from '../../parser/fixed';
 
 describe('which screen the 🎤 opens', () => {
@@ -79,5 +79,12 @@ describe('listening in the app (the big 🎤, bn-BD)', () => {
 
   it('stopped by the user: nothing to say', () => {
     expect(heardErrorWords('aborted')).toBe('');
+  });
+});
+
+describe('the clip file of a listen', () => {
+  it('is known before the recorder closes it (same path the library writes)', () => {
+    expect(clipUri('file:///data/user/0/com.mudidokan.app/files/', 'voice_1.wav')).toBe('file:///data/user/0/com.mudidokan.app/files/voice_1.wav');
+    expect(clipUri('/data/user/0/com.mudidokan.app/files', 'voice_1.wav')).toBe('file:///data/user/0/com.mudidokan.app/files/voice_1.wav');
   });
 });

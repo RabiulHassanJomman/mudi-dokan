@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
@@ -12,7 +12,7 @@ import { Txt } from '../components/Txt';
 import { createVoiceLog, customerAliasMap, knownNames, productAliasMap, setOutcome, setParsed } from '../db/repo';
 import { writer } from '../device';
 import { fixedAsParsed } from '../domain/entry';
-import { EXAMPLE_BN, fixedProblemWords, heardErrorWords, readKeyboardText } from '../domain/keyboard';
+import { EXAMPLE_BN, clipUri, fixedProblemWords, heardErrorWords, readKeyboardText } from '../domain/keyboard';
 import { nav } from '../lib/nav';
 import { speak, stopSpeaking } from '../lib/speak';
 import { colors, fonts, fontSize, radius, spacing } from '../theme/tokens';
@@ -45,7 +45,7 @@ export default function SayScreen() {
   /** Silent restarts after nothing was heard (recording mode gives up after ~2 s of silence). */
   const quietRetries = useRef(0);
   const leaving = useRef(false);
-  /** This listen's recording: its file once audioend says so; waiters for it. */
+  /** This listen's recording: its file (known at start), whether the recorder has closed it, waiters for that. */
   const clip = useRef<{ uri: string | null; ended: boolean; waiters: (() => void)[] } | null>(null);
 
   const intro = `${customer ? `${customer}। ` : ''}মাইক চেপে বলুন। যেমন: ${examples.join('। অথবা: ')}।`;
@@ -79,7 +79,9 @@ export default function SayScreen() {
     if (leaving.current) return;
     // a new try starts clean: the old text and its clip go
     dropClip(clip.current);
-    clip.current = { uri: null, ended: false, waiters: [] };
+    const name = `voice_${Date.now()}.wav`;
+    // the library writes it at file:// + folder + name; Android 12 and older record nothing
+    clip.current = { uri: CAN_RECORD ? clipUri(Paths.document.uri, name) : null, ended: false, waiters: [] };
     setText('');
     setProblem('');
     listeningRef.current = true;
@@ -90,7 +92,7 @@ export default function SayScreen() {
       maxAlternatives: 1,
       continuous: false,
       // Android 13+ only; older phones give no file (the entry is kept without a clip)
-      recordingOptions: { persist: true, outputDirectory: Paths.document.uri, outputFileName: `voice_${Date.now()}.wav` },
+      ...(CAN_RECORD ? { recordingOptions: { persist: true, outputDirectory: Paths.document.uri, outputFileName: name } } : {}),
     });
   }
 
@@ -112,7 +114,7 @@ export default function SayScreen() {
   useSpeechRecognitionEvent('audioend', (e) => {
     const c = clip.current;
     if (!c || c.ended) return;
-    c.uri = e.uri;
+    c.uri = e.uri ?? c.uri;
     c.ended = true;
     for (const w of c.waiters.splice(0)) w();
   });
@@ -166,9 +168,10 @@ export default function SayScreen() {
       );
       const w = writer();
       const words = fixedProblemWords(cmd);
-      // only a command that goes to the card keeps its clip
-      const audioPath = words ? null : await clipFile(clip.current);
-      if (!words && audioPath) clip.current = null; // the log owns it now
+      // only a command that goes to the card keeps its clip; no wait for the recorder to close the
+      // file (that took ~1.7 s): the card doesn't need it, and the upload waits QUEUE_DELAY_MS
+      const audioPath = words ? null : (clip.current?.uri ?? null);
+      if (audioPath) clip.current = null; // the log owns it now
       const logId = await createVoiceLog(db, w, { transcript: said, source: 'voice', contextTab: tabParam, engine: 'android', audioPath });
       if (words) {
         // the clip stays until a new try or leaving: fixed by keyboard, it still goes with the entry
@@ -349,12 +352,8 @@ const QUIET_RETRIES = 3;
 
 type Clip = { uri: string | null; ended: boolean; waiters: (() => void)[] } | null;
 
-/** The recording's file, once the recorder has closed it (waits up to 2 s for audioend). */
-async function clipFile(c: Clip): Promise<string | null> {
-  if (!c) return null;
-  if (!c.ended) await Promise.race([new Promise<void>((r) => c.waiters.push(r)), new Promise((r) => setTimeout(r, 2000))]);
-  return c.uri;
-}
+/** Recording while recognizing needs Android 13+. */
+const CAN_RECORD = Platform.OS === 'android' && Number(Platform.Version) >= 33;
 
 /** Delete a recording nobody keeps (now, or when the recorder closes it). */
 function dropClip(c: Clip): void {
