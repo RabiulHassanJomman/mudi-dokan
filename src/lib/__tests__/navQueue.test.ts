@@ -104,3 +104,67 @@ describe('navQueue: what it logs (to find the stuck-after-install bug)', () => {
     expect(log).toEqual(['nav ready true', 'nav ready false']);
   });
 });
+
+describe('navQueue: each mounted app root brings its own router (attach)', () => {
+  /** A root's own router (expo-router useRouter): works while that root is mounted. */
+  function rootRouter(name: string, calls: string[]) {
+    return {
+      push: (h: never) => void calls.push(`${name} push ${String(h)}`),
+      replace: (h: never) => void calls.push(`${name} replace ${String(h)}`),
+      back: () => void calls.push(`${name} back`),
+      canGoBack: () => true,
+    };
+  }
+
+  it('Android relaunch after an update: root B mounts, then root A unmounts; taps still work (B)', () => {
+    const global = fakeRouter(); // expo-router's global router: A's unmount unbound it
+    const calls: string[] = [];
+    const nav = createNavQueue(global.r);
+    const detachA = nav.attach(rootRouter('A', calls));
+    nav.attach(rootRouter('B', calls));
+    detachA();
+    nav.push('/say' as never);
+    expect(calls).toEqual(['B push /say']);
+    expect(nav.canGoBack()).toBe(true);
+  });
+
+  it('the newest mounted root is used; when none is attached, the global router', () => {
+    const global = fakeRouter();
+    global.bind(true);
+    const calls: string[] = [];
+    const nav = createNavQueue(global.r);
+    const detachA = nav.attach(rootRouter('A', calls));
+    const detachB = nav.attach(rootRouter('B', calls));
+    nav.push('/1' as never);
+    detachB();
+    nav.push('/2' as never);
+    detachA();
+    nav.push('/3' as never);
+    expect(calls).toEqual(['B push /1', 'A push /2']);
+    expect(global.calls).toEqual(['push /3']);
+  });
+
+  it('a tap that waited runs as soon as a root attaches', () => {
+    const global = fakeRouter();
+    const c = clock();
+    const calls: string[] = [];
+    const nav = createNavQueue(global.r, { now: c.now, setTimer: c.setTimer });
+    nav.push('/cash' as never);
+    expect(nav.pending).toBe(1);
+    nav.attach(rootRouter('A', calls));
+    expect(calls).toEqual(['A push /cash']);
+    expect(nav.pending).toBe(0);
+  });
+
+  it('detaching twice is harmless', () => {
+    const global = fakeRouter();
+    const calls: string[] = [];
+    const nav = createNavQueue(global.r);
+    const detachA = nav.attach(rootRouter('A', calls));
+    nav.attach(rootRouter('B', calls));
+    detachA();
+    detachA();
+    nav.back();
+    expect(calls).toEqual(['B back']);
+  });
+});

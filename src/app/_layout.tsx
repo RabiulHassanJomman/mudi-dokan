@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { Stack, useRootNavigationState } from 'expo-router';
+import { Stack, useRootNavigationState, useRouter } from 'expo-router';
 import { SQLiteProvider, useSQLiteContext } from 'expo-sqlite';
 import { StatusBar } from 'expo-status-bar';
 
@@ -48,10 +48,15 @@ export default function RootLayout() {
   );
 }
 
-/** Tells the nav queue when the root navigator is mounted: taps made before that run then. */
+/**
+ * Tells the nav queue when the root navigator is mounted (taps made before that run then) and
+ * hands it this root's own router: when Android starts a second activity (after an app update),
+ * the old root's unmount unbinds expo-router's global router, but this one keeps working.
+ */
 function NavReady() {
   const key = useRootNavigationState()?.key;
-  useEffect(() => nav.setReady(!!key), [key]);
+  const own = useRouter();
+  useEffect(() => (key ? nav.attach(own) : undefined), [key, own]);
   return null;
 }
 

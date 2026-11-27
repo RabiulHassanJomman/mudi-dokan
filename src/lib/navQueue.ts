@@ -4,6 +4,12 @@
  * first render has finished" while its routing bridge is unbound (cold start, activity
  * re-create, `am start`). Calls made then are queued and run in order once the navigator
  * is ready (setReady) or a retry succeeds. Pure TS: the router and the timer are injected.
+ *
+ * attach(): each mounted app root hands in its own router (expo-router useRouter, bound to
+ * that root), and the newest one still mounted is used. Needed because Android can start a
+ * second activity on top (after an app update it relaunches the app with CLEAR_TASK): root B
+ * mounts, then root A unmounts and its cleanup unbinds expo-router's single global router,
+ * so every later tap would wait and be dropped until the app was restarted.
  */
 
 export interface RouterLike {
@@ -36,6 +42,9 @@ export function createNavQueue<R extends RouterLike>(router: R, opts: NavQueueOp
   let ready = false;
   let timer = false;
   const waiting: { run: () => void; at: number; what: string }[] = [];
+  /** Mounted roots' own routers, oldest first. */
+  const attached: { router: RouterLike }[] = [];
+  const current = (): RouterLike => attached[attached.length - 1]?.router ?? router;
 
   /** Runs queued calls in order; stops at the first that still isn't possible. */
   function flush() {
@@ -89,13 +98,13 @@ export function createNavQueue<R extends RouterLike>(router: R, opts: NavQueueOp
   }
 
   return {
-    push: (href: Parameters<R['push']>[0]) => run(`push ${JSON.stringify(href)}`, () => router.push(href)),
-    replace: (href: Parameters<R['replace']>[0]) => run(`replace ${JSON.stringify(href)}`, () => router.replace(href)),
-    back: () => run('back', () => router.back()),
+    push: (href: Parameters<R['push']>[0]) => run(`push ${JSON.stringify(href)}`, () => current().push(href as never)),
+    replace: (href: Parameters<R['replace']>[0]) => run(`replace ${JSON.stringify(href)}`, () => current().replace(href as never)),
+    back: () => run('back', () => current().back()),
     /** false while the navigator isn't ready. */
     canGoBack: () => {
       try {
-        return router.canGoBack();
+        return current().canGoBack();
       } catch (e) {
         if (isNotReadyError(e)) return false;
         throw e;
@@ -106,6 +115,20 @@ export function createNavQueue<R extends RouterLike>(router: R, opts: NavQueueOp
       if (r !== ready) log(`nav ready ${r}`);
       ready = r;
       if (r) flush();
+    },
+    /** A root mounted with its own router; returns the detach for its unmount (removes only that one). */
+    attach(own: RouterLike): () => void {
+      const entry = { router: own };
+      attached.push(entry);
+      log(`nav attach (${attached.length} mounted)`);
+      ready = true;
+      flush();
+      return () => {
+        const i = attached.indexOf(entry);
+        if (i < 0) return;
+        attached.splice(i, 1);
+        log(`nav detach (${attached.length} mounted)`);
+      };
     },
     get ready() {
       return ready;
