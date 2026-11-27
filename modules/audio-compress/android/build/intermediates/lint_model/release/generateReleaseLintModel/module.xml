@@ -1,6 +1,6 @@
 <lint-module
     format="1"
-    dir="/Users/jomman/Desktop/mudi-dokan/modules/audio-compress/android"
+    dir="/Users/jomman/mudi-dokan/modules/audio-compress/android"
     name=":audio-compress"
     type="LIBRARY"
     maven="expo.modules.audiocompress:audio-compress:1.0.0"

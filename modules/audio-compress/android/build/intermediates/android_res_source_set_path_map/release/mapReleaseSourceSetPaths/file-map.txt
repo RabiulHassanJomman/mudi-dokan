@@ -1,9 +1,9 @@
-expo.modules.audiocompress.audio-compress-pngs-0 /Users/jomman/Desktop/mudi-dokan/modules/audio-compress/android/build/generated/res/pngs/release
-expo.modules.audiocompress.audio-compress-updated_navigation_xml-1 /Users/jomman/Desktop/mudi-dokan/modules/audio-compress/android/build/generated/updated_navigation_xml/release
-expo.modules.audiocompress.audio-compress-mergeReleaseResources-2 /Users/jomman/Desktop/mudi-dokan/modules/audio-compress/android/build/intermediates/incremental/release/mergeReleaseResources/merged.dir
-expo.modules.audiocompress.audio-compress-mergeReleaseResources-3 /Users/jomman/Desktop/mudi-dokan/modules/audio-compress/android/build/intermediates/incremental/release/mergeReleaseResources/stripped.dir
-expo.modules.audiocompress.audio-compress-release-4 /Users/jomman/Desktop/mudi-dokan/modules/audio-compress/android/build/intermediates/merged_res/release/mergeReleaseResources
-expo.modules.audiocompress.audio-compress-release-5 /Users/jomman/Desktop/mudi-dokan/modules/audio-compress/android/build/intermediates/packaged_res/release/packageReleaseResources
-expo.modules.audiocompress.audio-compress-main-6 /Users/jomman/Desktop/mudi-dokan/modules/audio-compress/android/src/main/res
-expo.modules.audiocompress.audio-compress-release-7 /Users/jomman/Desktop/mudi-dokan/modules/audio-compress/android/src/release/res
+expo.modules.audiocompress.audio-compress-pngs-0 /Users/jomman/mudi-dokan/modules/audio-compress/android/build/generated/res/pngs/release
+expo.modules.audiocompress.audio-compress-updated_navigation_xml-1 /Users/jomman/mudi-dokan/modules/audio-compress/android/build/generated/updated_navigation_xml/release
+expo.modules.audiocompress.audio-compress-mergeReleaseResources-2 /Users/jomman/mudi-dokan/modules/audio-compress/android/build/intermediates/incremental/release/mergeReleaseResources/merged.dir
+expo.modules.audiocompress.audio-compress-mergeReleaseResources-3 /Users/jomman/mudi-dokan/modules/audio-compress/android/build/intermediates/incremental/release/mergeReleaseResources/stripped.dir
+expo.modules.audiocompress.audio-compress-release-4 /Users/jomman/mudi-dokan/modules/audio-compress/android/build/intermediates/merged_res/release/mergeReleaseResources
+expo.modules.audiocompress.audio-compress-release-5 /Users/jomman/mudi-dokan/modules/audio-compress/android/build/intermediates/packaged_res/release/packageReleaseResources
+expo.modules.audiocompress.audio-compress-main-6 /Users/jomman/mudi-dokan/modules/audio-compress/android/src/main/res
+expo.modules.audiocompress.audio-compress-release-7 /Users/jomman/mudi-dokan/modules/audio-compress/android/src/release/res
 gradleHome-0 /Users/jomman/.gradle
