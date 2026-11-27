@@ -6,6 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Icon } from '../components/Icon';
 import { Txt } from '../components/Txt';
 import { nav } from '../lib/nav';
+import { speak, stopSpeaking } from '../lib/speak';
 import { colors, fontSize, radius, size, spacing } from '../theme/tokens';
 
 const SAMPLE = 'চাল দুই কেজি, একশো কুড়ি টাকা। ঠিক আছে?';
@@ -23,9 +24,11 @@ export default function VoiceTestScreen() {
     };
   }, []);
 
+  /** No voice: the app's own (lib/speak, domain/voice). */
   const play = (v?: Speech.Voice) => {
-    Speech.stop();
-    Speech.speak(SAMPLE, { language: 'bn-BD', rate: 0.95, ...(v ? { voice: v.identifier } : {}) });
+    if (!v) return void speak(SAMPLE);
+    stopSpeaking();
+    Speech.speak(SAMPLE, { language: 'bn-BD', rate: 0.95, voice: v.identifier });
   };
 
   return (
@@ -41,7 +44,7 @@ export default function VoiceTestScreen() {
       <ScrollView contentContainerStyle={styles.body}>
         <Pressable accessibilityRole="button" onPress={() => play()} style={styles.card}>
           <Txt size={fontSize.label} weight="bold">
-            🔊 এখনকার ডিফল্ট (bn-BD)
+            🔊 অ্যাপের ভয়েস
           </Txt>
         </Pressable>
         {voices === null ? (
