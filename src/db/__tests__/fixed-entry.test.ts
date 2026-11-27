@@ -25,7 +25,7 @@ async function draftOf(db: TestDb, said: string) {
 async function say(p: Phone, said: string, newCustomer = false) {
   let d = (await draftOf(p.db, said))!;
   if (newCustomer) d = withEntryCustomer(d, d.customerName!, true);
-  const log = await createVoiceLog(p.db, p.w, { transcript: said, source: 'voice', contextTab: 'sale', engine: 'android' });
+  const log = await createVoiceLog(p.db, p.w, { transcript: said, source: 'voice', contextTab: 'sale' });
   return saveEntry(p.db, p.w, d, log, []);
 }
 

@@ -52,7 +52,6 @@ export const typeName = (f: WipeFlow, typed: string): WipeFlow => ({ ...f, typed
 
 /** Progress of the press-and-hold, 0..1; releasing early starts over. */
 export const holdProgress = (heldMs: number): number => Math.max(0, Math.min(1, heldMs / HOLD_MS));
-export const holdDone = (heldMs: number): boolean => heldMs >= HOLD_MS;
 
 export interface Counts {
   entries: number;

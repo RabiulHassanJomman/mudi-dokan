@@ -1,4 +1,4 @@
-import { FALLBACK_WORD, HOLD_MS, START, chooseScope, finalWarning, holdDone, holdProgress, nameMatches, step, typeName, wordToType, type WipeFlow } from '../flow';
+import { FALLBACK_WORD, HOLD_MS, START, chooseScope, finalWarning, holdProgress, nameMatches, step, typeName, wordToType, type WipeFlow } from '../flow';
 
 const SHOP = 'রহিম স্টোর';
 const done = (over: Partial<WipeFlow> = {}): WipeFlow => ({ scope: 'phone', backedUp: true, typed: SHOP, held: true, confirmed: true, ...over });
@@ -34,8 +34,6 @@ describe('wipe flow', () => {
 
   it('the hold is 5 seconds; letting go early starts over', () => {
     expect(HOLD_MS).toBe(5000);
-    expect(holdDone(4999)).toBe(false);
-    expect(holdDone(5000)).toBe(true);
     expect(holdProgress(0)).toBe(0);
     expect(holdProgress(2500)).toBe(0.5);
     expect(holdProgress(9000)).toBe(1);

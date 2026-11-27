@@ -195,11 +195,11 @@ export default function SayScreen() {
       // file (that took ~1.7 s): the card doesn't need it, and the upload waits QUEUE_DELAY_MS
       const audioPath = words ? null : (clip.current?.uri ?? null);
       if (audioPath) clip.current = null; // the log owns it now
-      const logId = await createVoiceLog(db, w, { transcript: said, source: 'voice', contextTab: tabParam, engine: 'android', audioPath });
+      const logId = await createVoiceLog(db, w, { transcript: said, source: 'voice', contextTab: tabParam, audioPath });
       if (words) {
         // the clip stays until a new try or leaving: fixed by keyboard, it still goes with the entry
         // kept in the debug log: what was heard and what was missing
-        await setParsed(db, w, logId, fixedAsParsed(cmd), { by: 'android' });
+        await setParsed(db, w, logId, fixedAsParsed(cmd));
         await setOutcome(db, w, logId, 'unsupported');
         showProblem(words);
         return;

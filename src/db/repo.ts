@@ -256,18 +256,12 @@ export interface NewVoiceLog {
   transcript: string;
   source: 'voice' | 'typed';
   contextTab: string;
-  alternatives?: string[];
   audioPath?: string | null;
   parsed?: ParsedCommand | null;
   sttError?: string | null;
   /** 'pick' = chosen on ছবি দেখে (no speech, no parser): left out of the accuracy. */
   via?: 'pick';
-  /** Voice only: 'android' = said with the Ridmik keyboard. */
-  engine?: 'android';
 }
-
-/** Stored engine; 'gemini' / 'both' only on logs made before Gemini was removed (Nov 27). */
-export type Engine = 'android' | 'gemini' | 'both';
 
 export async function createVoiceLog(db: Db, w: Writer, v: NewVoiceLog): Promise<string> {
   const id = w.newId();
@@ -280,11 +274,9 @@ export async function createVoiceLog(db: Db, w: Writer, v: NewVoiceLog): Promise
     audio_status: v.audioPath ? 'local' : 'none',
     source: v.source,
     context_tab: v.contextTab,
-    alternatives_json: v.alternatives?.length ? JSON.stringify(v.alternatives) : null,
     stt_error: v.sttError ?? null,
     outcome: v.sttError ? 'stt_error' : 'pending',
     via: v.via ?? null,
-    engine: v.engine ?? null,
     device_name: w.deviceName,
     ...cols,
   });
@@ -301,55 +293,29 @@ export interface VoiceLogRow {
   context_tab: string | null;
   parsed_json: string | null;
   audio_path: string | null;
-  alternatives_json: string | null;
   stt_error: string | null;
   outcome: Outcome;
   edits_json: string | null;
   final_json: string | null;
   entry_table: string | null;
   entry_id: string | null;
-  /** Pilot reviewer: 1 = STT heard it right, 0 = wrong, null = not checked. */
-  stt_ok: number | null;
   /** 'pick' = ছবি দেখে বেছে নেওয়া; null = voice or typed. */
   via: 'pick' | null;
   /** Parsed intent, replaced by the confirmed one on save. */
   intent: string | null;
-  /** v7 (Gemini experiment, removed Nov 27): columns kept; old logs may still have them filled. */
-  engine: Engine | null;
-  parsed_by: 'android' | 'gemini' | null;
-  android_json: string | null;
-  gemini_json: string | null;
-  gemini_transcript: string | null;
-  gemini_error: string | null;
-  gemini_model: string | null;
-  gemini_ms: number | null;
-  gemini_prompt_tokens: number | null;
-  gemini_audio_tokens: number | null;
-  gemini_output_tokens: number | null;
-  gemini_thought_tokens: number | null;
+  /* v7 Gemini columns (engine, parsed_by, android_json, gemini_*, removed Nov 27) stay in the table, unused. */
   created_at: number;
 }
 
 export const getVoiceLog = (db: Db, id: string) =>
   db.getFirstAsync<VoiceLogRow>('SELECT * FROM voice_logs WHERE id = ?', id);
 
-/**
- * parsed = what the confirm card shows; `by` = who read it ('android' = the fixed formats).
- */
-export async function setParsed(
-  db: Db,
-  w: Writer,
-  id: string,
-  parsed: ParsedCommand,
-  extra: { by?: 'android'; android?: ParsedCommand | null } = {},
-): Promise<void> {
+/** parsed = what the confirm card shows. */
+export async function setParsed(db: Db, w: Writer, id: string, parsed: ParsedCommand): Promise<void> {
   await db.runAsync(
-    `UPDATE voice_logs SET parsed_json = ?, intent = ?, parsed_by = COALESCE(?, parsed_by),
-       android_json = COALESCE(?, android_json), updated_at = ? WHERE id = ?`,
+    'UPDATE voice_logs SET parsed_json = ?, intent = ?, updated_at = ? WHERE id = ?',
     JSON.stringify(parsed),
     parsed.intent,
-    extra.by ?? null,
-    extra.android ? JSON.stringify(extra.android) : null,
     w.now(),
     id,
   );
@@ -376,8 +342,6 @@ export async function setOutcome(
     w.now(),
     id,
   );
-  // decided (saved or discarded): no longer waiting to be understood / confirmed
-  await db.runAsync('DELETE FROM understand_queue WHERE voice_log_id = ?', id);
 }
 
 /**

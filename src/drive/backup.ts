@@ -66,7 +66,6 @@ export async function exportBackup(db: Db, by: { deviceId: string; deviceName: s
 }
 
 /** Row count per table (the restore sheet reads the total). */
-export const backupCounts = (b: BackupFile) => Object.fromEntries(Object.entries(b.tables).map(([t, rows]) => [t, rows.length]));
 
 export type ParseResult = { ok: true; backup: BackupFile } | { ok: false; reason: 'not_backup' | 'newer_app' };
 

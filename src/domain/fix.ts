@@ -4,9 +4,9 @@
  * original is never changed. Pure TS. Money in poisha.
  */
 import type { Unit } from '../parser/types';
-import { canSave, type BasketDraft, type ItemDraft, type ProductInfo } from './basket';
+import { type BasketDraft, type ItemDraft, type ProductInfo } from './basket';
 import { customerStatus } from './customers';
-import { canSaveEntry, type EntryDraft, type EntryKind } from './entry';
+import { type EntryDraft, type EntryKind } from './entry';
 
 /** One effective line of a saved basket (latest version, not voided). */
 export interface StoredSaleLine {
@@ -113,6 +113,3 @@ export function entryFromStored(s: StoredEntry): EntryDraft {
   };
   return d;
 }
-
-/** A fix can be saved when the card is complete (same rules as a new entry). */
-export const canSaveFix = (d: BasketDraft | EntryDraft): boolean => ('items' in d ? canSave(d) : canSaveEntry(d));

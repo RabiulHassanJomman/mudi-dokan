@@ -47,12 +47,12 @@ describe('navQueue: no crash before the navigator is mounted', () => {
     expect(nav.pending).toBe(2);
     expect(nav.canGoBack()).toBe(false);
     f.bind(true);
-    nav.setReady(true);
+    nav.attach(f.r);
     expect(f.calls).toEqual(['push /cash', 'replace /history']);
     expect(nav.pending).toBe(0);
   });
 
-  it('the retry timer runs it even without setReady', () => {
+  it('the retry timer runs it even without an attach', () => {
     const f = fakeRouter();
     const c = clock();
     const nav = createNavQueue(f.r, { now: c.now, setTimer: c.setTimer, retryMs: 100 });
@@ -71,7 +71,7 @@ describe('navQueue: no crash before the navigator is mounted', () => {
     nav.push('/cash' as never);
     for (let i = 0; i < 5; i++) c.advance(100);
     f.bind(true);
-    nav.setReady(true);
+    nav.attach(f.r);
     expect(f.calls).toEqual([]);
     expect(nav.pending).toBe(0);
   });
@@ -95,14 +95,6 @@ describe('navQueue: what it logs (to find the stuck-after-install bug)', () => {
     expect(log).toEqual(['nav push "/say"', 'nav waiting: router not ready', 'nav dropped after 400 ms: push "/say"']);
   });
 
-  it('ready changes are logged', () => {
-    const f = fakeRouter();
-    const log: string[] = [];
-    const nav = createNavQueue(f.r, { log: (m) => log.push(m) });
-    nav.setReady(true);
-    nav.setReady(false);
-    expect(log).toEqual(['nav ready true', 'nav ready false']);
-  });
 });
 
 describe('navQueue: each mounted app root brings its own router (attach)', () => {

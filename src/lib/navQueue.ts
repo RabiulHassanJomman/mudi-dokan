@@ -3,7 +3,7 @@
  * expo-router's global `router` throws "The imperative router is unavailable before the
  * first render has finished" while its routing bridge is unbound (cold start, activity
  * re-create, `am start`). Calls made then are queued and run in order once the navigator
- * is ready (setReady) or a retry succeeds. Pure TS: the router and the timer are injected.
+ * is ready (a root attaches) or a retry succeeds. Pure TS: the router and the timer are injected.
  *
  * attach(): each mounted app root hands in its own router (expo-router useRouter, bound to
  * that root), and the newest one still mounted is used. Needed because Android can start a
@@ -109,12 +109,6 @@ export function createNavQueue<R extends RouterLike>(router: R, opts: NavQueueOp
         if (isNotReadyError(e)) return false;
         throw e;
       }
-    },
-    /** The root navigator mounted (useRootNavigationState has a key): run what waited. */
-    setReady(r: boolean) {
-      if (r !== ready) log(`nav ready ${r}`);
-      ready = r;
-      if (r) flush();
     },
     /** A root mounted with its own router; returns the detach for its unmount (removes only that one). */
     attach(own: RouterLike): () => void {

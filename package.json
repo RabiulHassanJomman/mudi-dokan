@@ -9,8 +9,7 @@
     "apk": "expo prebuild -p android --no-install && (cd android && ANDROID_HOME=${ANDROID_HOME:-$HOME/Library/Android/sdk} ./gradlew assembleRelease)",
     "test": "jest",
     "typecheck": "tsc --noEmit",
-    "doctor": "expo-doctor",
-    "eval:import": "tsx scripts/eval-import.ts"
+    "doctor": "expo-doctor"
   },
   "devDependencies": {
     "@types/jest": "^30.0.0",

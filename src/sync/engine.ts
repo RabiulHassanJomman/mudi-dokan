@@ -491,8 +491,7 @@ export class SyncEngine {
           ...vals,
         );
       }
-    } catch (e) {
-      if (__DEV_LOG__) console.warn(`sync: ${t.name} ${id} waits`, e);
+    } catch {
       return false;
     }
     const mine = await this.db.getFirstAsync<{ updated_at: number; device_id: string }>(
@@ -514,12 +513,6 @@ export class SyncEngine {
     return true;
   }
 }
-
-/** Set to true to log rows that wait in the inbox. */
-let __DEV_LOG__ = false;
-export const setSyncDebug = (on: boolean) => {
-  __DEV_LOG__ = on;
-};
 
 function toDoc(t: SyncTable, r: Record<string, Bind>): DocData {
   const d: DocData = {};
