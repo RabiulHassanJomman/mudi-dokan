@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { File, Paths } from 'expo-file-system';
+import { useAudioPlayer } from 'expo-audio';
 import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-speech-recognition';
 
 import { Icon } from '../components/Icon';
@@ -12,6 +13,7 @@ import { Txt } from '../components/Txt';
 import { createVoiceLog, customerAliasMap, customerByName, knownNames, productAliasMap, setOutcome, setParsed } from '../db/repo';
 import { writer } from '../device';
 import { fixedAsParsed } from '../domain/entry';
+import { joinWav } from '../domain/wav';
 import { EXAMPLE_BN, LOOKUP_EXAMPLE_BN, clipUri, customerLookup, fixedProblemWords, heardErrorWords, joinPieces, readKeyboardText } from '../domain/keyboard';
 import { nav } from '../lib/nav';
 import { speak, stopSpeaking } from '../lib/speak';
@@ -24,7 +26,8 @@ type Tab = keyof typeof EXAMPLE_BN;
  * the same one the Ridmik keyboard's mic uses). When the speaker stops, the text goes to the
  * confirm card; if something is missing it is said, and the text stays to see or fix by
  * keyboard (the clip is kept for it). 🎤 starts over (clears the text and its clip). Tapping the text box opens the keyboard
- * (Ridmik's mic still works there).
+ * (Ridmik's mic still works there). A beep says the mic is open. বিরতি stops listening without
+ * going to the card; চালিয়ে যান listens on and adds to the same text (the parts' WAVs are joined).
  * The clip (WAV, Android 13+) goes with the voice log → Drive; a command not understood
  * keeps none. Cancelled ones are dropped by the upload queue and deleted by retention.
  */
@@ -39,6 +42,12 @@ export default function SayScreen() {
   const [problem, setProblem] = useState('');
   const [busy, setBusy] = useState(false);
   const [listening, setListening] = useState(false);
+  /** বিরতি: stopped, the text kept, not sent; চালিয়ে যান listens on. */
+  const [paused, setPaused] = useState(false);
+  const pausedRef = useRef(false);
+  /** Final pieces from before this listen (চালিয়ে যান): "nothing heard yet" counts only this listen's. */
+  const piecesBefore = useRef(0);
+  const beep = useAudioPlayer(BEEP);
   const scroll = useRef<React.ComponentRef<typeof ScrollView>>(null);
   const input = useRef<React.ComponentRef<typeof TextInput>>(null);
   const listeningRef = useRef(false);
@@ -53,8 +62,11 @@ export default function SayScreen() {
    */
   const pieces = useRef<string[]>([]);
   const leaving = useRef(false);
-  /** This listen's recording: its file (known at start), whether the recorder has closed it, waiters for that. */
-  const clip = useRef<{ uri: string | null; ended: boolean; waiters: (() => void)[] } | null>(null);
+  /**
+   * This sentence's recordings, one per listen (more after চালিয়ে যান): each file (known at start),
+   * whether the recorder has closed it, waiters for that. The last one is the listen going on.
+   */
+  const clips = useRef<NonNullable<Clip>[]>([]);
 
   const intro = `${customer ? `${customer}। ` : ''}মাইক চেপে বলুন। যেমন: ${examples.join('। অথবা: ')}।`;
 
@@ -70,13 +82,27 @@ export default function SayScreen() {
     if (why !== 'quiet') quietRetries.current = 0;
     starting.current = true;
     try {
-      await startListening();
+      // the mic is open after the beep (not on the quiet restarts): start speaking then
+      if (why !== 'quiet') await playBeep();
+      await startListening(why === 'quiet' ? 'retry' : why === 'resume' ? 'more' : 'fresh');
     } finally {
       starting.current = false;
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function startListening() {
+  async function playBeep() {
+    try {
+      stopSpeaking();
+      beep.seekTo(0);
+      beep.play();
+      await new Promise((r) => setTimeout(r, BEEP_MS));
+    } catch {
+      // no beep: listen anyway
+    }
+  }
+
+  /** fresh = a new sentence; more = চালিয়ে যান (keep the text and parts); retry = quiet restart (its silent part goes). */
+  async function startListening(mode: 'fresh' | 'more' | 'retry') {
     stopSpeaking();
     input.current?.blur();
     const perm = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
@@ -85,14 +111,23 @@ export default function SayScreen() {
       return;
     }
     if (leaving.current) return;
-    // a new try starts clean: the old text and its clip go
-    dropClip(clip.current);
+    if (mode === 'fresh') {
+      // a new try starts clean: the old text and its clips go
+      clips.current.forEach(dropClip);
+      clips.current = [];
+      setText('');
+      pieces.current = [];
+    } else if (mode === 'retry') {
+      // the quiet part heard nothing: its file goes, the earlier parts stay
+      dropClip(clips.current.pop() ?? null);
+    }
+    piecesBefore.current = pieces.current.length;
+    pausedRef.current = false;
+    setPaused(false);
     const name = `voice_${Date.now()}.wav`;
     // the library writes it at file:// + folder + name; Android 12 and older record nothing
-    clip.current = { uri: CAN_RECORD ? clipUri(Paths.document.uri, name) : null, ended: false, waiters: [] };
-    setText('');
+    clips.current.push({ uri: CAN_RECORD ? clipUri(Paths.document.uri, name) : null, ended: false, waiters: [] });
     setProblem('');
-    pieces.current = [];
     listeningRef.current = true;
     setListening(true);
     ExpoSpeechRecognitionModule.start({
@@ -110,6 +145,14 @@ export default function SayScreen() {
     ExpoSpeechRecognitionModule.stop();
   }, []);
 
+  /** বিরতি: stop listening; the text stays and nothing goes to the card ('end' sees pausedRef). */
+  const pause = () => {
+    if (!listeningRef.current) return;
+    pausedRef.current = true;
+    setPaused(true);
+    ExpoSpeechRecognitionModule.stop();
+  };
+
   useSpeechRecognitionEvent('result', (e) => {
     if (!listeningRef.current) return;
     const heard = (e.results[0]?.transcript ?? '').trim();
@@ -118,7 +161,7 @@ export default function SayScreen() {
       const said = joinPieces(pieces.current);
       setText(said);
       // complete already: to the card now, no wait for the end of listening (~2 s); else wait for the rest
-      if (said && !fixedProblemWords(readKeyboardText(said, {}, { customer }, {}))) {
+      if (said && !pausedRef.current && !fixedProblemWords(readKeyboardText(said, {}, { customer }, {}))) {
         listeningRef.current = false;
         setListening(false);
         pieces.current = [];
@@ -130,16 +173,19 @@ export default function SayScreen() {
     }
   });
   useSpeechRecognitionEvent('audioend', (e) => {
-    const c = clip.current;
-    if (!c || c.ended) return;
+    // the recorder closes the parts in order
+    const c = clips.current.find((x) => !x.ended);
+    if (!c) return;
     c.uri = e.uri ?? c.uri;
     c.ended = true;
     for (const w of c.waiters.splice(0)) w();
   });
   useSpeechRecognitionEvent('error', (e) => {
     if (!listeningRef.current) return;
-    // something was heard already: 'end' sends it
-    if (pieces.current.length) return;
+    // বিরতি: 'end' keeps the text
+    if (pausedRef.current) return;
+    // something was heard in this listen: 'end' sends it
+    if (pieces.current.length > piecesBefore.current) return;
     listeningRef.current = false;
     // nothing said yet: listen again quietly, so a slow start still works
     if (e.error === 'no-speech' && quietRetries.current < QUIET_RETRIES && !leaving.current) {
@@ -148,14 +194,26 @@ export default function SayScreen() {
       return;
     }
     setListening(false);
+    // after চালিয়ে যান nothing more was said: back to বিরতি, the earlier text kept
+    if (pieces.current.length) {
+      dropClip(clips.current.pop() ?? null);
+      pausedRef.current = true;
+      setPaused(true);
+      return;
+    }
     showProblem(heardErrorWords(e.error));
   });
   useSpeechRecognitionEvent('end', () => {
     const wasOn = listeningRef.current;
     listeningRef.current = false;
     setListening(false);
-    // listening is over: the whole sentence goes to the card
     const said = joinPieces(pieces.current);
+    // বিরতি: keep the pieces for চালিয়ে যান, nothing goes to the card
+    if (pausedRef.current) {
+      setText(said);
+      return;
+    }
+    // listening is over: the whole sentence goes to the card
     pieces.current = [];
     if (wasOn && said) void done(said);
   });
@@ -168,9 +226,9 @@ export default function SayScreen() {
       clearTimeout(t);
       if (listeningRef.current) ExpoSpeechRecognitionModule.abort();
       stopSpeaking();
-      // left without a saved command: the clip isn't kept (one handed to a log is null here)
-      dropClip(clip.current);
-      clip.current = null;
+      // left without a saved command: the clips aren't kept (ones handed to a log are gone from here)
+      clips.current.forEach(dropClip);
+      clips.current = [];
     };
   }, [listen]);
 
@@ -195,8 +253,7 @@ export default function SayScreen() {
       const words = fixedProblemWords(cmd);
       // only a command that goes to the card keeps its clip; no wait for the recorder to close the
       // file (that took ~1.7 s): the card doesn't need it, and the upload waits QUEUE_DELAY_MS
-      const audioPath = words ? null : (clip.current?.uri ?? null);
-      if (audioPath) clip.current = null; // the log owns it now
+      const audioPath = words ? null : await oneClip();
       const logId = await createVoiceLog(db, w, { transcript: said, source: 'voice', contextTab: tabParam, audioPath });
       const lookup = words && canLookup ? customerLookup(said, names.customers, aliases) : null;
       const found = lookup ? await customerByName(db, lookup) : null;
@@ -227,8 +284,36 @@ export default function SayScreen() {
     }
   }
 
+  /**
+   * The sentence's recording for its log (the log owns it then). One part: its file at once (no wait
+   * for the recorder, ~1.7 s; the upload waits QUEUE_DELAY_MS). Parts from চালিয়ে যান: wait until
+   * each is closed, join them into the first file.
+   */
+  async function oneClip(): Promise<string | null> {
+    const parts = clips.current.filter((c) => c.uri);
+    clips.current = [];
+    const first = parts[0];
+    if (!first?.uri) return null;
+    if (parts.length === 1) return first.uri;
+    try {
+      await Promise.all(parts.map((c) => (c.ended ? null : new Promise<void>((r) => c.waiters.push(r)))));
+      const bytes = await Promise.all(parts.map((c) => new File(c.uri!).bytes().catch(() => new Uint8Array())));
+      const joined = joinWav(bytes);
+      if (joined) new File(first.uri).write(joined);
+      for (const c of parts.slice(1)) dropClip(c);
+    } catch (e) {
+      console.warn('joining the recording failed', e);
+    }
+    return first.uri;
+  }
+
   const clear = () => {
     stopListening();
+    pausedRef.current = false;
+    setPaused(false);
+    pieces.current = [];
+    clips.current.forEach(dropClip);
+    clips.current = [];
     setText('');
     setProblem('');
   };
@@ -291,6 +376,14 @@ export default function SayScreen() {
         </ScrollView>
 
         <View style={styles.actions}>
+          {listening && (
+            <Pressable accessibilityRole="button" accessibilityLabel="বিরতি" onPress={pause} style={({ pressed }) => [styles.pause, pressed && styles.pressed]}>
+              <Icon name="pause" size={30} color={colors.ink} />
+              <Txt size={fontSize.caption} weight="bold">
+                বিরতি
+              </Txt>
+            </Pressable>
+          )}
           {!!text && !listening && (
             <Pressable accessibilityRole="button" accessibilityLabel="মুছে আবার বলুন" onPress={clear} style={({ pressed }) => [styles.clear, pressed && styles.pressed]}>
               <Icon name="close" size={30} color={colors.ink} strokeWidth={2.6} />
@@ -298,13 +391,13 @@ export default function SayScreen() {
           )}
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={listening ? 'থামুন' : 'মাইক চেপে বলুন'}
-            onPress={() => (listening ? stopListening() : void listen('tap'))}
+            accessibilityLabel={listening ? 'থামুন' : paused ? 'চালিয়ে যান' : 'মাইক চেপে বলুন'}
+            onPress={() => (listening ? stopListening() : void listen(paused ? 'resume' : 'tap'))}
             style={({ pressed }) => [styles.mic, listening && styles.micOn, pressed && styles.pressed]}
           >
-            <Icon name="mic" size={34} color={listening ? colors.onColor : colors.saleDark} strokeWidth={2.4} />
-            <Txt size={fontSize.button} weight="bold" color={listening ? colors.onColor : colors.saleDark}>
-              {listening ? 'থামুন' : 'বলুন'}
+            <Icon name={paused && !listening ? 'play' : 'mic'} size={paused && !listening ? 28 : 34} color={listening ? colors.onColor : colors.saleDark} strokeWidth={2.4} />
+            <Txt size={paused && !listening ? fontSize.label : fontSize.button} weight="bold" color={listening ? colors.onColor : colors.saleDark}>
+              {listening ? 'থামুন' : paused ? 'চালিয়ে যান' : 'বলুন'}
             </Txt>
           </Pressable>
           {!!text && !listening && (
@@ -373,6 +466,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: spacing.xs,
   },
+  pause: { width: 72, height: 72, borderRadius: radius.button, backgroundColor: colors.surface, borderWidth: 2, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
   micOn: { backgroundColor: colors.baki, borderColor: colors.baki },
   done: { flex: 1, height: 72, borderRadius: radius.button, backgroundColor: colors.sale, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm },
   disabled: { opacity: 0.5 },
@@ -384,6 +478,10 @@ const styles = StyleSheet.create({
  * (overriding it made Google miss speech): nothing heard → listen again quietly, this many times.
  */
 const QUIET_RETRIES = 3;
+
+/** "Speak now": played before each listen (not the quiet restarts), which starts when it is over. */
+const BEEP = require('../../assets/sounds/beep.wav') as number; // eslint-disable-line @typescript-eslint/no-require-imports
+const BEEP_MS = 220;
 
 type Clip = { uri: string | null; ended: boolean; waiters: (() => void)[] } | null;
 

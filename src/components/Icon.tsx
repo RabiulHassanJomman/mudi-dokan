@@ -3,7 +3,7 @@ import Svg, { Circle, Path, Rect } from 'react-native-svg';
 /** Stroke icons from the design (24×24 viewBox, round caps). */
 export type IconName =
   | 'cart' | 'box' | 'book' | 'speaker' | 'mic' | 'keyboard'
-  | 'back' | 'plus' | 'minus' | 'check' | 'close' | 'cash' | 'play' | 'list'
+  | 'back' | 'plus' | 'minus' | 'check' | 'close' | 'cash' | 'play' | 'pause' | 'list'
   | 'settings' | 'keypad' | 'arrow' | 'search' | 'image' | 'phone' | 'person' | 'alert'
   // step 5: cash card, ✏️ fix, day picker, cash out
   | 'wallet' | 'edit' | 'forward' | 'up' | 'equals' | 'undo'
@@ -92,6 +92,7 @@ export function Icon({ name, size = 24, color, strokeWidth = 1.8 }: Props) {
         </>
       )}
       {name === 'play' && <Path d="M8 5v14l11-7z" fill={color} />}
+      {name === 'pause' && <Path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z" fill={color} />}
       {name === 'list' && <Path {...p} d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />}
       {PRODUCT_PATHS[name] && <Path {...p} d={PRODUCT_PATHS[name]} />}
       {name === 'settings' && (
