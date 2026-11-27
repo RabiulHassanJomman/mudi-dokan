@@ -42,6 +42,8 @@ export default function SayScreen() {
   const listeningRef = useRef(false);
   /** Between the tap and start(): a second call must not start the recognizer again (it cuts off the first). */
   const starting = useRef(false);
+  /** Silent restarts after nothing was heard (recording mode gives up after ~2 s of silence). */
+  const quietRetries = useRef(0);
   const leaving = useRef(false);
   /** This listen's recording: its file once audioend says so; waiters for it. */
   const clip = useRef<{ uri: string | null; ended: boolean; waiters: (() => void)[] } | null>(null);
@@ -57,6 +59,7 @@ export default function SayScreen() {
   const listen = useCallback(async (why: string) => {
     console.log(`MUDI_SAY listen ${why}${listeningRef.current || starting.current ? ' (already on)' : ''}`);
     if (listeningRef.current || starting.current || leaving.current) return;
+    if (why !== 'quiet') quietRetries.current = 0;
     starting.current = true;
     try {
       await startListening();
@@ -116,6 +119,12 @@ export default function SayScreen() {
   useSpeechRecognitionEvent('error', (e) => {
     if (!listeningRef.current) return;
     listeningRef.current = false;
+    // nothing said yet: listen again quietly, so a slow start still works
+    if (e.error === 'no-speech' && quietRetries.current < QUIET_RETRIES && !leaving.current) {
+      quietRetries.current++;
+      setTimeout(() => void listen('quiet'), 50);
+      return;
+    }
     setListening(false);
     showProblem(heardErrorWords(e.error));
   });
@@ -331,6 +340,12 @@ const styles = StyleSheet.create({
   disabled: { opacity: 0.5 },
   pressed: { opacity: 0.85 },
 });
+
+/**
+ * While recording, the library ends a listen after 2 s of silence, also before any speech
+ * (overriding it made Google miss speech): nothing heard → listen again quietly, this many times.
+ */
+const QUIET_RETRIES = 3;
 
 type Clip = { uri: string | null; ended: boolean; waiters: (() => void)[] } | null;
 
