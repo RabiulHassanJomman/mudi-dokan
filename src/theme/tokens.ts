@@ -63,12 +63,11 @@ export const noteChips = [
 ] as const;
 
 /**
- * Hind Siliguri, embedded by the expo-font config plugin (app.json).
+ * Hind Siliguri, embedded by the expo-font config plugin (app.json); 400 isn't embedded (unused).
  * On Android the family name is the file name, one family per weight —
  * use these instead of `fontWeight`.
  */
 export const fonts = {
-  regular: 'HindSiliguri_400Regular',
   medium: 'HindSiliguri_500Medium',
   semibold: 'HindSiliguri_600SemiBold',
   bold: 'HindSiliguri_700Bold',
@@ -77,10 +76,9 @@ export const fonts = {
 /**
  * Numbers only: Noto Sans Bengali. Hind Siliguri's ১ is a hook that reads like a letter; in Noto
  * it has a long tail and the digits are spaced apart (compared with Baloo Da 2, Tiro Bangla,
- * Anek Bangla on the font test screen). Text stays Hind Siliguri; <Num> switches per run.
+ * Anek Bangla in Nov; those were removed from the APK). Text stays Hind Siliguri; <Num> switches per run.
  */
 export const numFonts = {
-  regular: 'NotoSansBengali_400Regular',
   medium: 'NotoSansBengali_500Medium',
   semibold: 'NotoSansBengali_600SemiBold',
   bold: 'NotoSansBengali_700Bold',

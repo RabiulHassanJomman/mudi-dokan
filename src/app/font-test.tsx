@@ -9,13 +9,10 @@ import { colors, fontSize, radius, size, spacing } from '../theme/tokens';
 const DIGITS = '১২৩৪৫৬৭৮৯০';
 const SAMPLE = '৳ ১১১ · ১০১ · ৭১১ · ৩,১২০ · ২.৫ · ৫০০ · ৬৯৮';
 
-/** Hidden (⚙ › ডিবাগ লগ › ফন্ট): the digits in each candidate font, the way the phone draws them. */
+/** Hidden (⚙ › ডিবাগ লগ › ফন্ট): the digits in the app's two fonts, the way the phone draws them. */
 const CANDIDATES = [
   { name: 'Hind Siliguri (আগে)', family: 'HindSiliguri_700Bold' },
   { name: 'Noto Sans Bengali ✔ বাছা', family: 'NotoSansBengali_700Bold' },
-  { name: 'Baloo Da 2', family: 'BalooDa2_700Bold' },
-  { name: 'Tiro Bangla', family: 'TiroBangla_400Regular' },
-  { name: 'Anek Bangla', family: 'AnekBangla_700Bold' },
 ] as const;
 
 export default function FontTestScreen() {

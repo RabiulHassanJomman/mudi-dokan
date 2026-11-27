@@ -29,17 +29,12 @@
         "expo-font",
         {
           "fonts": [
-            "./node_modules/@expo-google-fonts/hind-siliguri/400Regular/HindSiliguri_400Regular.ttf",
             "./node_modules/@expo-google-fonts/hind-siliguri/500Medium/HindSiliguri_500Medium.ttf",
             "./node_modules/@expo-google-fonts/hind-siliguri/600SemiBold/HindSiliguri_600SemiBold.ttf",
             "./node_modules/@expo-google-fonts/hind-siliguri/700Bold/HindSiliguri_700Bold.ttf",
-            "./node_modules/@expo-google-fonts/noto-sans-bengali/400Regular/NotoSansBengali_400Regular.ttf",
             "./node_modules/@expo-google-fonts/noto-sans-bengali/500Medium/NotoSansBengali_500Medium.ttf",
             "./node_modules/@expo-google-fonts/noto-sans-bengali/600SemiBold/NotoSansBengali_600SemiBold.ttf",
-            "./node_modules/@expo-google-fonts/noto-sans-bengali/700Bold/NotoSansBengali_700Bold.ttf",
-            "./node_modules/@expo-google-fonts/baloo-da-2/700Bold/BalooDa2_700Bold.ttf",
-            "./node_modules/@expo-google-fonts/tiro-bangla/400Regular/TiroBangla_400Regular.ttf",
-            "./node_modules/@expo-google-fonts/anek-bangla/700Bold/AnekBangla_700Bold.ttf"
+            "./node_modules/@expo-google-fonts/noto-sans-bengali/700Bold/NotoSansBengali_700Bold.ttf"
           ]
         }
       ],
