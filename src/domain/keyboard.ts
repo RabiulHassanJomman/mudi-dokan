@@ -137,3 +137,7 @@ export function heardErrorWords(code: string): string {
  * file:// and trailing /, then /name), as the file:// uri its audioend event reports.
  */
 export const clipUri = (dir: string, name: string): string => `file://${dir.replace(/^file:\/\//, '').replace(/\/+$/, '')}/${name}`;
+
+/** The text of one listen: its final pieces in order, then the piece still being heard. */
+export const joinPieces = (finals: readonly string[], current = ''): string =>
+  [...finals, current].map((p) => p.trim()).filter(Boolean).join(' ');

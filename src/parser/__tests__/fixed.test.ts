@@ -154,3 +154,19 @@ describe('ask again', () => {
 it('keeps what was said', () => {
   expect(parseFixed('নগদ বিক্রি চাল ১০০ টাকা।')).toMatchObject({ raw: 'নগদ বিক্রি চাল ১০০ টাকা।', normalized: 'নগদ বিক্রি চাল 100 টাকা'.normalize('NFC') });
 });
+
+describe('real recognizer output (A5, Mac Bangla voice on the Pixel 7, Nov 27)', () => {
+  it('সাড়ে তিনশো written as "সাড়ে 300"', () => {
+    ok('হোসাইন বাকি সাড়ে 300 টাকা', { kind: 'baki', customer: 'হোসাইন', amount: 350 });
+  });
+  it('এক হাজার দুইশো written as "১০০০ ২০০"', () => {
+    ok('কাউসার স্টোর বাকি ১০০০ ২০০ টাকা', { kind: 'baki', customer: 'কাউসার স্টোর', amount: 1200 });
+  });
+  it('"বিক্রিতে" is not goods', () => {
+    ok('নগদ বিক্রিতে সাবান ১২০ টাকা', { kind: 'cash_sale', goods: ['সাবান'], amount: 120 });
+  });
+  it('digits for numbers', () => {
+    ok('সাজু 50 টাকা জমা দিয়েছে', { kind: 'joma', customer: 'সাজু', amount: 50 });
+    ok('১০০০ টাকার আলু কেনা হয়েছে', { kind: 'purchase', goods: ['আলু'], amount: 1000 });
+  });
+});

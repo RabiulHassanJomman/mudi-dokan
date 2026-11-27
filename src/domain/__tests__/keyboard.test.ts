@@ -1,5 +1,5 @@
 /** Android mode: said with the Ridmik keyboard's voice typing, read by the fixed formats. */
-import { EXAMPLE_BN, clipUri, fixedProblemWords, heardErrorWords, readKeyboardText, voiceRoute } from '../keyboard';
+import { EXAMPLE_BN, clipUri, fixedProblemWords, joinPieces, heardErrorWords, readKeyboardText, voiceRoute } from '../keyboard';
 import { parseFixed } from '../../parser/fixed';
 
 describe('which screen the 🎤 opens', () => {
@@ -86,5 +86,14 @@ describe('the clip file of a listen', () => {
   it('is known before the recorder closes it (same path the library writes)', () => {
     expect(clipUri('file:///data/user/0/com.mudidokan.app/files/', 'voice_1.wav')).toBe('file:///data/user/0/com.mudidokan.app/files/voice_1.wav');
     expect(clipUri('/data/user/0/com.mudidokan.app/files', 'voice_1.wav')).toBe('file:///data/user/0/com.mudidokan.app/files/voice_1.wav');
+  });
+});
+
+describe('a sentence heard in pieces (recording mode sends each pause as its own final piece)', () => {
+  it('pieces join in order, with the piece still being heard last', () => {
+    expect(joinPieces(['শোয়েব ভাই বাকি নিল'], 'দেড় হাজার টাকা')).toBe('শোয়েব ভাই বাকি নিল দেড় হাজার টাকা');
+    expect(joinPieces(['শোয়েব ভাই বাকি নিল', 'দেড় হাজার টাকা'])).toBe('শোয়েব ভাই বাকি নিল দেড় হাজার টাকা');
+    expect(joinPieces([], ' সাজু ')).toBe('সাজু');
+    expect(joinPieces(['', ' '], '')).toBe('');
   });
 });

@@ -113,3 +113,29 @@ describe('not numbers / boundaries', () => {
     expect(num('নয়')?.value).toBe(9);
   });
 });
+
+describe('how the phone recognizer writes spoken numbers (A5, Nov 27)', () => {
+  it.each([
+    // "সাড়ে তিনশো" → "সাড়ে 300"
+    ['সাড়ে 300', 350],
+    ['সাড়ে ৩০০', 350],
+    ['সাড়ে 2000', 2500],
+    ['সাড়ে 3', 3.5],
+    // "এক হাজার দুইশো" → "১০০০ ২০০"
+    ['১০০০ ২০০', 1200],
+    ['1000 200', 1200],
+    ['2000 500 50', 2550],
+    ['২০০ ৫০', 250],
+    // still one number
+    ['১০০ হাজার', 100000],
+    ['1200', 1200],
+  ])('%s = %d', (text, value) => {
+    expect(num(text)?.value).toBe(value);
+  });
+
+  it('two numbers that are not a hundreds/thousands pair stay apart', () => {
+    expect(num('২ ৫০০')).toBeNull();
+    expect(num('৫০ ২০')).toBeNull();
+    expect(num('১২০০ ৫০০')).toBeNull();
+  });
+});

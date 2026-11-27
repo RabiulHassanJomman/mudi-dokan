@@ -12,7 +12,7 @@ import { Txt } from '../components/Txt';
 import { createVoiceLog, customerAliasMap, knownNames, productAliasMap, setOutcome, setParsed } from '../db/repo';
 import { writer } from '../device';
 import { fixedAsParsed } from '../domain/entry';
-import { EXAMPLE_BN, clipUri, fixedProblemWords, heardErrorWords, readKeyboardText } from '../domain/keyboard';
+import { EXAMPLE_BN, clipUri, fixedProblemWords, heardErrorWords, joinPieces, readKeyboardText } from '../domain/keyboard';
 import { nav } from '../lib/nav';
 import { speak, stopSpeaking } from '../lib/speak';
 import { colors, fonts, fontSize, radius, spacing } from '../theme/tokens';
@@ -44,6 +44,12 @@ export default function SayScreen() {
   const starting = useRef(false);
   /** Silent restarts after nothing was heard (recording mode gives up after ~2 s of silence). */
   const quietRetries = useRef(0);
+  /**
+   * This listen's final pieces. While recording, Google sends each stretch between pauses as its
+   * own final result ("শোয়েব ভাই বাকি নিল" … "দেড় হাজার টাকা"); the sentence is all of them,
+   * sent to the card when listening ends.
+   */
+  const pieces = useRef<string[]>([]);
   const leaving = useRef(false);
   /** This listen's recording: its file (known at start), whether the recorder has closed it, waiters for that. */
   const clip = useRef<{ uri: string | null; ended: boolean; waiters: (() => void)[] } | null>(null);
@@ -84,6 +90,7 @@ export default function SayScreen() {
     clip.current = { uri: CAN_RECORD ? clipUri(Paths.document.uri, name) : null, ended: false, waiters: [] };
     setText('');
     setProblem('');
+    pieces.current = [];
     listeningRef.current = true;
     setListening(true);
     ExpoSpeechRecognitionModule.start({
@@ -104,11 +111,20 @@ export default function SayScreen() {
   useSpeechRecognitionEvent('result', (e) => {
     if (!listeningRef.current) return;
     const heard = (e.results[0]?.transcript ?? '').trim();
-    setText(heard);
     if (e.isFinal) {
-      listeningRef.current = false;
-      setListening(false);
-      if (heard) void done(heard);
+      if (heard) pieces.current.push(heard);
+      const said = joinPieces(pieces.current);
+      setText(said);
+      // complete already: to the card now, no wait for the end of listening (~2 s); else wait for the rest
+      if (said && !fixedProblemWords(readKeyboardText(said, {}, { customer }, {}))) {
+        listeningRef.current = false;
+        setListening(false);
+        pieces.current = [];
+        ExpoSpeechRecognitionModule.stop();
+        void done(said);
+      }
+    } else {
+      setText(joinPieces(pieces.current, heard));
     }
   });
   useSpeechRecognitionEvent('audioend', (e) => {
@@ -120,6 +136,8 @@ export default function SayScreen() {
   });
   useSpeechRecognitionEvent('error', (e) => {
     if (!listeningRef.current) return;
+    // something was heard already: 'end' sends it
+    if (pieces.current.length) return;
     listeningRef.current = false;
     // nothing said yet: listen again quietly, so a slow start still works
     if (e.error === 'no-speech' && quietRetries.current < QUIET_RETRIES && !leaving.current) {
@@ -131,8 +149,13 @@ export default function SayScreen() {
     showProblem(heardErrorWords(e.error));
   });
   useSpeechRecognitionEvent('end', () => {
+    const wasOn = listeningRef.current;
     listeningRef.current = false;
     setListening(false);
+    // listening is over: the whole sentence goes to the card
+    const said = joinPieces(pieces.current);
+    pieces.current = [];
+    if (wasOn && said) void done(said);
   });
 
   useEffect(() => {

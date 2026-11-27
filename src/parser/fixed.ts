@@ -60,7 +60,7 @@ const kindOf = (t: string): FixedKind | undefined => KIND_WORDS.find(([, words])
 
 /** The sentence's verbs and glue: neither a name nor goods. */
 const VERBS = wordSet([
-  ...K.TAKE, ...K.GAVE, ...K.SALE, ...K.TODAY, 'নিয়েছেন', 'দিয়েছেন', 'নিলেন', 'দিলেন',
+  ...K.TAKE, ...K.GAVE, ...K.SALE, ...K.TODAY, 'নিয়েছেন', 'দিয়েছেন', 'নিলেন', 'দিলেন', 'বিক্রিতে',
   'হয়েছে', 'হইছে', 'হলো', 'হল', 'হয়', 'করলাম', 'করেছি', 'করেছে', 'করল', 'করলো', 'করলেন', 'করেছেন', 'করা',
   'দিলাম', 'দিয়েছি', 'দিছি', 'দিয়ে', 'গেল', 'গেলো', 'গেছে', 'নিলাম', 'নিয়েছি', 'নিছি',
   'মোট', 'টোটাল',

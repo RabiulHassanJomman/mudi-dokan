@@ -73,6 +73,14 @@ interface Group {
   classifier: boolean;
 }
 
+/** 300 → 100, 2000 → 1000; other numbers have no scale of their own. */
+function impliedScale(n: number): number | undefined {
+  if (!Number.isInteger(n) || n < 100) return undefined;
+  if (n % 1000 === 0) return 1000;
+  if (n % 100 === 0) return 100;
+  return undefined;
+}
+
 /** One group: [modifier] base [scale], e.g. "সাড়ে তিন", "পাঁচশ", "দেড় হাজার". */
 function parseGroup(tokens: readonly string[], i: number): Group | null {
   let j = i;
@@ -103,6 +111,14 @@ function parseGroup(tokens: readonly string[], i: number): Group | null {
     if (s !== undefined) {
       scale = s;
       j++;
+    } else if (tok !== undefined && DIGITS.test(tok)) {
+      // the recognizer writes "সাড়ে তিনশো" as "সাড়ে 300" and "এক হাজার দুইশো" as "১০০০ ২০০":
+      // a round digit number is so many hundreds / thousands, so it takes সাড়ে and joins a smaller group
+      const implied = impliedScale(atom.base);
+      if (implied) {
+        atom = { base: atom.base / implied };
+        scale = implied;
+      }
     }
   }
   return {
