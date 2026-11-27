@@ -14,6 +14,7 @@ import { createVoiceLog, customerAliasMap, customerByName, knownNames, productAl
 import { writer } from '../device';
 import { fixedAsParsed } from '../domain/entry';
 import { joinWav } from '../domain/wav';
+import { within } from '../domain/within';
 import { EXAMPLE_BN, LOOKUP_EXAMPLE_BN, clipUri, customerLookup, fixedProblemWords, heardErrorWords, joinPieces, readKeyboardText } from '../domain/keyboard';
 import { nav } from '../lib/nav';
 import { speak, stopSpeaking } from '../lib/speak';
@@ -296,8 +297,18 @@ export default function SayScreen() {
     if (!first?.uri) return null;
     if (parts.length === 1) return first.uri;
     try {
-      await Promise.all(parts.map((c) => (c.ended ? null : new Promise<void>((r) => c.waiters.push(r)))));
-      const bytes = await Promise.all(parts.map((c) => new File(c.uri!).bytes().catch(() => new Uint8Array())));
+      const closed = Promise.all(parts.map((c) => (c.ended ? null : new Promise<void>((r) => c.waiters.push(r)))));
+      // after a stop, Google sometimes never ends its segmented session, so the recorder never closes
+      // the last file (stuck on দেখছি…): abort ends it, and the file is closed then
+      if (!(await within(closed, CLOSE_WAIT_MS))) {
+        console.log('MUDI_SAY recorder still open: abort');
+        ExpoSpeechRecognitionModule.abort();
+        await within(closed, CLOSE_WAIT_MS);
+      }
+      // a part still open has no proper file: it is left out of the join
+      const ready = parts.filter((c) => c.ended);
+      if (!ready.length) return first.uri;
+      const bytes = await Promise.all(ready.map((c) => new File(c.uri!).bytes().catch(() => new Uint8Array())));
       const joined = joinWav(bytes);
       if (joined) new File(first.uri).write(joined);
       for (const c of parts.slice(1)) dropClip(c);
@@ -482,6 +493,8 @@ const QUIET_RETRIES = 3;
 /** "Speak now": a two-note rising chime before each listen (not the quiet restarts), which starts when it is over. */
 const BEEP = require('../../assets/sounds/chime.wav') as number; // eslint-disable-line @typescript-eslint/no-require-imports
 const BEEP_MS = 330;
+/** How long to wait for the recorder to close a part's file before aborting (and again after). */
+const CLOSE_WAIT_MS = 1500;
 
 type Clip = { uri: string | null; ended: boolean; waiters: (() => void)[] } | null;
 
