@@ -10,7 +10,7 @@ import { Icon } from '../components/Icon';
 import { NumberPadSheet } from '../components/NumberPadSheet';
 import { Txt } from '../components/Txt';
 import { getSetup, saveDeviceSetup, saveSetup } from '../db/repo';
-import { getDevice, markSetupDone, setDevice, writer } from '../device';
+import { getDevice, isTutorialSeen, markSetupDone, setDevice, writer } from '../device';
 import {
   DEVICE_NAME_MAX,
   ROLE_BN,
@@ -202,6 +202,8 @@ export default function SetupScreen() {
       setConfirming(false);
       void speak(editing ? 'রাখা হয়েছে।' : 'দোকান চালু হয়েছে।');
       if (editing && nav.canGoBack()) nav.back();
+      // a new phone: অ্যাপ শেখা once, then home
+      else if (!editing && !isTutorialSeen()) nav.replace('/tutorial');
       else nav.replace('/');
     } catch (e) {
       setSaving(false);
@@ -360,6 +362,21 @@ export default function SetupScreen() {
             </Txt>
           ) : null}
         </Section>
+        )}
+
+        {/* settings only: অ্যাপ শেখা again (the first-time tutorial) */}
+        {editing && (
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => nav.push({ pathname: '/tutorial', params: { again: '1' } })}
+            style={({ pressed }) => [styles.importButton, styles.tutorialButton, pressed && styles.pressed]}
+          >
+            <Icon name="speaker" size={28} color={colors.sale} />
+            <Txt size={fontSize.label} weight="bold" color={colors.saleDark} style={styles.flex}>
+              অ্যাপ শেখা
+            </Txt>
+            <Icon name="arrow" size={24} color={colors.saleDark} />
+          </Pressable>
         )}
 
         {/* settings only (step 8): backup and the voice clips on Drive */}
@@ -589,5 +606,6 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   pressed: { opacity: 0.85 },
+  tutorialButton: { borderColor: colors.micRing, backgroundColor: colors.saleTint },
   later: { minHeight: 56, borderRadius: radius.icon, backgroundColor: colors.neutralTint, alignItems: 'center', justifyContent: 'center' },
 });

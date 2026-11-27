@@ -51,3 +51,11 @@ export const markSetupDone = () => Storage.setItemSync(KEY_SETUP, '1');
 
 /** After a wipe: প্রথমবার চালু runs again (the name and role stay filled in). */
 export const clearSetupDone = () => Storage.removeItemSync(KEY_SETUP);
+
+/**
+ * অ্যাপ শেখা (first-time tutorial): shown once after the first Setup on a new phone. Not cleared
+ * by a wipe (it's about this phone's user, not the shop's data).
+ */
+const KEY_TUTORIAL = 'tutorial_seen';
+export const isTutorialSeen = () => Storage.getItemSync(KEY_TUTORIAL) === '1';
+export const markTutorialSeen = () => Storage.setItemSync(KEY_TUTORIAL, '1');
