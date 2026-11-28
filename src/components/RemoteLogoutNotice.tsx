@@ -1,17 +1,23 @@
 import { useEffect } from 'react';
 import { Modal, Pressable, StyleSheet, View } from 'react-native';
 
+import { nav } from '../lib/nav';
 import { speak } from '../lib/speak';
 import { useRemoteLogout } from '../sync/app';
 import { colors, fontSize, radius, spacing } from '../theme/tokens';
 import { Icon } from './Icon';
 import { Txt } from './Txt';
 
-const TEXT = 'অ্যাডমিন এই ফোন লগ আউট করেছেন। এই ফোনের হিসাব ফোনেই আছে, শুধু সিঙ্ক বন্ধ। আবার চালু করতে সেটিংস থেকে Google অ্যাকাউন্টে ঢুকুন।';
+const TEXT = 'অ্যাডমিন এই ফোন লগ আউট করেছেন, তাই এই ফোনের হিসাব মুছে ফেলা হয়েছে। দোকানের হিসাব অন্য ফোনে আছে। আবার চালু করতে Google অ্যাকাউন্টে ঢুকুন।';
 
-/** An admin logged this phone out (ফোনগুলো): say so once, until ঠিক আছে. */
+/** An admin logged this phone out and its data was erased (ফোনগুলো): say so, then ঠিক আছে → দোকান চালু করুন. */
 export function RemoteLogoutNotice() {
-  const [shown, dismiss] = useRemoteLogout();
+  const [shown, close] = useRemoteLogout();
+  // the phone is empty now: start again like a new phone
+  const dismiss = () => {
+    close();
+    nav.replace('/setup');
+  };
   useEffect(() => {
     if (shown) void speak(TEXT);
   }, [shown]);

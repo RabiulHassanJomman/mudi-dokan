@@ -19,7 +19,7 @@ import { afterLocalWipe } from '../wipe/files';
 import { duplicatePairs, type MergePair } from '../domain/merge';
 import type { Db } from '../db/repo';
 import { signOut, watchAccount } from './auth';
-import { checkPresence } from './presence';
+import { checkPresence, remoteLogout } from './presence';
 import { SyncController, type SyncStatus } from './controller';
 import { SyncEngine } from './engine';
 import { firestoreRemote } from './firestore';
@@ -113,7 +113,7 @@ function presence(): void {
     .then(async (p) => {
       if (p === 'touched') ctl.localChange();
       if (p !== 'logout') return;
-      await leave(false);
+      if (!(await eraseForAdmin(ctl))) return; // something unsent: the next sync tries again
       remoteLoggedOut = true;
       for (const fn of logoutSubs) fn(true);
     })
@@ -138,6 +138,33 @@ async function leave(mark: boolean): Promise<void> {
     }
     clearSession();
     await signOut();
+  } finally {
+    leaving = false;
+  }
+}
+
+/**
+ * An admin logged this phone out: send what is unsent, sign out, erase this phone's data and
+ * files (Setup runs again). False = still unsent, nothing erased.
+ */
+async function eraseForAdmin(ctl: SyncController): Promise<boolean> {
+  leaving = true;
+  try {
+    return await remoteLogout({
+      push: async () => {
+        await ctl.engine.push();
+      },
+      pending: () => ctl.engine.pendingCount(),
+      signOut: async () => {
+        clearSession();
+        await ctl.setAccount(null); // listeners off at once: nothing can come back in
+        await signOut();
+      },
+      wipe: async () => {
+        await afterLocalWipe(await ctl.engine.wipeLocal(getDevice().id), { backups: true });
+        bumpData();
+      },
+    });
   } finally {
     leaving = false;
   }

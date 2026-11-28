@@ -111,7 +111,8 @@ describe('words', () => {
   it('every action asks with the phone name', () => {
     expect(actionQuestion('admin_on', 'রফিক')).toMatch(/^রফিক-এর ফোন অ্যাডমিন হবে/);
     expect(actionQuestion('admin_off', 'রফিক')).toMatch(/আর অ্যাডমিন থাকবে না/);
-    expect(actionQuestion('logout', 'রফিক')).toMatch(/লগ আউট হবে। ওই ফোনের হিসাব ফোনেই থাকবে/);
+    expect(actionQuestion('logout', 'রফিক')).toMatch(/লগ আউট হবে, ওই ফোনের সব হিসাব মুছে যাবে/);
+    expect(actionQuestion('logout', 'রফিক')).toMatch(/আগে পাঠানো হবে/);
     expect(actionQuestion('claim', '')).toMatch(/^এই ফোন অ্যাডমিন হবে/);
   });
 

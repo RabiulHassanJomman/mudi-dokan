@@ -5,8 +5,8 @@
  * All phones share one Google account, so "who may do what" is the app's own rule, not the
  * server's: admin state is the latest admin_on / admin_off event per phone. Nobody is admin
  * until a phone claims it (only while nobody is); the last admin can't be removed.
- * Remote লগ আউট names the session the admin saw: the phone signs out when its current
- * session has one. Signing in again starts a new session, which that event doesn't touch.
+ * Remote লগ আউট names the session the admin saw: the phone sends what is unsent, signs out
+ * and erases its data when its current session has one. Signing in again starts a new session, which that event doesn't touch.
  */
 import { toBnDigits } from '../lib/bn';
 
@@ -130,7 +130,7 @@ export function actionQuestion(action: DeviceAction | 'claim', name: string): st
     case 'admin_off':
       return `${name}-এর ফোন আর অ্যাডমিন থাকবে না। ঠিক আছে?`;
     case 'logout':
-      return `${name}-এর ফোন লগ আউট হবে। ওই ফোনের হিসাব ফোনেই থাকবে, শুধু সিঙ্ক বন্ধ হবে। ঠিক আছে?`;
+      return `${name}-এর ফোন লগ আউট হবে, ওই ফোনের সব হিসাব মুছে যাবে। যা পাঠানো হয়নি তা আগে পাঠানো হবে, দোকানের হিসাব অন্য ফোনে থাকবে। ঠিক আছে?`;
   }
 }
 
@@ -144,7 +144,7 @@ export function actionDone(action: DeviceAction | 'claim', name: string): string
     case 'admin_off':
       return `${name} আর অ্যাডমিন নয়।`;
     case 'logout':
-      return `${name}-এর ফোন ইন্টারনেটে এলেই লগ আউট হবে।`;
+      return `${name}-এর ফোন ইন্টারনেটে এলেই লগ আউট হবে, ফোনের হিসাব মুছে যাবে।`;
   }
 }
 

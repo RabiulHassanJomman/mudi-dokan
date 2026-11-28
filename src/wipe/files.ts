@@ -3,7 +3,11 @@ import { Directory, File, Paths } from 'expo-file-system';
 
 import { clearSetupDone } from '../device';
 
-export async function afterLocalWipe(audioFiles: readonly string[]): Promise<void> {
+/**
+ * `backups`: also the backup copies on this phone (Documents/backup, cache/backup). Only when
+ * an admin logged the phone out (ফোনগুলো): then no copy of the shop may stay on it.
+ */
+export async function afterLocalWipe(audioFiles: readonly string[], opts: { backups?: boolean } = {}): Promise<void> {
   for (const uri of audioFiles) {
     try {
       const f = new File(uri);
@@ -21,6 +25,15 @@ export async function afterLocalWipe(audioFiles: readonly string[]): Promise<voi
       // harmless
     }
   }
-  // the backup copies in Documents/backup stay: they are what the user keeps
+  // the backup copies in Documents/backup stay (they are what the user keeps), unless an admin removed this phone
+  if (opts.backups) {
+    for (const d of [new Directory(Paths.document, 'backup'), new Directory(Paths.cache, 'backup')]) {
+      try {
+        if (d.exists) d.delete();
+      } catch {
+        // harmless
+      }
+    }
+  }
   clearSetupDone();
 }
