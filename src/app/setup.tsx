@@ -31,9 +31,6 @@ import { useDataVersion, useSyncStatus } from '../sync/app';
 import { parseSpokenAmount } from '../parser';
 import { colors, fonts, fontSize, radius, size, spacing } from '../theme/tokens';
 import { nav } from '../lib/nav';
-import { buildLabel } from '../lib/buildInfo';
-
-const DANGER_INK = '#B3261E';
 
 const PLACEHOLDER_DEVICE = 'এই ফোন';
 
@@ -47,7 +44,7 @@ const PROBLEM_TEXT: Record<SetupProblem, string> = {
 /**
  * প্রথমবার চালু: the shop's Google account (sync; optional), shop name, whose phone (+ role),
  * opening cash. Runs once (first launch);
- * ?edit=1 opens it from ⚙ on the home screen with the saved values. Nothing is saved
+ * ?edit=1 = সেটিংস › দোকান ও আমার তথ্য (shop name, this phone, opening cash; no account card). Nothing is saved
  * before the ঠিক আছে? sheet's হ্যাঁ.
  */
 export default function SetupScreen() {
@@ -165,15 +162,23 @@ export default function SetupScreen() {
       void speak(fetching ? 'দোকানের হিসাব আনা হচ্ছে, একটু অপেক্ষা করুন।' : 'দোকান চালু করুন। প্রথমে দোকানের Google অ্যাকাউন্টে ঢুকুন। ইন্টারনেট না থাকলে পরে ঢুকব চাপুন।');
       return;
     }
-    const parts = [
-      editing ? 'দোকানের তথ্য।' : 'দোকান চালু করুন।',
+    const parts = editing
+      ? [
+          'দোকান ও আমার তথ্য।',
+          `এক, দোকানের নাম। ${draft.shopName.trim() || 'লেখা হয়নি।'}`,
+          `দুই, আপনার নাম। ${draft.deviceName.trim() ? `${draft.deviceName.trim()}, ${draft.role ? ROLE_BN[draft.role] : 'মালিক না কর্মচারী বেছে নিন'}।` : 'লিখুন, না হলে মাইক চেপে বলুন।'}`,
+          `তিন, শুরুতে ক্যাশে কত টাকা? ${draft.openingCashPoisha === null ? 'মাইক চেপে বলুন।' : `${formatNumber(draft.openingCashPoisha / 100)} টাকা।`}`,
+          'শেষে রাখুন চাপুন।',
+        ]
+      : [
+      'দোকান চালু করুন।',
       `এক, দোকানের Google অ্যাকাউন্ট। ${email ? `${email}, ঢোকা আছে।` : 'ঢুকুন চাপুন। দোকানের সব ফোনে একই অ্যাকাউন্ট। ইন্টারনেট না থাকলে পরে ঢুকব চাপুন।'}`,
       ...(joined
         ? [`দোকান ${draft.shopName.trim()}, আগের ফোন থেকে আনা। দুই, আপনার নাম।`]
         : [`দুই, দোকানের নাম। ${draft.shopName.trim() || 'লেখা হয়নি।'}`, 'তিন, আপনার নাম।']),
       ` ${draft.deviceName.trim() ? `${draft.deviceName.trim()}, ${draft.role ? ROLE_BN[draft.role] : 'মালিক না কর্মচারী বেছে নিন'}।` : 'লিখুন, না হলে মাইক চেপে বলুন। তারপর মালিক না কর্মচারী।'}`,
       ...(joined ? [] : [`চার, এখন ক্যাশে কত টাকা? ${draft.openingCashPoisha === null ? 'মাইক চেপে বলুন।' : `${formatNumber(draft.openingCashPoisha / 100)} টাকা।`}`]),
-      editing ? 'শেষে রাখুন চাপুন।' : 'শেষে শুরু করুন চাপুন।',
+      'শেষে শুরু করুন চাপুন।',
     ];
     void speak(parts.join(' '));
   };
@@ -224,7 +229,7 @@ export default function SetupScreen() {
           </Pressable>
         )}
         <Txt accessibilityRole="header" size={fontSize.headingLg} weight="bold" style={styles.flex}>
-          {editing ? 'দোকানের তথ্য' : 'দোকান চালু করুন'}
+          {editing ? 'দোকান ও আমার তথ্য' : 'দোকান চালু করুন'}
         </Txt>
         <Pressable accessibilityRole="button" accessibilityLabel="শুনুন" onPress={readScreen} style={styles.listen}>
           <Icon name="speaker" size={26} color={colors.onColor} strokeWidth={2} />
@@ -232,8 +237,10 @@ export default function SetupScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
+        {/* from সেটিংস the account has its own card there; here only the shop and this phone */}
+        {!editing && (
         <Section n={1} title="দোকানের Google অ্যাকাউন্ট" bad={false}>
-          <AccountCard showSync={editing} />
+          <AccountCard />
           {waitingSignIn && (
             <Pressable
               accessibilityRole="button"
@@ -259,9 +266,10 @@ export default function SetupScreen() {
             </Txt>
           )}
         </Section>
+        )}
 
         {showForm && !joined && (
-        <Section n={2} title="দোকানের নাম" bad={bad('shop_name')}>
+        <Section n={editing ? 1 : 2} title="দোকানের নাম" bad={bad('shop_name')}>
           <TextInput
             value={draft.shopName}
             onChangeText={(t) => set({ shopName: t })}
@@ -275,7 +283,7 @@ export default function SetupScreen() {
         )}
 
         {showForm && (
-        <Section n={joined ? 2 : 3} title="আপনার নাম" bad={bad('device_name') || bad('role')}>
+        <Section n={joined || editing ? 2 : 3} title="আপনার নাম" bad={bad('device_name') || bad('role')}>
           <View style={styles.cashRow}>
             <TextInput
               value={draft.deviceName}
@@ -328,7 +336,7 @@ export default function SetupScreen() {
         )}
 
         {showForm && !joined && (
-        <Section n={4} title="এখন ক্যাশে কত টাকা?" bad={bad('opening_cash')}>
+        <Section n={editing ? 3 : 4} title="এখন ক্যাশে কত টাকা?" bad={bad('opening_cash')}>
           <View style={styles.cashRow}>
             <Pressable
               accessibilityRole="button"
@@ -364,83 +372,6 @@ export default function SetupScreen() {
         </Section>
         )}
 
-        {/* settings only: অ্যাপ শেখা again (the first-time tutorial) */}
-        {editing && (
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => nav.push({ pathname: '/tutorial', params: { again: '1' } })}
-            style={({ pressed }) => [styles.importButton, styles.tutorialButton, pressed && styles.pressed]}
-          >
-            <Icon name="speaker" size={28} color={colors.sale} />
-            <Txt size={fontSize.label} weight="bold" color={colors.saleDark} style={styles.flex}>
-              অ্যাপ শেখা
-            </Txt>
-            <Icon name="arrow" size={24} color={colors.saleDark} />
-          </Pressable>
-        )}
-
-        {/* settings only (step 8): backup and the voice clips on Drive */}
-        {editing && (
-          <View style={styles.linkRow}>
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => nav.push('/backup')}
-              style={({ pressed }) => [styles.linkButton, pressed && styles.pressed]}
-            >
-              <Icon name="up" size={26} color={colors.sale} />
-              <Txt size={fontSize.label} weight="bold" color={colors.saleDark}>
-                ব্যাকআপ
-              </Txt>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => nav.push('/drive')}
-              style={({ pressed }) => [styles.linkButton, pressed && styles.pressed]}
-            >
-              <Icon name="play" size={22} color={colors.sale} />
-              <Txt size={fontSize.label} weight="bold" color={colors.saleDark}>
-                Drive
-              </Txt>
-            </Pressable>
-          </View>
-        )}
-
-        {/* settings only: danger zone (সব তথ্য মুছুন) and the hidden debug log (long-press the version) */}
-        {editing && (
-          <>
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => nav.push('/wipe')}
-              style={({ pressed }) => [styles.dangerButton, pressed && styles.pressed]}
-            >
-              <Icon name="trash" size={26} color={DANGER_INK} />
-              <Txt size={fontSize.label} weight="bold" color={DANGER_INK} style={styles.flex}>
-                সব তথ্য মুছুন
-              </Txt>
-              <Icon name="arrow" size={24} color={DANGER_INK} />
-            </Pressable>
-            <Pressable accessibilityRole="button" accessibilityLabel="অ্যাপের সংস্করণ" onLongPress={() => nav.push('/debug-log')} delayLongPress={1500} style={styles.versionBox}>
-              <Txt size={fontSize.caption} weight="medium" color={colors.muted}>
-                {buildLabel()}
-              </Txt>
-            </Pressable>
-          </>
-        )}
-
-        {/* settings only: bring in an existing customer list (.txt) */}
-        {editing && (
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => nav.push({ pathname: '/import', params: { kind: 'customers' } })}
-            style={({ pressed }) => [styles.importButton, pressed && styles.pressed]}
-          >
-            <Icon name="list" size={28} color={colors.baki} />
-            <Txt size={fontSize.label} weight="bold" color={colors.bakiInk} style={styles.flex}>
-              ক্রেতার তালিকা আনুন
-            </Txt>
-            <Icon name="arrow" size={24} color={colors.bakiInk} />
-          </Pressable>
-        )}
       </ScrollView>
 
       {showForm && (
@@ -510,40 +441,6 @@ function Chip({ label, on, color, tint, onPress }: { label: string; on: boolean;
 }
 
 const styles = StyleSheet.create({
-  linkRow: { flexDirection: 'row', gap: spacing.sm },
-  linkButton: {
-    flex: 1,
-    minHeight: 64,
-    borderRadius: radius.card,
-    backgroundColor: colors.saleTint,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.xs,
-  },
-  dangerButton: {
-    minHeight: 64,
-    borderRadius: radius.card,
-    borderWidth: 2,
-    borderColor: DANGER_INK,
-    backgroundColor: '#FBE9E7',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    paddingHorizontal: spacing.lg,
-  },
-  versionBox: { alignItems: 'center', justifyContent: 'center', minHeight: size.minTouch },
-  importButton: {
-    minHeight: 64,
-    borderRadius: radius.card,
-    borderWidth: 2,
-    borderColor: colors.bakiBorder,
-    backgroundColor: colors.bakiTint,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    paddingHorizontal: spacing.lg,
-  },
   screen: { flex: 1, backgroundColor: colors.bg, paddingHorizontal: spacing.screen, paddingBottom: spacing.screen, gap: spacing.md },
   header: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingTop: spacing.xl },
   flex: { flex: 1 },
@@ -606,6 +503,5 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   pressed: { opacity: 0.85 },
-  tutorialButton: { borderColor: colors.micRing, backgroundColor: colors.saleTint },
   later: { minHeight: 56, borderRadius: radius.icon, backgroundColor: colors.neutralTint, alignItems: 'center', justifyContent: 'center' },
 });

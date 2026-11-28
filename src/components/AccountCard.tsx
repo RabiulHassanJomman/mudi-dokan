@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
-import { signIn, signOut } from '../sync/auth';
+import { signIn } from '../sync/auth';
 import { enableDrive } from '../drive/app';
-import { useSyncStatus } from '../sync/app';
+import { signOutShop, useSyncStatus } from '../sync/app';
 import { PHASE_BN, SHOP_ADOPTED_BN, agoBn } from '../sync/words';
 import { formatNumber } from '../lib/bn';
 import { speak } from '../lib/speak';
@@ -56,7 +56,7 @@ export function AccountCard({ showSync = false }: { showSync?: boolean }) {
   const doSignOut = async () => {
     setBusy(true);
     try {
-      await signOut();
+      await signOutShop();
       void speak('লগ আউট হয়েছে। এই ফোনের হিসাব ফোনেই আছে।');
     } finally {
       setBusy(false);

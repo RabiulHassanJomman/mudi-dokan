@@ -24,6 +24,8 @@ const ENTRY_LOCAL = ['root_id', 'rev'] as const;
 export const SYNC_TABLES: readonly SyncTable[] = [
   { name: 'shop', kind: 'mutable', localOnly: [] },
   { name: 'devices', kind: 'mutable', localOnly: [] },
+  // ফোনগুলো: admin on/off and remote logout, append-only like the entries
+  { name: 'device_events', kind: 'entry', localOnly: [] },
   { name: 'products', kind: 'mutable', localOnly: [] },
   { name: 'customers', kind: 'mutable', localOnly: [] },
   { name: 'product_aliases', kind: 'mutable', localOnly: [] },

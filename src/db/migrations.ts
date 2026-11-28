@@ -450,10 +450,36 @@ ALTER TABLE understand_queue ADD COLUMN kind TEXT;
 `;
 
 /**
+ * v17 (ফোনগুলো, Nov 28): which phones use the shop, who is অ্যাডমিন, remote লগ আউট.
+ * devices gets what the list shows: model (e.g. "Pixel 7"), session_id (a new one on every
+ * Google sign-in), signed_in (1 / 0; null = an older app that doesn't say), last_seen_at (ms,
+ * at most hourly). Only a phone writes its own devices row.
+ * device_events: what an admin did to a phone, append-only like the entries (so two phones
+ * never overwrite each other): admin_on / admin_off, or logout of one session (a later
+ * sign-in on that phone is a new session and is not touched). Synced like every table.
+ */
+const V17 = `
+ALTER TABLE devices ADD COLUMN model TEXT;
+ALTER TABLE devices ADD COLUMN session_id TEXT;
+ALTER TABLE devices ADD COLUMN signed_in INTEGER CHECK (signed_in IN (0, 1));
+ALTER TABLE devices ADD COLUMN last_seen_at INTEGER;
+CREATE TABLE device_events (
+  target_device_id TEXT NOT NULL,
+  action TEXT NOT NULL CHECK (action IN ('admin_on','admin_off','logout')),
+  target_session TEXT,
+  device_name TEXT NOT NULL,${ROW}
+);
+CREATE INDEX device_events_target ON device_events(target_device_id);
+CREATE TRIGGER device_events_no_update BEFORE UPDATE ON device_events
+BEGIN SELECT RAISE(ABORT, 'device_events is append-only'); END;
+${noDeleteTrigger('device_events')}
+`;
+
+/**
  * Index i holds the SQL that takes the DB from user_version i to i + 1.
  * Append only; never edit or renumber a shipped one.
  */
-export const MIGRATIONS: readonly string[] = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16];
+export const MIGRATIONS: readonly string[] = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17];
 
 /**
  * Nov 14 fork: an early main build shipped v7 = customers.note (no Gemini columns) while

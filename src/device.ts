@@ -3,6 +3,7 @@
  * file), not in the synced tables: every phone has its own.
  * Setup sets the name and role; until then: "এই ফোন", role unset.
  */
+import { Platform } from 'react-native';
 import { randomUUID } from 'expo-crypto';
 import { Storage } from 'expo-sqlite/kv-store';
 
@@ -59,3 +60,22 @@ export const clearSetupDone = () => Storage.removeItemSync(KEY_SETUP);
 const KEY_TUTORIAL = 'tutorial_seen';
 export const isTutorialSeen = () => Storage.getItemSync(KEY_TUTORIAL) === '1';
 export const markTutorialSeen = () => Storage.setItemSync(KEY_TUTORIAL, '1');
+
+/**
+ * ফোনগুলো: this phone's sign-in session. A new one on each Google sign-in (kept across
+ * restarts, cleared at লগ আউট), so an admin's remote logout ends only the session it saw.
+ */
+const KEY_SESSION = 'sign_in_session';
+export const getSession = () => Storage.getItemSync(KEY_SESSION);
+export function startSession(): string {
+  const s = randomUUID();
+  Storage.setItemSync(KEY_SESSION, s);
+  return s;
+}
+export const clearSession = () => Storage.removeItemSync(KEY_SESSION);
+
+/** "Pixel 7" etc. for the list (Android's Build.MODEL); null if unknown. */
+export function deviceModel(): string | null {
+  const c = Platform.constants as { Model?: string };
+  return c.Model?.trim() || null;
+}

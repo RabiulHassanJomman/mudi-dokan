@@ -12,11 +12,12 @@ async function phone(cloud: FakeCloud, name: string) {
   const w: Writer = { deviceId: `dev-${name}`, deviceName: name, newId: () => `${name}-${++n}`, now: () => (t += 1000) };
   await ensureDevice(db, w, 'owner');
   const engine = new SyncEngine(db, () => t);
-  const events = { data: 0, first: 0 };
+  const events = { data: 0, first: 0, after: 0 };
   const ctl = new SyncController(engine, {
     afterApply: () => repointMerged(db, w),
     onData: () => events.data++,
     onFirstSync: () => events.first++,
+    afterSync: () => events.after++,
   });
   const remote = cloud.client('uid');
   const signIn = () => ctl.setAccount({ uid: 'uid', email: 'shop@example.com', remote });
@@ -46,6 +47,8 @@ describe('SyncController', () => {
     expect(cloud.writes).toBe(1);
     expect(a.ctl.current).toMatchObject({ phase: 'idle', email: 'shop@example.com', stats: { pending: 0, writesToday: 1 } });
     expect(a.events.first).toBe(1);
+    // ফোনগুলো check runs after each successful run
+    expect(a.events.after).toBeGreaterThanOrEqual(1);
     expect(seen.map((s) => s.phase)).toContain('syncing');
     a.ctl.dispose();
   });

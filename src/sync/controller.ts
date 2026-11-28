@@ -35,6 +35,8 @@ export interface ControllerHooks {
   onData?: () => void;
   /** The user said হ্যাঁ to "মুছবেন?" after another phone's wipe: erase this phone (files too). */
   wipeLocal?: () => Promise<void>;
+  /** After each successful run (ফোনগুলো: remote logout, last seen). */
+  afterSync?: () => void;
 }
 
 export const SAVE_DEBOUNCE_MS = 3_000;
@@ -238,6 +240,7 @@ export class SyncController {
       const more = await this.engine.push();
       await this.engine.markSynced();
       this.failures = 0;
+      this.hooks.afterSync?.();
       await this.publish({ phase: pushed.budgetHit || more.budgetHit ? 'budget' : 'idle', lastError: null, wipePending: null });
       return true;
     } catch (e) {

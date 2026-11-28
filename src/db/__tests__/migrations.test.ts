@@ -311,8 +311,8 @@ describe('v7–v9 (shared by main and exp/gemini-audio)', () => {
     expect(() => db.exec("UPDATE sales SET quantity = 1 WHERE id = 's1'")).toThrow(/append-only/);
   }
 
-  it('v7–v9 are shared by every branch (the latest is now 16)', () => {
-    expect(SCHEMA_VERSION).toBe(16);
+  it('v7–v9 are shared by every branch (the latest is now 17)', () => {
+    expect(SCHEMA_VERSION).toBe(17);
   });
 
   it('v6 shop phone (main) → v9: data kept, new columns null', async () => {
@@ -666,6 +666,35 @@ describe('v10: voided + entry_at (corrections and undo)', () => {
     // new columns: who it was said for, from a customer's screen
     old.exec("INSERT INTO understand_queue (voice_log_id, tab, queued_at, customer, kind) VALUES ('vq2', 'ledger', 5, 'সাজু', 'joma')");
     expect(old.prepare('SELECT state, customer, kind FROM understand_queue').get()).toEqual({ state: 'waiting', customer: 'সাজু', kind: 'joma' });
+    old.close();
+  });
+  it('v16 shop phone (two phones synced) → v17: every row kept, devices get the ফোনগুলো columns (null), device_events empty and append-only', async () => {
+    const old = v9Shop();
+    for (let v = 9; v < 16; v++) old.exec(`${MIGRATIONS[v]}\nPRAGMA user_version = ${v + 1};`);
+    insert(old, 'devices', { ...row('d2'), device_id: 'd2', device_name: 'রফিক', role: 'staff' });
+    old.exec("INSERT INTO sync_state (tbl, row_id, pushed_at) VALUES ('devices', 'd2', 1763000000000)");
+    old.exec("INSERT INTO understand_queue (voice_log_id, tab, queued_at, customer, kind) VALUES ('v1', 'ledger', 5, 'করিম', 'joma')");
+    const before = dumpAll(old);
+    await expect(migrate(adapter(old))).resolves.toBe(16);
+    expect(old.prepare('PRAGMA user_version').get()).toEqual({ user_version: SCHEMA_VERSION });
+    const after = dumpAll(old);
+    for (const t of TABLES) {
+      expect(after[t]!.map((r) => Object.fromEntries(Object.keys(before[t]![0] ?? {}).map((c) => [c, r[c]])))).toEqual(before[t]);
+    }
+    expect(old.prepare('SELECT id, model, session_id, signed_in, last_seen_at FROM devices ORDER BY id').all()).toEqual([
+      { id: 'd1', model: null, session_id: null, signed_in: null, last_seen_at: null },
+      { id: 'd2', model: null, session_id: null, signed_in: null, last_seen_at: null },
+    ]);
+    expect(old.prepare('SELECT * FROM sync_state').all()).toEqual([{ tbl: 'devices', row_id: 'd2', pushed_at: 1763000000000 }]);
+    expect(old.prepare('SELECT customer FROM understand_queue').all()).toEqual([{ customer: 'করিম' }]);
+    // the new columns and table
+    old.exec("UPDATE devices SET model = 'Pixel 7', session_id = 's1', signed_in = 1, last_seen_at = 5 WHERE id = 'd1'");
+    expect(() => old.exec("UPDATE devices SET signed_in = 2 WHERE id = 'd1'")).toThrow(/CHECK/);
+    expect(old.prepare('SELECT COUNT(*) AS n FROM device_events').get()).toEqual({ n: 0 });
+    insert(old, 'device_events', { ...row('e1'), device_name: 'আব্বু', target_device_id: 'd2', action: 'logout', target_session: 's9' });
+    expect(() => old.exec("UPDATE device_events SET action = 'admin_on'")).toThrow(/append-only/);
+    expect(() => old.exec('DELETE FROM device_events')).toThrow(/append-only/);
+    expect(() => insert(old, 'device_events', { ...row('e2'), device_name: 'x', target_device_id: 'd2', action: 'boss' })).toThrow(/CHECK/);
     old.close();
   });
 });

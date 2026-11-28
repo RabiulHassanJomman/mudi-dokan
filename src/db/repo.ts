@@ -1175,7 +1175,7 @@ const WIPE_ORDER = [
 /**
  * "সব তথ্য মুছুন" on this phone: every entry, product, customer, voice log and the shop row, and
  * all sync / Drive / queue bookkeeping, so the phone starts like new. Keeps this phone's own
- * devices row (the other phones' rows go) and the sync_meta keys in `keepMeta` (the account,
+ * devices row (the other phones' rows and every device_events row go) and the sync_meta keys in `keepMeta` (the account,
  * the wipe already seen). The append-only DELETE guards are dropped and re-created inside one
  * transaction. Returns the audio files to delete from the phone.
  */
@@ -1185,6 +1185,10 @@ export async function wipeAllData(db: Db, keepDeviceId: string | null, keepMeta:
     for (const t of ENTRY_TABLES) await db.runAsync(`DROP TRIGGER ${t}_no_delete`);
     for (const t of WIPE_ORDER) await db.runAsync(`DELETE FROM ${t}`);
     await db.runAsync('DELETE FROM devices WHERE id IS NOT ?', keepDeviceId);
+    // who is অ্যাডমিন starts over too (the first phone to ask takes it again)
+    await db.runAsync('DROP TRIGGER device_events_no_delete');
+    await db.runAsync('DELETE FROM device_events');
+    await db.runAsync(noDeleteTrigger('device_events'));
     for (const t of ENTRY_TABLES) await db.runAsync(noDeleteTrigger(t));
     for (const t of ['sync_state', 'sync_inbox', 'audio_queue', 'understand_queue']) await db.runAsync(`DELETE FROM ${t}`);
     const ph = keepMeta.map(() => '?').join(', ');

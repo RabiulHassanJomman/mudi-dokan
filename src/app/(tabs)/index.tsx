@@ -129,7 +129,7 @@ export default function SaleScreen() {
       <ScreenHeader
         title={shopName ?? 'আমার দোকান'}
         onListen={readScreen}
-        onSettings={() => nav.push({ pathname: '/setup', params: { edit: '1' } })}
+        onSettings={() => nav.push('/settings')}
       />
       <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
         <Pressable

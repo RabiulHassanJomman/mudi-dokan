@@ -12,7 +12,7 @@ service cloud.firestore {
         return request.auth != null && request.auth.uid == uid;
       }
       function knownTable() {
-        return table in ['shop', 'devices', 'products', 'customers', 'product_aliases',
+        return table in ['shop', 'devices', 'device_events', 'products', 'customers', 'product_aliases',
           'customer_aliases', 'voice_logs', 'purchases', 'sales', 'ledger', 'expenses',
           'owner_withdrawals', 'day_close', 'meta'];
       }

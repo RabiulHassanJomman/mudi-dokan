@@ -8,6 +8,7 @@ import { nav } from '../lib/nav';
 import { mergePairs, onFirstSync, startSync } from '../sync/app';
 import { startDrive } from '../drive/app';
 import { WipeNotice } from '../components/WipeNotice';
+import { RemoteLogoutNotice } from '../components/RemoteLogoutNotice';
 import { registerDriveTask } from '../drive/background';
 import { startUnderstand } from '../lib/understand';
 import { colors } from '../theme/tokens';
@@ -25,6 +26,7 @@ export default function RootLayout() {
       <NavReady />
       <SyncBoot />
       <WipeNotice />
+      <RemoteLogoutNotice />
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.bg } }}>
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="say" options={{ animation: 'fade' }} />
@@ -39,6 +41,8 @@ export default function RootLayout() {
         <Stack.Screen name="cash" />
         <Stack.Screen name="cash-count" />
         <Stack.Screen name="history" />
+        <Stack.Screen name="settings" />
+        <Stack.Screen name="devices" />
         <Stack.Screen name="sync" />
         <Stack.Screen name="drive" />
         <Stack.Screen name="backup" />

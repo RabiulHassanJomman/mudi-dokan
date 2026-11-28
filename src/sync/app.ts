@@ -13,17 +13,20 @@ import { addDatabaseChangeListener, openDatabaseAsync } from 'expo-sqlite';
 
 import { DATABASE_NAME } from '../db/client';
 import { adoptCloudShop, dismissedMerges, mergeItems, repointMerged } from '../db/repo';
-import { getDevice, writer } from '../device';
+import { clearSession, deviceModel, getDevice, getSession, startSession, writer } from '../device';
+import { markSignedIn, markSignedOut } from '../db/devices';
 import { afterLocalWipe } from '../wipe/files';
 import { duplicatePairs, type MergePair } from '../domain/merge';
 import type { Db } from '../db/repo';
-import { watchAccount } from './auth';
+import { signOut, watchAccount } from './auth';
+import { checkPresence } from './presence';
 import { SyncController, type SyncStatus } from './controller';
 import { SyncEngine } from './engine';
 import { firestoreRemote } from './firestore';
 import { SYNC_TABLE_NAMES } from './tables';
 
 let controller: SyncController | null = null;
+let syncDbRef: Db | null = null;
 let starting: Promise<SyncController> | null = null;
 
 let dataVersion = 0;
@@ -53,7 +56,11 @@ async function boot(): Promise<SyncController> {
   const ctl = new SyncController(engine, {
     afterApply: () => repointMerged(syncDb as unknown as Db, writer()),
     adoptShop: (shop) => adoptCloudShop(syncDb as unknown as Db, writer(), shop),
-    onData: bumpData,
+    onData: () => {
+      bumpData();
+      presence();
+    },
+    afterSync: () => presence(),
     // another phone erased the shop and the user said হ্যাঁ: this phone too, files included
     wipeLocal: async () => {
       await afterLocalWipe(await engine.wipeLocal(getDevice().id));
@@ -63,9 +70,19 @@ async function boot(): Promise<SyncController> {
     },
   });
   controller = ctl;
+  syncDbRef = syncDb as unknown as Db;
 
   watchAccount((a) => {
-    void ctl.setAccount(a ? { uid: a.uid, email: a.email, remote: firestoreRemote(a.uid) } : null);
+    void (async () => {
+      if (a) {
+        // ফোনগুলো: this phone says it is signed in (a new session per sign-in), pushed with the first sync
+        const session = getSession() ?? startSession();
+        await engine
+          .exclusive(() => markSignedIn(syncDb as unknown as Db, writer(), session, deviceModel()))
+          .catch((e) => console.warn('markSignedIn failed', e));
+      } else clearSession();
+      await ctl.setAccount(a ? { uid: a.uid, email: a.email, remote: firestoreRemote(a.uid) } : null);
+    })();
   });
   NetInfo.addEventListener((s) => ctl.setOnline(!!s.isConnected && s.isInternetReachable !== false));
   AppState.addEventListener('change', (s) => ctl.setActive(s === 'active'));
@@ -77,6 +94,73 @@ async function boot(): Promise<SyncController> {
 }
 
 export const syncController = () => controller;
+
+// ── ফোনগুলো: remote logout, last seen ─────────────────────────
+
+let checking = false;
+let leaving = false;
+const logoutSubs = new Set<(v: boolean) => void>();
+let remoteLoggedOut = false;
+
+/** After a sync or rows from other phones: did an admin log this phone out? */
+function presence(): void {
+  const ctl = controller;
+  const db = syncDbRef;
+  if (!ctl || !db || checking || leaving) return;
+  checking = true;
+  void ctl.engine
+    .exclusive(() => checkPresence(db, writer(), getSession()))
+    .then(async (p) => {
+      if (p === 'touched') ctl.localChange();
+      if (p !== 'logout') return;
+      await leave(false);
+      remoteLoggedOut = true;
+      for (const fn of logoutSubs) fn(true);
+    })
+    .catch((e) => console.warn('presence failed', e))
+    .finally(() => {
+      checking = false;
+    });
+}
+
+/**
+ * লগ আউট: this phone's row says so and is sent first (a few seconds at most: offline, the
+ * next sign-in replaces it anyway), then Google/Firebase sign-out. The data stays on the phone.
+ */
+async function leave(mark: boolean): Promise<void> {
+  const ctl = controller;
+  const db = syncDbRef;
+  leaving = true;
+  try {
+    if (ctl && db) {
+      if (mark) await ctl.engine.exclusive(() => markSignedOut(db, writer()));
+      await Promise.race([ctl.engine.push(), new Promise((r) => setTimeout(r, 5_000))]).catch(() => undefined);
+    }
+    clearSession();
+    await signOut();
+  } finally {
+    leaving = false;
+  }
+}
+
+/** The লগ আউট button (AccountCard). */
+export const signOutShop = () => leave(true);
+
+/** An admin logged this phone out (the notice shows until ঠিক আছে). */
+export function useRemoteLogout(): [boolean, () => void] {
+  const [v, setV] = useState(remoteLoggedOut);
+  useEffect(() => {
+    logoutSubs.add(setV);
+    return () => {
+      logoutSubs.delete(setV);
+    };
+  }, []);
+  const dismiss = () => {
+    remoteLoggedOut = false;
+    for (const fn of logoutSubs) fn(false);
+  };
+  return [v, dismiss];
+}
 
 /** Settings › সিঙ্ক, the account card. */
 export function useSyncStatus(): SyncStatus | null {

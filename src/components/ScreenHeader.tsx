@@ -8,7 +8,7 @@ interface Props {
   title: string;
   /** "শুনুন" reads the screen aloud. */
   onListen?: () => void;
-  /** ⚙ (home only): shop/phone settings = Setup in edit mode. */
+  /** ⚙ (home only): সেটিংস. */
   onSettings?: () => void;
 }
 
@@ -22,7 +22,7 @@ export function ScreenHeader({ title, onListen, onSettings }: Props) {
       {onSettings && (
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="দোকানের তথ্য"
+          accessibilityLabel="সেটিংস"
           onPress={onSettings}
           style={({ pressed }) => [styles.settings, pressed && { opacity: 0.85 }]}
         >

@@ -1,16 +1,16 @@
 -- Merging decision tree log ---
 manifest
-ADDED from /Users/jomman/mudi-dokan/modules/audio-compress/android/build/intermediates/tmp/ProcessLibraryManifest/release/tempAndroidManifest10348575360983716215.xml:2:13-83
-INJECTED from /Users/jomman/mudi-dokan/modules/audio-compress/android/build/intermediates/tmp/ProcessLibraryManifest/release/tempAndroidManifest10348575360983716215.xml:2:13-83
+ADDED from /Users/jomman/mudi-dokan/modules/audio-compress/android/build/intermediates/tmp/ProcessLibraryManifest/release/tempAndroidManifest1815214335099627690.xml:2:13-83
+INJECTED from /Users/jomman/mudi-dokan/modules/audio-compress/android/build/intermediates/tmp/ProcessLibraryManifest/release/tempAndroidManifest1815214335099627690.xml:2:13-83
 	package
-		INJECTED from /Users/jomman/mudi-dokan/modules/audio-compress/android/build/intermediates/tmp/ProcessLibraryManifest/release/tempAndroidManifest10348575360983716215.xml
+		INJECTED from /Users/jomman/mudi-dokan/modules/audio-compress/android/build/intermediates/tmp/ProcessLibraryManifest/release/tempAndroidManifest1815214335099627690.xml
 	xmlns:android
-		ADDED from /Users/jomman/mudi-dokan/modules/audio-compress/android/build/intermediates/tmp/ProcessLibraryManifest/release/tempAndroidManifest10348575360983716215.xml:2:23-81
+		ADDED from /Users/jomman/mudi-dokan/modules/audio-compress/android/build/intermediates/tmp/ProcessLibraryManifest/release/tempAndroidManifest1815214335099627690.xml:2:23-81
 uses-sdk
-INJECTED from /Users/jomman/mudi-dokan/modules/audio-compress/android/build/intermediates/tmp/ProcessLibraryManifest/release/tempAndroidManifest10348575360983716215.xml reason: use-sdk injection requested
-INJECTED from /Users/jomman/mudi-dokan/modules/audio-compress/android/build/intermediates/tmp/ProcessLibraryManifest/release/tempAndroidManifest10348575360983716215.xml
-INJECTED from /Users/jomman/mudi-dokan/modules/audio-compress/android/build/intermediates/tmp/ProcessLibraryManifest/release/tempAndroidManifest10348575360983716215.xml
+INJECTED from /Users/jomman/mudi-dokan/modules/audio-compress/android/build/intermediates/tmp/ProcessLibraryManifest/release/tempAndroidManifest1815214335099627690.xml reason: use-sdk injection requested
+INJECTED from /Users/jomman/mudi-dokan/modules/audio-compress/android/build/intermediates/tmp/ProcessLibraryManifest/release/tempAndroidManifest1815214335099627690.xml
+INJECTED from /Users/jomman/mudi-dokan/modules/audio-compress/android/build/intermediates/tmp/ProcessLibraryManifest/release/tempAndroidManifest1815214335099627690.xml
 	android:targetSdkVersion
-		INJECTED from /Users/jomman/mudi-dokan/modules/audio-compress/android/build/intermediates/tmp/ProcessLibraryManifest/release/tempAndroidManifest10348575360983716215.xml
+		INJECTED from /Users/jomman/mudi-dokan/modules/audio-compress/android/build/intermediates/tmp/ProcessLibraryManifest/release/tempAndroidManifest1815214335099627690.xml
 	android:minSdkVersion
-		INJECTED from /Users/jomman/mudi-dokan/modules/audio-compress/android/build/intermediates/tmp/ProcessLibraryManifest/release/tempAndroidManifest10348575360983716215.xml
+		INJECTED from /Users/jomman/mudi-dokan/modules/audio-compress/android/build/intermediates/tmp/ProcessLibraryManifest/release/tempAndroidManifest1815214335099627690.xml
