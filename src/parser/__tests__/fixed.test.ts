@@ -189,3 +189,46 @@ describe('কেনা heard as "কেন" / "কিনা" (debug log, Pixel 7
     expect(parseFixed('সাজু ১০০ টাকার চাল বাকি নিল কেন').kind).toBe('baki');
   });
 });
+
+describe('more mishearings from the debug log (Pixel 7, Nov 27–28)', () => {
+  const ctx: FixedContext = { knownCustomers: ['সাজু'], knownProducts: ['আলু', 'চাল', 'আটা', 'ময়দা', 'সুজি', 'টুথপেস্ট'] };
+
+  it('বাকি heard as বাঁকে / পাখি / মাকে / ভাগে (an amount, no other type word)', () => {
+    expect(parseFixed('সাজুর বাঁকে ৫০ টাকা', ctx)).toMatchObject({ kind: 'baki', customer: 'সাজু', amount: 50, problems: [] });
+    expect(parseFixed('সাজু পাখি ৫০ টাকা', ctx)).toMatchObject({ kind: 'baki', customer: 'সাজু', amount: 50, problems: [] });
+    expect(parseFixed('সাজুর পাখি ৫০ টাকা', ctx)).toMatchObject({ kind: 'baki', customer: 'সাজু', amount: 50, problems: [] });
+    expect(parseFixed('সাজু মাকে নিয়েছে ৫০ টাকা', ctx)).toMatchObject({ kind: 'baki', customer: 'সাজু', amount: 50, problems: [] });
+    expect(parseFixed('সাজু মাকে নিয়েছে আধা চাল ১০০ টাকা', ctx)).toMatchObject({ kind: 'baki', customer: 'সাজু', amount: 100 });
+    expect(parseFixed('সাজুর ভাগে ৫০ টাকা', ctx)).toMatchObject({ kind: 'baki', customer: 'সাজু', amount: 50, problems: [] });
+    expect(parseFixed('সাজু বাঁকে নিয়েছে কাল আটা ময়দা সুজি ১০০ টাকা', ctx)).toMatchObject({ kind: 'baki', customer: 'সাজু', amount: 100 });
+  });
+
+  it('...but not without an amount, or with another type word', () => {
+    expect(parseFixed('পাখি', ctx).kind).toBeNull();
+    expect(parseFixed('মাকে নিয়েছে', ctx).kind).toBeNull();
+    expect(parseFixed('সাজু ৫০ টাকা জমা দিয়েছে মাকে', ctx).kind).toBe('joma');
+  });
+
+  it('name and বাকি written as one word', () => {
+    expect(parseFixed('সাজুবাকে ১০০ টাকা', ctx)).toMatchObject({ kind: 'baki', customer: 'সাজু', amount: 100, problems: [] });
+    expect(parseFixed('সাজুরবাকি ৫০ টাকা', ctx)).toMatchObject({ kind: 'baki', customer: 'সাজু', amount: 50, problems: [] });
+    // বাকি alone is untouched
+    expect(parseFixed('সাজু বাকি ৫০ টাকা', ctx)).toMatchObject({ kind: 'baki', customer: 'সাজু', amount: 50 });
+  });
+
+  it('নগদ heard as a place name', () => {
+    expect(parseFixed('নবদ্বীপে ৪০০ টাকা', ctx)).toMatchObject({ kind: 'cash_sale', amount: 400, problems: [] });
+    expect(parseFixed('নবদ্বীপে চাঁদ একশ টাকা', ctx)).toMatchObject({ kind: 'cash_sale', amount: 100 });
+    expect(parseFixed('সাজু নগরদীপি ৫০ টাকা', ctx)).toMatchObject({ kind: 'cash_sale', amount: 50 });
+    expect(parseFixed('নগর বিক্রি চাল ১০০ টাকা', ctx)).toMatchObject({ kind: 'cash_sale', goods: ['চাল'], amount: 100, problems: [] });
+    // নগর alone stays a word
+    expect(parseFixed('নগর ১০০ টাকা', ctx).kind).toBeNull();
+  });
+
+  it('কেনা heard as "কেন" right before হয়েছে, anywhere in a sentence with টাকা', () => {
+    expect(parseFixed('আলু কেন হয়েছে এক হাজার টাকা', ctx)).toMatchObject({ kind: 'purchase', goods: ['আলু'], amount: 1000, problems: [] });
+    expect(parseFixed('২০০ টাকা টুথপেস্ট কেন হয়েছে', ctx)).toMatchObject({ kind: 'purchase', goods: ['টুথপেস্ট'], amount: 200, problems: [] });
+    // no money: "কেন হয়েছে" (why did it happen) stays
+    expect(parseFixed('চাল শেষ কেন হয়েছে', ctx).kind).toBeNull();
+  });
+});

@@ -83,25 +83,58 @@ function words(text: string): Word[] {
   const list = text
     .split(/[,،](?![0-9০-৯])|(?<![0-9০-৯])[,،]/)
     .flatMap((part) => tokenize(part).map((t, n) => ({ text: fixSpelling(t), starts: n === 0 })));
-  return kenaInContext(list);
+  return heardInContext(list);
 }
 
-/**
- * Google writes a spoken কেনা as "কেন" / "কেনো" / "কিনা" ("১০০০ টাকার আলু কেন"). They are real words
- * (why / whether), so spelling.ts leaves them; only at the end of a "<টাকা>র …" sentence with no
- * other type word (then maybe হয়েছে / হইছে / হলো) is it কেনা.
+/*
+ * Words Google writes for a type word that are real words themselves, so spelling.ts can't change
+ * them everywhere (debug log, Pixel 7, Nov 27–28). Only in a sentence with টাকা and no type word
+ * yet, and only one word is changed:
+ *  - কেনা as "কেন" / "কেনো" / "কিনা": at the end of a "<টাকা>র …" sentence (then maybe হয়েছে …),
+ *    or right before হয়েছে / হইছে ("আলু কেন হয়েছে এক হাজার টাকা")
+ *  - নগদ as "নগর" right before বিক্রি
+ *  - name + বাকি as one word ("সাজুবাকে", "সাজুরবাকি") → split
+ *  - বাকি as "বাঁকে" / "পাখি" / "মাকে" / "ভাগে"
  */
 const KENA_HEARD = wordSet(['কেন', 'কেনো', 'কিনা']);
 const AFTER_KENA = wordSet(['হয়েছে', 'হইছে', 'হলো', 'হইলো', 'হয়', 'হল', 'হইল']);
+const KENA_DONE = wordSet(['হয়েছে', 'হইছে']);
 const MONEY_OF = wordSet(['টাকার']);
+const NOGOR = wordSet(['নগর']);
+const SALE = wordSet(['বিক্রি', 'বিক্রিতে']);
+const BAKI_HEARD = wordSet(['বাঁকে', 'পাখি', 'মাকে', 'ভাগে']);
+/** Stem of 3+ letters ("বাবাকে" is "to father", not বা + বাকে). */
+const JOINED_BAKI = new RegExp(`^(.{3,}?)(${['বাকি', 'বাকী', 'বাকে', 'বাঁকে', 'বাঁকি'].map(nfc).join('|')})$`, 'u');
 
-function kenaInContext(ws: readonly Word[]): Word[] {
-  if (!ws.some((w) => MONEY_OF.has(w.text))) return [...ws];
-  let i = ws.length - 1;
-  while (i >= 0 && AFTER_KENA.has(ws[i]!.text)) i--;
-  if (i < 0 || !KENA_HEARD.has(ws[i]!.text)) return [...ws];
-  if (ws.some((w, n) => n !== i && kindOf(w.text) !== undefined)) return [...ws];
-  return ws.map((w, n) => (n === i ? { ...w, text: 'কেনা'.normalize('NFC') } : w));
+function heardInContext(ws: readonly Word[]): Word[] {
+  const list = [...ws];
+  if (!list.some((w) => K.MONEY.has(w.text)) || list.some((w) => kindOf(w.text) !== undefined)) return list;
+  const set = (i: number, text: string) => list.map((w, n) => (n === i ? { ...w, text: nfc(text) } : w));
+
+  // কেনা: at the end of a "টাকার" sentence, or right before হয়েছে / হইছে
+  if (list.some((w) => MONEY_OF.has(w.text))) {
+    let i = list.length - 1;
+    while (i >= 0 && AFTER_KENA.has(list[i]!.text)) i--;
+    if (i >= 0 && KENA_HEARD.has(list[i]!.text)) return set(i, 'কেনা');
+  }
+  const before = list.findIndex((w, n) => KENA_HEARD.has(w.text) && KENA_DONE.has(list[n + 1]?.text ?? ''));
+  if (before >= 0) return set(before, 'কেনা');
+
+  // নগদ: "নগর বিক্রি"
+  const nogor = list.findIndex((w, n) => NOGOR.has(w.text) && SALE.has(list[n + 1]?.text ?? ''));
+  if (nogor >= 0) return set(nogor, 'নগদ');
+
+  // বাকি joined to the name: "সাজুবাকে" → সাজু বাকি
+  const joined = list.findIndex((w) => JOINED_BAKI.test(w.text));
+  if (joined >= 0) {
+    const m = JOINED_BAKI.exec(list[joined]!.text)!;
+    return [...list.slice(0, joined), { ...list[joined]!, text: m[1]! }, { text: nfc('বাকি'), starts: false }, ...list.slice(joined + 1)];
+  }
+
+  // বাকি as বাঁকে / পাখি / মাকে / ভাগে
+  const baki = list.findIndex((w) => BAKI_HEARD.has(w.text));
+  if (baki >= 0) return set(baki, 'বাকি');
+  return list;
 }
 
 interface Taken {
