@@ -10,6 +10,7 @@ import { parseCommand } from '../../parser';
 import type { ParseContext } from '../../parser/types';
 import {
   addProductAlias,
+  adoptCloudShop,
   cashDay,
   createVoiceLog,
   customerBalances,
@@ -520,5 +521,38 @@ describe('account', () => {
     expect(pending).toBeGreaterThan(0);
     await a.engine.push();
     expect(cloud.docs('other-uid', 'products')).toHaveLength(1);
+  });
+});
+
+describe('a phone erased by an admin signs in again', () => {
+  it('gets every বাকি/জমা back, and nothing on any phone is cancelled', async () => {
+    const cloud = new FakeCloud();
+    const a = await shopA(cloud);
+    const b = await phone(cloud, 'B', at(D1, 9));
+    await sync(a);
+    await b.engine.firstSync((shop) => adoptCloudShop(b.db, b.w, shop));
+    await enter(b, 'করিম ৫০০ টাকা বাকি', 'ledger', asNew);
+    await enter(b, 'করিম ২০০ টাকা জমা', 'ledger');
+    await enter(a, 'সাজু ৩০০ টাকা বাকি', 'ledger', asNew);
+    await sync(b);
+    await sync(a);
+    await sync(b);
+    const live = (p: Phone) => count(p, 'SELECT COUNT(*) AS n FROM v_ledger');
+    expect([live(a), live(b)]).toEqual([3, 3]);
+
+    // B is erased (remote logout) and signs in again
+    await b.engine.push();
+    b.engine.setRemote(null);
+    await b.engine.wipeLocal('dev-B');
+    expect(live(b)).toBe(0);
+    b.engine.setRemote(b.remote);
+    await b.engine.useAccount('shop-uid');
+    const first = await b.engine.firstSync((shop) => adoptCloudShop(b.db, b.w, shop));
+    await repointMerged(b.db, b.w);
+    await b.engine.push();
+    await sync(a);
+    expect(first.cloudShop).toBe(true);
+    expect(count(b, 'SELECT COUNT(*) AS n FROM ledger WHERE voided = 1') + count(a, 'SELECT COUNT(*) AS n FROM ledger WHERE voided = 1')).toBe(0);
+    expect([live(a), live(b)]).toEqual([3, 3]);
   });
 });
