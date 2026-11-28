@@ -16,6 +16,7 @@ import {
   adminIds,
   canClaimAdmin,
   canLogOut,
+  canMakeAdmin,
   canRemoveAdmin,
   deviceCards,
   devicesReadout,
@@ -91,6 +92,7 @@ export default function DevicesScreen() {
       } else {
         if (!now.has(meId)) throw new Error('not admin');
         if (ask.action === 'admin_off' && !canRemoveAdmin(now, target)) throw new Error('last admin');
+        if (ask.action === 'admin_on' && rows.find((r) => r.id === target)?.signed_in !== 1) throw new Error('not signed in');
         const session = ask.action === 'logout' ? (rows.find((r) => r.id === target)?.session_id ?? null) : null;
         if (ask.action === 'logout' && !session) throw new Error('no session');
         await addDeviceEvent(db, w, { target, action: ask.action, targetSession: session });
@@ -171,7 +173,7 @@ export default function DevicesScreen() {
 
 function PhoneCard({ card: c, meAdmin, canDropAdmin, onAction }: { card: DeviceCard; meAdmin: boolean; canDropAdmin: boolean; onAction: (a: DeviceAction) => void }) {
   const stateColor = c.state === 'in' ? colors.saleDark : c.state === 'leaving' ? colors.bakiInk : colors.muted;
-  const showAdminOn = meAdmin && !c.isAdmin && c.state !== 'unknown';
+  const showAdminOn = meAdmin && canMakeAdmin(c);
   const showAdminOff = meAdmin && c.isAdmin && canDropAdmin;
   const showLogout = meAdmin && canLogOut(c);
   return (

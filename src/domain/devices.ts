@@ -48,11 +48,13 @@ export interface DeviceCard {
 
 const later = (a: DeviceEvent, b: DeviceEvent) => a.created_at > b.created_at || (a.created_at === b.created_at && a.id > b.id);
 
-/** Phones that are অ্যাডমিন now: the latest admin_on / admin_off per phone. */
+/**
+ * Phones that are অ্যাডমিন now: the latest admin_on / admin_off / logout per phone. A remote
+ * logout takes admin away too, so a removed phone that signs in again is not admin.
+ */
 export function adminIds(events: readonly DeviceEvent[]): Set<string> {
   const last = new Map<string, DeviceEvent>();
   for (const e of events) {
-    if (e.action === 'logout') continue;
     const was = last.get(e.target_device_id);
     if (!was || later(e, was)) last.set(e.target_device_id, e);
   }
@@ -70,6 +72,9 @@ export const canClaimAdmin = (admins: ReadonlySet<string>) => admins.size === 0;
 
 /** The last admin stays: someone must be able to manage the phones. */
 export const canRemoveAdmin = (admins: ReadonlySet<string>, target: string) => admins.has(target) && admins.size > 1;
+
+/** Only a signed-in phone can be made admin (not one that is logged out or on an old app). */
+export const canMakeAdmin = (c: DeviceCard) => !c.isAdmin && c.state === 'in';
 
 /** A signed-in phone (not this one) can be logged out, unless that is already asked. */
 export const canLogOut = (c: DeviceCard) => !c.isMe && c.state === 'in';
@@ -130,7 +135,7 @@ export function actionQuestion(action: DeviceAction | 'claim', name: string): st
     case 'admin_off':
       return `${name}-এর ফোন আর অ্যাডমিন থাকবে না। ঠিক আছে?`;
     case 'logout':
-      return `${name}-এর ফোন লগ আউট হবে, ওই ফোনের সব হিসাব মুছে যাবে। যা পাঠানো হয়নি তা আগে পাঠানো হবে, দোকানের হিসাব অন্য ফোনে থাকবে। ঠিক আছে?`;
+      return `${name}-এর ফোন লগ আউট হবে, অ্যাডমিন থাকলে আর থাকবে না, ওই ফোনের সব হিসাব মুছে যাবে। যা পাঠানো হয়নি তা আগে পাঠানো হবে, দোকানের হিসাব অন্য ফোনে থাকবে। ঠিক আছে?`;
   }
 }
 

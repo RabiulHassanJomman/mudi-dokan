@@ -3,6 +3,7 @@ import {
   adminIds,
   canClaimAdmin,
   canLogOut,
+  canMakeAdmin,
   canRemoveAdmin,
   deviceCards,
   devicesReadout,
@@ -40,10 +41,16 @@ describe('adminIds', () => {
     expect(canClaimAdmin(adminIds([ev('pixel', 'admin_on', 1)]))).toBe(false);
   });
 
-  it('the latest admin_on / admin_off per phone counts; logout events do not touch it', () => {
-    const events = [ev('pixel', 'admin_on', 1), ev('rafiq', 'admin_on', 2), ev('rafiq', 'admin_off', 3), ev('pixel', 'logout', 4, 's1')];
+  it('the latest admin_on / admin_off per phone counts', () => {
+    const events = [ev('pixel', 'admin_on', 1), ev('rafiq', 'admin_on', 2), ev('rafiq', 'admin_off', 3)];
     expect([...adminIds(events)]).toEqual(['pixel']);
     expect([...adminIds([...events, ev('rafiq', 'admin_on', 5)])].sort()).toEqual(['pixel', 'rafiq']);
+  });
+
+  it('a remote logout also takes admin away (signing in again does not bring it back); made admin again later counts', () => {
+    const events = [ev('pixel', 'admin_on', 1), ev('miraj', 'admin_on', 2), ev('miraj', 'logout', 3, 's-m')];
+    expect([...adminIds(events)]).toEqual(['pixel']);
+    expect(adminIds([...events, ev('miraj', 'admin_on', 4)]).has('miraj')).toBe(true);
   });
 
   it('events from two phones at the same ms: the larger id wins (every phone agrees)', () => {
@@ -92,6 +99,18 @@ describe('deviceCards', () => {
     ]);
     expect(cards.find((c) => c.id === 'old')!.seenAt).toBe(50); // an old app: its row's time
     expect(cards.filter(canLogOut).map((c) => c.id)).toEqual(['rafiq']); // not itself, not leaving/out/unknown
+    // only a signed-in phone that isn't admin yet can be made admin
+    expect(cards.filter(canMakeAdmin).map((c) => c.id)).toEqual(['rafiq']);
+  });
+
+  it('a logged-out phone that is still admin (from before) can only have admin removed', () => {
+    const rows = [dev('pixel'), dev('miraj', { signed_in: 0 })];
+    const events = [ev('pixel', 'admin_on', 1), ev('miraj', 'admin_on', 2)];
+    const miraj = deviceCards(rows, events, 'pixel').find((c) => c.id === 'miraj')!;
+    expect(miraj).toMatchObject({ isAdmin: true, state: 'out' });
+    expect(canMakeAdmin(miraj)).toBe(false);
+    expect(canLogOut(miraj)).toBe(false);
+    expect(canRemoveAdmin(adminIds(events), 'miraj')).toBe(true);
   });
 
   it('a blank name shows as নাম নেই', () => {
@@ -111,7 +130,7 @@ describe('words', () => {
   it('every action asks with the phone name', () => {
     expect(actionQuestion('admin_on', 'রফিক')).toMatch(/^রফিক-এর ফোন অ্যাডমিন হবে/);
     expect(actionQuestion('admin_off', 'রফিক')).toMatch(/আর অ্যাডমিন থাকবে না/);
-    expect(actionQuestion('logout', 'রফিক')).toMatch(/লগ আউট হবে, ওই ফোনের সব হিসাব মুছে যাবে/);
+    expect(actionQuestion('logout', 'রফিক')).toMatch(/লগ আউট হবে, অ্যাডমিন থাকলে আর থাকবে না, ওই ফোনের সব হিসাব মুছে যাবে/);
     expect(actionQuestion('logout', 'রফিক')).toMatch(/আগে পাঠানো হবে/);
     expect(actionQuestion('claim', '')).toMatch(/^এই ফোন অ্যাডমিন হবে/);
   });
