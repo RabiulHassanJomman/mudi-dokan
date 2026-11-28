@@ -80,9 +80,28 @@ interface Word {
 /** Tokens, remembering where the text had commas. */
 function words(text: string): Word[] {
   // "1,500" stays one number
-  return text
+  const list = text
     .split(/[,،](?![0-9০-৯])|(?<![0-9০-৯])[,،]/)
     .flatMap((part) => tokenize(part).map((t, n) => ({ text: fixSpelling(t), starts: n === 0 })));
+  return kenaInContext(list);
+}
+
+/**
+ * Google writes a spoken কেনা as "কেন" / "কেনো" / "কিনা" ("১০০০ টাকার আলু কেন"). They are real words
+ * (why / whether), so spelling.ts leaves them; only at the end of a "<টাকা>র …" sentence with no
+ * other type word (then maybe হয়েছে / হইছে / হলো) is it কেনা.
+ */
+const KENA_HEARD = wordSet(['কেন', 'কেনো', 'কিনা']);
+const AFTER_KENA = wordSet(['হয়েছে', 'হইছে', 'হলো', 'হইলো', 'হয়', 'হল', 'হইল']);
+const MONEY_OF = wordSet(['টাকার']);
+
+function kenaInContext(ws: readonly Word[]): Word[] {
+  if (!ws.some((w) => MONEY_OF.has(w.text))) return [...ws];
+  let i = ws.length - 1;
+  while (i >= 0 && AFTER_KENA.has(ws[i]!.text)) i--;
+  if (i < 0 || !KENA_HEARD.has(ws[i]!.text)) return [...ws];
+  if (ws.some((w, n) => n !== i && kindOf(w.text) !== undefined)) return [...ws];
+  return ws.map((w, n) => (n === i ? { ...w, text: 'কেনা'.normalize('NFC') } : w));
 }
 
 interface Taken {

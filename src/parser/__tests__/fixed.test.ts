@@ -170,3 +170,22 @@ describe('real recognizer output (A5, Mac Bangla voice on the Pixel 7, Nov 27)',
     ok('১০০০ টাকার আলু কেনা হয়েছে', { kind: 'purchase', goods: ['আলু'], amount: 1000 });
   });
 });
+
+describe('কেনা heard as "কেন" / "কিনা" (debug log, Pixel 7, Nov 28)', () => {
+  it('at the end of a "… টাকার …" sentence it is কেনা', () => {
+    expect(parseFixed('১০০০ টাকার আলু কেন')).toMatchObject({ kind: 'purchase', goods: ['আলু'], amount: 1000, problems: [] });
+    expect(parseFixed('১০০ টাকার আলু কিনা হয়েছে')).toMatchObject({ kind: 'purchase', goods: ['আলু'], amount: 100, problems: [] });
+    expect(parseFixed('৫০০ টাকার চাল কেনো হইছে।')).toMatchObject({ kind: 'purchase', goods: ['চাল'], amount: 500, problems: [] });
+    // the goods misheard too ("আলু" → "হল", a filler word): still a purchase; the card asks which goods
+    expect(parseFixed('১০০০ টাকার হল কেন')).toMatchObject({ kind: 'purchase', amount: 1000, problems: ['no_goods'] });
+  });
+
+  it('elsewhere "কেন" / "কিনা" stay what they are', () => {
+    // no "টাকার"
+    expect(parseFixed('চাল আছে কিনা').kind).toBeNull();
+    // not at the end
+    expect(parseFixed('কিনা ১০০ টাকার আলু').kind).toBeNull();
+    // another type word: not turned into a second one
+    expect(parseFixed('সাজু ১০০ টাকার চাল বাকি নিল কেন').kind).toBe('baki');
+  });
+});
