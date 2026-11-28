@@ -1,6 +1,7 @@
 import { createVoiceLog, setOutcome } from '../../db/repo';
+import { leaveQueue, queueClip } from '../../db/understand';
 import { migratedDb, testWriter } from '../../db/__tests__/nodeDb';
-import { BACKOFF_MS, PENDING_GRACE_MS, QUEUE_DELAY_MS, backoffMs, pendingUploads, runUploadQueue } from '../queue';
+import { BACKOFF_MS, PENDING_GRACE_MS, QUEUE_DELAY_MS, UNDERSTAND_WAIT_MS, backoffMs, pendingUploads, runUploadQueue } from '../queue';
 import { getMetaNumber } from '../meta';
 import { FakeDrive, fakeFiles } from './fakeDrive';
 
@@ -130,6 +131,22 @@ describe('upload queue', () => {
     const r2 = await runUploadQueue({ db: s.db, api: s.drive, files: fakeFiles(s.disk), now: () => T0 + PENDING_GRACE_MS + 60_000 });
     expect(r2).toMatchObject({ uploaded: 1, left: 0 });
     expect(gone && expired).toBeTruthy();
+  });
+
+  it('a clip recorded offline stays a WAV on the phone until it is read and decided', async () => {
+    const s = await setup();
+    s.disk.set('file:///doc/off.wav', 'RIFF-pcm');
+    const id = await queueClip(s.db, s.w, { audioPath: 'file:///doc/off.wav', tab: 'sale' });
+    let now = T0 + PENDING_GRACE_MS + 60_000;
+    const r = await runUploadQueue({ db: s.db, api: s.drive, files: fakeFiles(s.disk), now: () => now });
+    expect(r).toMatchObject({ uploaded: 0, dropped: 0, left: 1 });
+    expect(s.disk.has('file:///doc/off.wav')).toBe(true);
+    expect((await queue(s))[0]!.next_at).toBe(now + UNDERSTAND_WAIT_MS);
+    // confirmed later: then it goes up like any saved clip
+    await setOutcome(s.db, s.w, id, 'saved');
+    await leaveQueue(s.db, id);
+    now += UNDERSTAND_WAIT_MS;
+    expect(await runUploadQueue({ db: s.db, api: s.drive, files: fakeFiles(s.disk), now: () => now })).toMatchObject({ uploaded: 1, left: 0 });
   });
 
   it('only saved entries go to Drive: a cancelled or not-understood clip is dropped, not uploaded', async () => {

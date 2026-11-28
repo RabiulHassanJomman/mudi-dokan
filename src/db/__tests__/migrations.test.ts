@@ -311,8 +311,8 @@ describe('v7–v9 (shared by main and exp/gemini-audio)', () => {
     expect(() => db.exec("UPDATE sales SET quantity = 1 WHERE id = 's1'")).toThrow(/append-only/);
   }
 
-  it('v7–v9 are shared by every branch (the latest is now 15)', () => {
-    expect(SCHEMA_VERSION).toBe(15);
+  it('v7–v9 are shared by every branch (the latest is now 16)', () => {
+    expect(SCHEMA_VERSION).toBe(16);
   });
 
   it('v6 shop phone (main) → v9: data kept, new columns null', async () => {
@@ -603,7 +603,8 @@ describe('v10: voided + entry_at (corrections and undo)', () => {
     }
     expect(old.prepare('SELECT id, party_id, amount_poisha, at FROM v_ledger ORDER BY id').all()).toEqual(viewBefore);
     expect(old.prepare("SELECT note FROM v_ledger WHERE id = 'l1'").get()).toEqual({ note: null });
-    expect(old.prepare('SELECT COUNT(*) AS n FROM understand_queue').get()).toEqual({ n: 1 });
+    // v16 drops the Gemini-era queue rows (offline 🎤 uses the table again)
+    expect(old.prepare('SELECT COUNT(*) AS n FROM understand_queue').get()).toEqual({ n: 0 });
     insert(old, 'ledger', { ...entry('l2'), party_id: 'c1', kind: 'baki', amount_poisha: 50000, note: 'তেল, আটা, ময়দা, সুজি', created_at: now + 5 });
     expect(old.prepare("SELECT note, amount_poisha FROM v_ledger WHERE id = 'l2'").get()).toEqual({ note: 'তেল, আটা, ময়দা, সুজি', amount_poisha: 50000 });
     // still append-only
@@ -635,6 +636,36 @@ describe('v10: voided + entry_at (corrections and undo)', () => {
     expect(old.prepare("SELECT note, amount_poisha FROM v_sales WHERE id = 's9'").get()).toEqual({ note: 'আদা, চাল', amount_poisha: 10000 });
     // still append-only
     expect(() => old.exec("UPDATE sales SET note = 'x' WHERE id = 's9'")).toThrow(/append-only/);
+    old.close();
+  });
+
+  it('v15 shop phone (Gemini clips left in the queue) → v16: queue emptied, its pending logs cancelled, every other row kept', async () => {
+    const old = v9Shop();
+    for (let v = 9; v < 15; v++) old.exec(`${MIGRATIONS[v]}\nPRAGMA user_version = ${v + 1};`);
+    // a Gemini clip that never got an answer (pending), and one answered and saved but still listed
+    insert(old, 'voice_logs', { ...row('vq1'), transcript: '', device_name: 'আব্বু', audio_path: 'file:///doc/vq1.wav', audio_status: 'local', outcome: 'pending' });
+    insert(old, 'voice_logs', { ...row('vq2'), transcript: 'সাজু ৫০ টাকা জমা', device_name: 'আব্বু', audio_path: 'file:///doc/vq2.aac', audio_status: 'uploaded', drive_file_id: 'drv9', outcome: 'saved' });
+    old.exec("INSERT INTO understand_queue (voice_log_id, tab, state, queued_at) VALUES ('vq1', 'sale', 'waiting', 1763000000000), ('vq2', 'ledger', 'ready', 1763000100000)");
+    old.exec("INSERT INTO audio_queue (voice_log_id, next_at, queued_at) VALUES ('vq1', 1763000120000, 1763000000000)");
+    const before = dumpAll(old);
+    const vq1Before = old.prepare("SELECT updated_at FROM voice_logs WHERE id = 'vq1'").get() as { updated_at: number };
+    await expect(migrate(adapter(old))).resolves.toBe(15);
+    expect(old.prepare('PRAGMA user_version').get()).toEqual({ user_version: SCHEMA_VERSION });
+    const after = dumpAll(old);
+    for (const t of TABLES) {
+      const keep = (rows: Record<string, unknown>[]) => (t === 'voice_logs' ? rows.filter((r) => r.id !== 'vq1') : rows);
+      expect(keep(after[t]!).map((r) => Object.fromEntries(Object.keys(keep(before[t]!)[0] ?? {}).map((c) => [c, r[c]])))).toEqual(keep(before[t]!));
+    }
+    const vq1 = old.prepare("SELECT outcome, transcript, audio_path, updated_at FROM voice_logs WHERE id = 'vq1'").get() as { outcome: string; updated_at: number };
+    expect(vq1).toMatchObject({ outcome: 'cancelled', transcript: '', audio_path: 'file:///doc/vq1.wav' });
+    expect(vq1.updated_at).toBeGreaterThan(vq1Before.updated_at); // the other phones see it
+    expect(old.prepare("SELECT outcome FROM voice_logs WHERE id = 'vq2'").get()).toEqual({ outcome: 'saved' });
+    expect(old.prepare('SELECT COUNT(*) AS n FROM understand_queue').get()).toEqual({ n: 0 });
+    // the upload queue keeps its row (it drops a cancelled clip itself)
+    expect(old.prepare('SELECT voice_log_id FROM audio_queue ORDER BY voice_log_id').all()).toEqual([{ voice_log_id: 'v1' }, { voice_log_id: 'vq1' }]);
+    // new columns: who it was said for, from a customer's screen
+    old.exec("INSERT INTO understand_queue (voice_log_id, tab, queued_at, customer, kind) VALUES ('vq2', 'ledger', 5, 'সাজু', 'joma')");
+    expect(old.prepare('SELECT state, customer, kind FROM understand_queue').get()).toEqual({ state: 'waiting', customer: 'সাজু', kind: 'joma' });
     old.close();
   });
 });

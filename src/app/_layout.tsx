@@ -9,6 +9,7 @@ import { mergePairs, onFirstSync, startSync } from '../sync/app';
 import { startDrive } from '../drive/app';
 import { WipeNotice } from '../components/WipeNotice';
 import { registerDriveTask } from '../drive/background';
+import { startUnderstand } from '../lib/understand';
 import { colors } from '../theme/tokens';
 
 /**
@@ -71,6 +72,8 @@ function SyncBoot() {
     // step 8: voice clips to Drive, nightly backup, 30-day audio retention
     startDrive();
     void registerDriveTask();
+    // offline 🎤: clips recorded with no internet are read when it is back
+    startUnderstand(db);
     return onFirstSync(() => {
       void mergePairs(db).then((p) => {
         if (p.length) nav.push('/merge');

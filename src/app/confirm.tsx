@@ -94,6 +94,10 @@ import { voiceTarget } from '../lib/voice';
 import type { Intent, ParseContext, ParsedCommand } from '../parser/types';
 import { colors, fonts, fontSize, productTiles, radius, size, spacing } from '../theme/tokens';
 import { nav } from '../lib/nav';
+import { useClipPlayer } from '../lib/useClipPlayer';
+import { openNextQueued, queueChanged } from '../lib/understand';
+import { leaveQueue, queuedClip } from '../db/understand';
+import { saidAtWords } from '../domain/offline';
 
 type How = 'voice' | 'typed' | 'pick';
 
@@ -153,7 +157,12 @@ export default function ConfirmScreen() {
    * logId = voice (from the বলুন screen); text = typed; pick = chosen on ছবি দেখে (JSON PickedItem).
    * customer / kind: from the customer screen (জমা নিন / বাকি দিন), used when not said.
    */
-  const params = useLocalSearchParams<{ logId?: string; text?: string; tab?: string; pick?: string; customer?: string; kind?: string; fix?: string }>();
+  const params = useLocalSearchParams<{ logId?: string; text?: string; tab?: string; pick?: string; customer?: string; kind?: string; fix?: string; queued?: string }>();
+  /** Offline 🎤: a sentence recorded with no internet, read later (from the home card). Saved with the time it was said. */
+  const queued = params.queued === '1' && !!params.logId;
+  const queuedAt = useRef<number | null>(null);
+  const [queuedInfo, setQueuedInfo] = useState<{ at: number; audio: string | null } | null>(null);
+  const playClip = useClipPlayer();
   /** ✏️ from History: "sales:<basket id>" or "<table>:<row id>" — the card edits a saved entry. */
   const fixing = !!params.fix;
   const tab = params.tab ?? 'sale';
@@ -236,6 +245,11 @@ export default function ConfirmScreen() {
           const log = await getVoiceLog(db, params.logId);
           transcript = log?.transcript ?? '';
           heardByPhone = true;
+          if (queued) {
+            const q = await queuedClip(db, params.logId);
+            queuedAt.current = q?.queued_at ?? log?.created_at ?? null;
+            if (alive && queuedAt.current) setQueuedInfo({ at: queuedAt.current, audio: q?.audio_path ?? log?.audio_path ?? null });
+          }
         } else {
           transcript = params.text ?? '';
           // empty = the number-pad fallback (voice failed): nothing to parse
@@ -256,8 +270,10 @@ export default function ConfirmScreen() {
           if (e) return showEntry(transcript, e);
           await setOutcome(db, w, logId.current!, 'unsupported');
           decided.current = true;
+          // shown once: the clip can be played here, then it leaves the queue
+          if (queued) await doneQueued();
           setState({ kind: 'unsupported', transcript, intent: 'unknown' });
-          void speak('কিছু বুঝিনি। আবার বলুন।');
+          void speak(queued ? 'এই কথাটা বুঝিনি। শুনে দেখুন, দরকার হলে আবার বলুন।' : 'কিছু বুঝিনি। আবার বলুন।');
           return;
         }
         parsed = parseCommand(transcript, {
@@ -592,10 +608,26 @@ export default function ConfirmScreen() {
     () => () => {
       if (!keepSpeaking.current) stopSpeaking();
       ExpoSpeechRecognitionModule.abort();
-      if (!decided.current && logId.current) void setOutcome(db, writer(), logId.current, 'cancelled');
+      // a queued sentence left without a decision stays in the queue for later
+      if (!decided.current && logId.current && !queued) void setOutcome(db, writer(), logId.current, 'cancelled');
     },
-    [db],
+    [db, queued],
   );
+
+  /** Offline 🎤: decided, out of the queue (the home card counts again). */
+  async function doneQueued() {
+    if (!queued || !logId.current) return;
+    await leaveQueue(db, logId.current).catch(() => undefined);
+    queueChanged();
+  }
+
+  /** After a decision: the next waiting sentence, else back. */
+  const leaveNext = () => {
+    if (!queued) return leave();
+    void openNextQueued(db, 'replace', logId.current).then((opened) => {
+      if (!opened) leave();
+    });
+  };
 
   // ── actions ────────────────────────────────────────────────────
   const leave = () => {
@@ -638,10 +670,11 @@ export default function ConfirmScreen() {
     setSaving(true);
     decided.current = true;
     try {
-      await saveEntry(db, writer(), e, logId.current, firstEntry.current ? diffEntries(firstEntry.current, e) : []);
+      await saveEntry(db, writer(), e, logId.current, firstEntry.current ? diffEntries(firstEntry.current, e) : [], queuedAt.current);
       await learnCustomerAlias(heardCustomer.current, e.customerName);
+      await doneQueued();
       void speak('রাখা হয়েছে।');
-      leave();
+      leaveNext();
     } catch (err) {
       decided.current = false;
       setSaving(false);
@@ -657,11 +690,12 @@ export default function ConfirmScreen() {
       void speak('কিছু বদলায়নি।');
       return leave();
     }
-    if (decided.current || !logId.current) return leave();
+    if (decided.current || !logId.current) return leaveNext();
     decided.current = true;
     await setOutcome(db, writer(), logId.current, 'cancelled');
+    await doneQueued();
     void speak(undoRef.current ? 'ঠিক আছে, কিছু বাতিল হয়নি।' : 'বাতিল।');
-    leave();
+    leaveNext();
   }
 
   const edit = (next: BasketDraft) => {
@@ -675,6 +709,7 @@ export default function ConfirmScreen() {
   const again = () => {
     decided.current = true;
     if (logId.current) void setOutcome(db, writer(), logId.current, 'cancelled');
+    void doneQueued();
     const t = tab === 'purchase' || tab === 'ledger' || tab === 'expense' ? tab : 'sale';
     nav.replace(voiceTarget(t, { ...(params.customer ? { customer: params.customer } : {}), ...(defaultKind ? { kind: defaultKind } : {}) }));
   };
@@ -683,6 +718,7 @@ export default function ConfirmScreen() {
   const pickInstead = () => {
     decided.current = true;
     if (logId.current) void setOutcome(db, writer(), logId.current, 'cancelled');
+    void doneQueued();
     nav.replace({ pathname: '/pick', params: { tab: tab === 'purchase' ? 'purchase' : 'sale' } });
   };
 
@@ -742,6 +778,24 @@ export default function ConfirmScreen() {
         )}
       </View>
 
+      {queuedInfo && (
+        <View style={styles.queued}>
+          <View style={styles.flex}>
+            <Txt size={fontSize.captionLg} weight="bold" color={colors.onColor}>
+              ইন্টারনেট ছিল না, রাখা কথা
+            </Txt>
+            <Txt size={fontSize.captionLg} weight="semibold" color={colors.onDarkMuted}>
+              {`বলা হয়েছে: ${saidAtWords(queuedInfo.at)}`}
+            </Txt>
+          </View>
+          {queuedInfo.audio && (
+            <Pressable accessibilityRole="button" accessibilityLabel="কথাটা শুনুন" onPress={() => playClip(queuedInfo.audio)} style={({ pressed }) => [styles.queuedPlay, pressed && styles.pressed]}>
+              <Icon name="play" size={24} color={colors.ink} />
+            </Pressable>
+          )}
+        </View>
+      )}
+
       {state.kind === 'loading' && (
         <Txt size={fontSize.label} weight="bold" style={styles.center}>
           বুঝছি…
@@ -749,7 +803,7 @@ export default function ConfirmScreen() {
       )}
 
       {state.kind === 'unsupported' && (
-        <Unsupported transcript={state.transcript} how={how} intent={state.intent} onAgain={again} onClose={leave} />
+        <Unsupported transcript={state.transcript} how={how} intent={state.intent} onAgain={again} onClose={leaveNext} />
       )}
 
       {state.kind === 'answer' && (
@@ -1297,6 +1351,8 @@ function Unsupported(props: { transcript: string; how: How; intent: Intent; onAg
 }
 
 const styles = StyleSheet.create({
+  queued: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, backgroundColor: colors.dark, borderRadius: radius.card, paddingVertical: spacing.sm, paddingHorizontal: spacing.lg },
+  queuedPlay: { width: size.iconButton, height: size.iconButton, borderRadius: radius.pill, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center' },
   screen: { flex: 1, backgroundColor: colors.bg, padding: spacing.screen, paddingBottom: 18, gap: spacing.md },
   top: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   back: {

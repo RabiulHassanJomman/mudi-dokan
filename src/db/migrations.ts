@@ -435,10 +435,25 @@ ${V_STOCK}
 `;
 
 /**
+ * v16 (offline 🎤, Nov 28): understand_queue is used again, for clips recorded with no internet
+ * (read later by Google's recognizer from the file). The Gemini-era rows are dropped (decided
+ * Nov 28) and their still-pending logs count as cancelled (so Drive and retention let them go).
+ * customer / kind: said from a customer's screen (জমা নিন / বাকি দিন), read with that customer.
+ * Local only, never synced.
+ */
+const V16 = `
+UPDATE voice_logs SET outcome = 'cancelled', updated_at = CAST(strftime('%s', 'now') AS INTEGER) * 1000
+  WHERE outcome = 'pending' AND id IN (SELECT voice_log_id FROM understand_queue);
+DELETE FROM understand_queue;
+ALTER TABLE understand_queue ADD COLUMN customer TEXT;
+ALTER TABLE understand_queue ADD COLUMN kind TEXT;
+`;
+
+/**
  * Index i holds the SQL that takes the DB from user_version i to i + 1.
  * Append only; never edit or renumber a shipped one.
  */
-export const MIGRATIONS: readonly string[] = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15];
+export const MIGRATIONS: readonly string[] = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16];
 
 /**
  * Nov 14 fork: an early main build shipped v7 = customers.note (no Gemini columns) while

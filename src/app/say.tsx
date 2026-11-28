@@ -16,6 +16,10 @@ import { fixedAsParsed } from '../domain/entry';
 import { joinWav } from '../domain/wav';
 import { within } from '../domain/within';
 import { EXAMPLE_BN, clipUri, examplesSpeech, sayExamples, customerLookup, fixedProblemWords, heardErrorWords, joinPieces, readKeyboardText } from '../domain/keyboard';
+import { OFFLINE_NOTHING_WORDS, OFFLINE_SAVED_WORDS, OFFLINE_START_WORDS, OFFLINE_UNSUPPORTED_WORDS, RECORD_LIMITS, isNetworkError } from '../domain/offline';
+import { queueClip } from '../db/understand';
+import { canRecordWav, recordWav, stopWav } from '../../modules/audio-compress';
+import { CAN_READ_LATER, checkOnline, queueChanged, setMicBusy } from '../lib/understand';
 import { nav } from '../lib/nav';
 import { speak, stopSpeaking } from '../lib/speak';
 import { colors, fonts, fontSize, radius, spacing } from '../theme/tokens';
@@ -46,6 +50,14 @@ export default function SayScreen() {
   /** বিরতি: stopped, the text kept, not sent; চালিয়ে যান listens on. */
   const [paused, setPaused] = useState(false);
   const pausedRef = useRef(false);
+  /**
+   * Offline 🎤: no internet, so the sentence is recorded (own WAV recorder) and read later.
+   * 'telling' = saying "ইন্টারনেট নেই…" before the chime; 'recording' = the mic is open.
+   */
+  const [offline, setOffline] = useState<null | 'telling' | 'recording'>(null);
+  const offlineRef = useRef(false);
+  /** The saved-for-later words go on after this screen closes. */
+  const keepSpeaking = useRef(false);
   /** Final pieces from before this listen (চালিয়ে যান): "nothing heard yet" counts only this listen's. */
   const piecesBefore = useRef(0);
   const beep = useAudioPlayer(BEEP);
@@ -83,6 +95,16 @@ export default function SayScreen() {
     if (why !== 'quiet') quietRetries.current = 0;
     starting.current = true;
     try {
+      // no internet: record now, read later (a quiet restart or চালিয়ে যান keeps the live way)
+      if ((why === 'open' || why === 'tap') && !(await checkOnline())) {
+        if (canRecordLater()) {
+          starting.current = false;
+          await recordOffline();
+        } else {
+          showProblem(OFFLINE_UNSUPPORTED_WORDS);
+        }
+        return;
+      }
       // the mic is open after the beep (not on the quiet restarts): start speaking then
       if (why !== 'quiet') await playBeep();
       await startListening(why === 'quiet' ? 'retry' : why === 'resume' ? 'more' : 'fresh');
@@ -202,6 +224,12 @@ export default function SayScreen() {
       return;
     }
     setListening(false);
+    // the internet went (or Google can't be reached) before anything was heard: record instead
+    if (isNetworkError(e.error) && !pieces.current.length && canRecordLater() && !leaving.current) {
+      dropClip(clips.current.pop() ?? null);
+      void recordOffline();
+      return;
+    }
     // after চালিয়ে যান nothing more was said: back to বিরতি, the earlier text kept
     if (pieces.current.length) {
       dropClip(clips.current.pop() ?? null);
@@ -227,13 +255,17 @@ export default function SayScreen() {
   });
 
   useEffect(() => {
+    // this screen has the mic: no clip is read in the background meanwhile
+    setMicBusy(true);
     // a moment after the screen opens, so the tap that opened it isn't heard
     const t = setTimeout(() => void listen('open'), 300);
     return () => {
       leaving.current = true;
       clearTimeout(t);
       if (listeningRef.current) ExpoSpeechRecognitionModule.abort();
-      stopSpeaking();
+      if (offlineRef.current) stopWav();
+      setMicBusy(false);
+      if (!keepSpeaking.current) stopSpeaking();
       // left without a saved command: the clips aren't kept (ones handed to a log are gone from here)
       clips.current.forEach(dropClip);
       clips.current = [];
@@ -341,6 +373,50 @@ export default function SayScreen() {
     }
   }
 
+  /**
+   * No internet: "ইন্টারনেট নেই…", the chime, then the own recorder (16 kHz WAV) until quiet after
+   * speech, nothing said, or শেষ. Heard → queued with the time speaking started (customer and kind
+   * from a customer's screen), read when the internet is back, confirmed from the home card.
+   */
+  async function recordOffline() {
+    if (offlineRef.current || leaving.current) return;
+    offlineRef.current = true;
+    setOffline('telling');
+    setProblem('');
+    setText('');
+    pieces.current = [];
+    clips.current.forEach(dropClip);
+    clips.current = [];
+    try {
+      await speak(OFFLINE_START_WORDS);
+      if (leaving.current) return;
+      await playBeep();
+      if (leaving.current) return;
+      setOffline('recording');
+      const uri = clipUri(Paths.document.uri, `offline_${Date.now()}.wav`);
+      const r = await recordWav(uri, RECORD_LIMITS);
+      playEndChime();
+      if (leaving.current || !r.heard) {
+        dropClip({ uri: r.uri, ended: true, waiters: [] });
+        if (!leaving.current) showProblem(OFFLINE_NOTHING_WORDS);
+        return;
+      }
+      await queueClip(db, writer(), { audioPath: r.uri, tab: tabParam, customer: customer ?? null, kind: kind ?? null, at: r.startedAt });
+      queueChanged();
+      leaving.current = true;
+      keepSpeaking.current = true;
+      void speak(OFFLINE_SAVED_WORDS);
+      if (nav.canGoBack()) nav.back();
+      else nav.replace('/');
+    } catch (e) {
+      console.warn('offline recording failed', e);
+      if (!leaving.current) showProblem('রেকর্ড করা গেল না। আবার চাপুন।');
+    } finally {
+      offlineRef.current = false;
+      if (!leaving.current) setOffline(null);
+    }
+  }
+
   const clear = () => {
     stopListening();
     pausedRef.current = false;
@@ -392,6 +468,16 @@ export default function SayScreen() {
             ))}
           </View>
 
+          {offline && (
+            <View accessibilityLiveRegion="polite" style={styles.offline}>
+              <Txt wrap size={fontSize.label} weight="bold" color={colors.onColor}>
+                {offline === 'recording' ? 'ইন্টারনেট নেই। রেকর্ড হচ্ছে, বলুন…' : 'ইন্টারনেট নেই। টুং শব্দের পর বলুন।'}
+              </Txt>
+              <Txt wrap size={fontSize.caption} weight="semibold" color={colors.onDarkMuted}>
+                রেখে দেব, ইন্টারনেট এলে বুঝে নেব। পরে বিক্রি পাতায় অপেক্ষার হিসাব থেকে হ্যাঁ দিন।
+              </Txt>
+            </View>
+          )}
           {/* above the text box: below it the keyboard would cover it */}
           {!!problem && (
             <View accessibilityLiveRegion="polite" style={styles.problem}>
@@ -410,7 +496,8 @@ export default function SayScreen() {
             }}
             multiline
             accessibilityLabel="যা বললেন"
-            placeholder={listening ? 'শুনছি… বলুন' : 'এখানে লেখা আসবে…'}
+            placeholder={offline === 'recording' ? 'রেকর্ড হচ্ছে… (ইন্টারনেট এলে লেখা আসবে)' : listening ? 'শুনছি… বলুন' : 'এখানে লেখা আসবে…'}
+            editable={!offline}
             placeholderTextColor={listening ? colors.saleDark : colors.muted}
             style={[styles.input, listening && styles.inputListening, !!problem && styles.inputWarn]}
           />
@@ -432,13 +519,13 @@ export default function SayScreen() {
           )}
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={listening ? 'থামুন' : paused ? 'চালিয়ে যান' : 'মাইক চেপে বলুন'}
-            onPress={() => (listening ? stopListening() : void listen(paused ? 'resume' : 'tap'))}
-            style={({ pressed }) => [styles.mic, listening && styles.micOn, pressed && styles.pressed]}
+            accessibilityLabel={offline ? 'শেষ' : listening ? 'থামুন' : paused ? 'চালিয়ে যান' : 'মাইক চেপে বলুন'}
+            onPress={() => (offline ? stopWav() : listening ? stopListening() : void listen(paused ? 'resume' : 'tap'))}
+            style={({ pressed }) => [styles.mic, (listening || offline === 'recording') && styles.micOn, pressed && styles.pressed]}
           >
-            <Icon name={paused && !listening ? 'play' : 'mic'} size={paused && !listening ? 28 : 34} color={listening ? colors.onColor : colors.saleDark} strokeWidth={2.4} />
-            <Txt size={paused && !listening ? fontSize.label : fontSize.button} weight="bold" color={listening ? colors.onColor : colors.saleDark}>
-              {listening ? 'থামুন' : paused ? 'চালিয়ে যান' : 'বলুন'}
+            <Icon name={offline ? 'check' : paused && !listening ? 'play' : 'mic'} size={paused && !listening && !offline ? 28 : 34} color={listening || offline === 'recording' ? colors.onColor : colors.saleDark} strokeWidth={2.4} />
+            <Txt size={paused && !listening && !offline ? fontSize.label : fontSize.button} weight="bold" color={listening || offline === 'recording' ? colors.onColor : colors.saleDark}>
+              {offline ? 'শেষ' : listening ? 'থামুন' : paused ? 'চালিয়ে যান' : 'বলুন'}
             </Txt>
           </Pressable>
           {!!text && !listening && (
@@ -486,6 +573,7 @@ const styles = StyleSheet.create({
   inputListening: { borderColor: colors.sale },
   inputWarn: { borderColor: colors.baki },
   problem: { backgroundColor: colors.bakiTint, borderRadius: radius.card, padding: spacing.lg },
+  offline: { backgroundColor: colors.dark, borderRadius: radius.card, padding: spacing.lg, gap: 4 },
   actions: { flexDirection: 'row', gap: spacing.sm, paddingHorizontal: spacing.screen, paddingVertical: spacing.sm },
   clear: {
     width: 72,
@@ -528,6 +616,9 @@ const BEEP_MS = 330;
 /** "Done listening": the same chime falling. Kept outside the screen, so it plays on while the card opens. */
 const END_CHIME = require('../../assets/sounds/chime-end.wav') as number; // eslint-disable-line @typescript-eslint/no-require-imports
 let endPlayer: ReturnType<typeof createAudioPlayer> | null = null;
+/** Record now, read later: Android 13+ (reads a file) with the native recorder in the APK. */
+const canRecordLater = () => CAN_READ_LATER && canRecordWav();
+
 function playEndChime() {
   try {
     endPlayer ??= createAudioPlayer(END_CHIME);

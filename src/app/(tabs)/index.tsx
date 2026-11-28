@@ -22,6 +22,8 @@ import { colors, fontSize, productTiles, radius, size, spacing } from '../../the
 import { nav } from '../../lib/nav';
 import { openVoice } from '../../lib/voice';
 import { useDataVersion } from '../../sync/app';
+import { openNextQueued, useQueueCounts } from '../../lib/understand';
+import { waitingNote, waitingSpeech, waitingTitle } from '../../domain/offline';
 
 /** Tile picture and colours per entry type (sale lines keep their product picture). */
 function entryLook(e: RecentEntry): { icon: IconName; tile: string; ink: string; border: string } {
@@ -91,6 +93,14 @@ export default function SaleScreen() {
   const [detail, setDetail] = useState<RecentEntry | null>(null);
   /** হাতে ক্যাশ = today's expected cash in hand. */
   const [cash, setCash] = useState<number | null>(null);
+  /** Offline 🎤: sentences recorded with no internet (read later, confirmed here). */
+  const queue = useQueueCounts(db);
+  const queued = queue.ready + queue.waiting;
+  const openQueue = () => {
+    void openNextQueued(db, 'push').then((opened) => {
+      if (!opened) void speak(waitingSpeech(queue));
+    });
+  };
 
   useFocusEffect(
     useCallback(() => {
@@ -109,6 +119,7 @@ export default function SaleScreen() {
       (cash !== null ? `হাতে ক্যাশ ${formatNumber(cash / 100).replace(/,/g, '')} টাকা। ` : '') +
         `আজ বিক্রি ${formatNumber(today.sales / 100)} টাকা। আজ বাকি ${formatNumber(today.baki / 100)} টাকা। ` +
         (last ? `শেষ: ${recentLine(last).words} ` : '') +
+        (queued ? `${waitingSpeech(queue)} ` : '') +
         'বিক্রি বলতে মাইক চাপুন। ছবি দেখে বেছে নিতে লিখুন চাপুন।',
     );
   };
@@ -169,6 +180,28 @@ export default function SaleScreen() {
             </View>
           </View>
         </View>
+
+        {queued > 0 && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`${waitingTitle(queued)}। ${waitingNote(queue)}`}
+            onPress={openQueue}
+            style={({ pressed }) => [styles.queueCard, pressed && styles.pressed]}
+          >
+            <View style={styles.queueIcon}>
+              <Icon name="mic" size={28} color={colors.onColor} />
+            </View>
+            <View style={styles.flex}>
+              <Txt size={fontSize.label} weight="bold" color={colors.bakiInk}>
+                {waitingTitle(queued)}
+              </Txt>
+              <Txt wrap size={fontSize.captionLg} weight="semibold" color={colors.bakiInk}>
+                {waitingNote(queue)}
+              </Txt>
+            </View>
+            {queue.ready > 0 && <Icon name="arrow" size={26} color={colors.bakiInk} />}
+          </Pressable>
+        )}
 
         <View style={styles.micArea}>
           <Pressable
@@ -367,6 +400,19 @@ const styles = StyleSheet.create({
     borderColor: 'transparent',
   },
   pressed: { opacity: 0.85 },
+  queueCard: {
+    minHeight: 72,
+    borderRadius: radius.card,
+    borderWidth: 2,
+    borderColor: colors.bakiBorder,
+    backgroundColor: colors.bakiTint,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+  },
+  queueIcon: { width: 48, height: 48, borderRadius: radius.pill, backgroundColor: colors.baki, alignItems: 'center', justifyContent: 'center' },
   entryTile: {
     width: size.listTile,
     height: size.listTile,

@@ -25,6 +25,8 @@ export const backoffMs = (attempts: number) => BACKOFF_MS[Math.min(Math.max(atte
  */
 export const QUEUE_DELAY_MS = 2 * 60_000;
 export const PENDING_GRACE_MS = 10 * 60_000;
+/** A clip waiting in understand_queue (offline 🎤) is looked at again after this. */
+export const UNDERSTAND_WAIT_MS = 60 * 60_000;
 /** Per run, so one run never holds the phone long. */
 export const RUN_LIMIT = 25;
 
@@ -63,6 +65,8 @@ interface QueueRow {
   audio_status: string | null;
   outcome: string | null;
   created_at: number | null;
+  /** 1 = recorded offline, still in understand_queue (its WAV is read later: not compressed yet). */
+  understanding: number;
 }
 
 /** Called with every new voice log that has a clip on this phone. */
@@ -89,7 +93,8 @@ export async function runUploadQueue(deps: UploadDeps): Promise<RunResult> {
   const t0 = now();
   const rows = await db.getAllAsync<QueueRow>(
     `SELECT q.voice_log_id, q.attempts, q.queued_at, v.id AS log_id, v.audio_path, v.drive_file_id, v.audio_status,
-            v.outcome, v.created_at
+            v.outcome, v.created_at,
+            EXISTS (SELECT 1 FROM understand_queue u WHERE u.voice_log_id = q.voice_log_id) AS understanding
      FROM audio_queue q LEFT JOIN voice_logs v ON v.id = q.voice_log_id
      WHERE q.next_at <= ? ORDER BY q.queued_at, q.voice_log_id LIMIT ?`,
     t0,
@@ -111,6 +116,11 @@ export async function runUploadQueue(deps: UploadDeps): Promise<RunResult> {
     // only saved entries keep their clip (retention deletes the file on the phone)
     if (r.outcome === 'cancelled' || r.outcome === 'unsupported' || r.outcome === 'stt_error') {
       await drop(id);
+      continue;
+    }
+    // recorded offline, not read or confirmed yet: the recognizer needs the WAV as it is
+    if (r.understanding) {
+      await db.runAsync('UPDATE audio_queue SET next_at = ? WHERE voice_log_id = ?', now() + UNDERSTAND_WAIT_MS, id);
       continue;
     }
     if (r.outcome === 'pending' && now() - (r.created_at ?? 0) < PENDING_GRACE_MS) {

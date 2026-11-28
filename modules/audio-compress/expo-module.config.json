@@ -1,6 +1,6 @@
 {
   "platforms": ["android"],
   "android": {
-    "modules": ["expo.modules.audiocompress.AudioCompressModule"]
+    "modules": ["expo.modules.audiocompress.AudioCompressModule", "expo.modules.audiocompress.WavRecorderModule"]
   }
 }
