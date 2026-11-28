@@ -89,7 +89,7 @@ import { UNIT_BN, formatNumber, formatQty, formatTaka, parseTakaInput, toBnDigit
 import { speak, stopSpeaking } from '../lib/speak';
 import { pickedCommand, pickText, type PickedItem } from '../domain/pick';
 import { parseCommand } from '../parser';
-import { readKeyboardText } from '../domain/keyboard';
+import { readKeyboardText, readSaid } from '../domain/keyboard';
 import { voiceTarget } from '../lib/voice';
 import type { Intent, ParseContext, ParsedCommand } from '../parser/types';
 import { colors, fonts, fontSize, productTiles, radius, size, spacing } from '../theme/tokens';
@@ -257,11 +257,26 @@ export default function ConfirmScreen() {
         }
         if (heardByPhone) {
           // from a customer screen the name need not be said
-          const cmd = readKeyboardText(transcript, {
+          const ctx = {
             knownProducts: names.products,
             knownCustomers: [...names.customers, ...Object.keys(aliasesNow)],
             productAliases: await productAliasMap(db),
-          }, { customer: params.customer }, aliasesNow);
+          };
+          const cmd = readKeyboardText(transcript, ctx, { customer: params.customer }, aliasesNow);
+          // a sentence recorded offline that asked for a customer's হিসাব ("সাজুর হিসাব"): open it now
+          if (queued) {
+            const said = readSaid(transcript, ctx, { customer: params.customer }, aliasesNow);
+            const found = said.kind === 'lookup' ? await customerByName(db, said.customer) : null;
+            if (found) {
+              await setOutcome(db, w, logId.current!, 'unsupported', { intent: 'customer_history_query' });
+              decided.current = true;
+              await doneQueued();
+              if (!alive) return;
+              stopSpeaking();
+              nav.replace({ pathname: '/customer/[id]', params: { id: found.id, summary: '1' } });
+              return;
+            }
+          }
           await setParsed(db, w, logId.current!, fixedAsParsed(cmd));
           heardCustomer.current = cmd.customer ?? null;
           const products = await findProducts(db, cmd.goods);

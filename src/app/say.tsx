@@ -40,8 +40,8 @@ export default function SayScreen() {
   const db = useSQLiteContext();
   const { tab: tabParam = 'sale', customer, kind } = useLocalSearchParams<{ tab?: string; customer?: string; kind?: string }>();
   const tab: Tab = tabParam === 'purchase' || tabParam === 'ledger' ? tabParam : 'sale';
-  /** বাকি tab, no customer chosen: a name alone opens that customer's হিসাব. */
-  const canLookup = tab === 'ledger' && !customer;
+  /** Any tab, no customer chosen: a name alone ("সাজুর হিসাব") opens that customer's হিসাব. */
+  const canLookup = !customer;
   const examples = sayExamples(tab, { lookup: canLookup });
   const [text, setText] = useState('');
   const [problem, setProblem] = useState('');

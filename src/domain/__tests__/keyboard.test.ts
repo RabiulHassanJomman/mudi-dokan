@@ -1,5 +1,5 @@
 /** Android mode: said with the Ridmik keyboard's voice typing, read by the fixed formats. */
-import { EXAMPLE_BN, clipUri, examplesSpeech, sayExamples, fixedProblemWords, joinPieces, heardErrorWords, readKeyboardText, voiceRoute } from '../keyboard';
+import { EXAMPLE_BN, clipUri, examplesSpeech, readSaid, sayExamples, fixedProblemWords, joinPieces, heardErrorWords, readKeyboardText, voiceRoute } from '../keyboard';
 import { parseFixed } from '../../parser/fixed';
 
 describe('which screen the 🎤 opens', () => {
@@ -110,6 +110,11 @@ describe('বলুন examples, labelled by type', () => {
     expect(sayExamples('purchase')).toEqual([{ label: 'মাল কেনা', text: '১০০০ টাকার আলু কেনা হয়েছে' }]);
   });
 
+  it('every tab offers হিসাব দেখা when no customer is chosen', () => {
+    expect(sayExamples('sale', { lookup: true }).map((e) => e.label)).toEqual(['নগদ বিক্রি', 'বাকি', 'হিসাব দেখা']);
+    expect(sayExamples('purchase', { lookup: true }).map((e) => e.label)).toEqual(['মাল কেনা', 'হিসাব দেখা']);
+  });
+
   it('বাকি tab: বাকি, জমা, and হিসাব দেখা when no customer is chosen', () => {
     expect(sayExamples('ledger', { lookup: true }).map((e) => e.label)).toEqual(['বাকি', 'জমা', 'হিসাব দেখা']);
     expect(sayExamples('ledger', { lookup: true }).at(-1)!.text).toBe('সাজুর হিসাব');
@@ -126,5 +131,32 @@ describe('বলুন examples, labelled by type', () => {
     expect(examplesSpeech(sayExamples('ledger', { lookup: true }))).toBe(
       'যেমন, বাকি: সাজু বাকি নিয়েছে আদা, চাল, আটা ১০০ টাকা। জমা: সাজু ৫০ টাকা জমা দিয়েছে। হিসাব দেখা: সাজুর হিসাব।',
     );
+  });
+});
+
+describe('entry or a customer\'s হিসাব (any tab, live or read later)', () => {
+  const ctx = { knownCustomers: ['সাজু', 'করিম', 'শাজু ভাই'], knownProducts: ['চাল'] };
+  const aliases = { 'শাজু ভাই': 'সাজু' };
+
+  it('a complete entry is an entry', () => {
+    expect(readSaid('সাজু ৫০ টাকা জমা দিয়েছে', ctx, {}, aliases)).toMatchObject({ kind: 'entry', cmd: { kind: 'joma', customer: 'সাজু' } });
+    expect(readSaid('নগদ বিক্রি ১০০ টাকা', ctx, {}, aliases).kind).toBe('entry');
+  });
+
+  it('a name alone or with হিসাব opens that customer', () => {
+    expect(readSaid('সাজুর হিসাব', ctx, {}, aliases)).toMatchObject({ kind: 'lookup', customer: 'সাজু' });
+    expect(readSaid('করিম', ctx, {}, aliases)).toMatchObject({ kind: 'lookup', customer: 'করিম' });
+    expect(readSaid('শাজু ভাই এর বাকি কত', ctx, {}, aliases)).toMatchObject({ kind: 'lookup', customer: 'সাজু' });
+  });
+
+  it('a half entry stays a problem (what is missing is said), not a lookup', () => {
+    const r = readSaid('সাজু বাকি নিয়েছে', ctx, {}, aliases);
+    expect(r.kind).toBe('problem');
+    expect(r.kind === 'problem' && r.words).toBeTruthy();
+    expect(readSaid('রহিমের হিসাব', ctx, {}, aliases).kind).toBe('problem'); // not a customer
+  });
+
+  it('from a customer\'s screen (customer chosen) there is no lookup', () => {
+    expect(readSaid('সাজুর হিসাব', ctx, { customer: 'করিম' }, aliases).kind).toBe('problem');
   });
 });

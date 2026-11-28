@@ -33,7 +33,7 @@ export const EXAMPLE_BN: Readonly<Record<Exclude<VoiceTab, 'expense'>, readonly 
   ledger: ['সাজু বাকি নিয়েছে আদা, চাল, আটা ১০০ টাকা', 'সাজু ৫০ টাকা জমা দিয়েছে'],
 };
 
-/** বাকি tab (no customer yet): saying a name opens that customer's হিসাব (customerLookup). */
+/** Any tab (no customer chosen): saying a name opens that customer's হিসাব (customerLookup). */
 export const LOOKUP_EXAMPLE_BN = 'সাজুর হিসাব';
 
 /** The type shown above each example on বলুন. */
@@ -123,6 +123,33 @@ export function readKeyboardText(
   const name = defaults.customer?.trim();
   if (!name || cmd.customer || !cmd.problems.includes('no_customer')) return cmd;
   return { ...cmd, customer: name, problems: cmd.problems.filter((p) => p !== 'no_customer') };
+}
+
+export type SayReading =
+  | { kind: 'entry'; cmd: FixedCommand }
+  | { kind: 'lookup'; customer: string; cmd: FixedCommand }
+  | { kind: 'problem'; cmd: FixedCommand; words: string };
+
+/**
+ * What a spoken sentence is, on any tab (live, or a clip read later): a complete entry; else,
+ * when no customer was chosen, a customer's name alone or with হিসাব / বাকি কত ("সাজুর হিসাব")
+ * = open their হিসাব; else what is missing. An entry always wins over a lookup.
+ */
+export function readSaid(
+  text: string,
+  ctx: FixedContext,
+  defaults: { customer?: string } = {},
+  customerAliases: Readonly<Record<string, string>> = {},
+): SayReading {
+  const cmd = readKeyboardText(text, ctx, defaults, customerAliases);
+  const words = fixedProblemWords(cmd);
+  if (!words) return { kind: 'entry', cmd };
+  if (!defaults.customer?.trim()) {
+    const customers = (ctx.knownCustomers ?? []).filter((k) => !Object.hasOwn(customerAliases, k));
+    const name = customerLookup(text, customers, customerAliases);
+    if (name) return { kind: 'lookup', customer: name, cmd };
+  }
+  return { kind: 'problem', cmd, words };
 }
 
 /** What to tell the shopkeeper (screen + 🔊); '' when the sentence is complete. */

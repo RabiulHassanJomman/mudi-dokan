@@ -13,7 +13,7 @@ import { AudioEncodingAndroid, ExpoSpeechRecognitionModule } from 'expo-speech-r
 import { customerAliasMap, knownNames, productAliasMap, type Db } from '../db/repo';
 import { dueClip, queueCounts, queuedClips, setReadOutcome } from '../db/understand';
 import { writer } from '../device';
-import { fixedProblemWords, joinPieces, readKeyboardText } from '../domain/keyboard';
+import { joinPieces, readSaid } from '../domain/keyboard';
 import { afterRead, nextReady } from '../domain/offline';
 import { nav } from './nav';
 
@@ -82,7 +82,8 @@ async function kick() {
       const names = await knownNames(db);
       const aliases = await customerAliasMap(db);
       const ctx = { knownProducts: names.products, knownCustomers: [...names.customers, ...Object.keys(aliases)], productAliases: await productAliasMap(db) };
-      const complete = (t: string) => !fixedProblemWords(readKeyboardText(t, ctx, { customer: clip.customer ?? undefined }, aliases));
+      // a whole entry, or a customer's name ("সাজুর হিসাব": the card opens their হিসাব)
+      const complete = (t: string) => readSaid(t, ctx, { customer: clip.customer ?? undefined }, aliases).kind !== 'problem';
       const o = afterRead(heard, clip.attempts, Date.now(), complete);
       console.log(`MUDI_UNDERSTAND ${clip.voice_log_id} → ${o.state}${o.lastError ? ` (${o.lastError})` : ''}`);
       await setReadOutcome(db, writer(), clip.voice_log_id, o);
