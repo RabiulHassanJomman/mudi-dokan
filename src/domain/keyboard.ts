@@ -2,7 +2,7 @@
  * Android mode (docs/PLAN.md › Android parsing): the shopkeeper speaks with the Ridmik
  * keyboard's voice typing into a text box; the fixed formats read it. Pure TS.
  */
-import { parseFixed, type FixedCommand, type FixedContext } from '../parser/fixed';
+import { parseFixed, type FixedCommand, type FixedContext, type FixedKind } from '../parser/fixed';
 import { BAKI, BAKI_OF, HISTORY, HONORIFIC_SET, HOW_MUCH, MONEY, OWED, SHOW } from '../parser/keywords';
 import { fixSpelling } from '../parser/spelling';
 import { distance } from './customers';
@@ -35,6 +35,31 @@ export const EXAMPLE_BN: Readonly<Record<Exclude<VoiceTab, 'expense'>, readonly 
 
 /** বাকি tab (no customer yet): saying a name opens that customer's হিসাব (customerLookup). */
 export const LOOKUP_EXAMPLE_BN = 'সাজুর হিসাব';
+
+/** The type shown above each example on বলুন. */
+export const EXAMPLE_LABEL_BN: Readonly<Record<FixedKind | 'lookup', string>> = {
+  cash_sale: 'নগদ বিক্রি',
+  baki: 'বাকি',
+  joma: 'জমা',
+  purchase: 'মাল কেনা',
+  lookup: 'হিসাব দেখা',
+};
+
+export interface LabeledExample {
+  label: string;
+  text: string;
+}
+
+/** বলুন's examples for the tab it was opened from, each with its type (from the parser, so they can't disagree). */
+export function sayExamples(tab: Exclude<VoiceTab, 'expense'>, opts: { lookup?: boolean } = {}): LabeledExample[] {
+  const list = EXAMPLE_BN[tab].map((text) => ({ label: EXAMPLE_LABEL_BN[parseFixed(text).kind ?? 'cash_sale'], text }));
+  if (opts.lookup) list.push({ label: EXAMPLE_LABEL_BN.lookup, text: LOOKUP_EXAMPLE_BN });
+  return list;
+}
+
+/** 🔊: "যেমন, বাকি: …। জমা: …।" */
+export const examplesSpeech = (examples: readonly LabeledExample[]) =>
+  `যেমন, ${examples.map((e) => `${e.label}: ${e.text}`).join('। ')}।`;
 
 // "সাজুর", "সাজুকে": the name is the stem
 const CASE_ENDINGS = ['কে', 'ের', 'র'].map((e) => e.normalize('NFC'));

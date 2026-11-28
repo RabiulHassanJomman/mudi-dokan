@@ -1,5 +1,5 @@
 /** Android mode: said with the Ridmik keyboard's voice typing, read by the fixed formats. */
-import { EXAMPLE_BN, clipUri, fixedProblemWords, joinPieces, heardErrorWords, readKeyboardText, voiceRoute } from '../keyboard';
+import { EXAMPLE_BN, clipUri, examplesSpeech, sayExamples, fixedProblemWords, joinPieces, heardErrorWords, readKeyboardText, voiceRoute } from '../keyboard';
 import { parseFixed } from '../../parser/fixed';
 
 describe('which screen the 🎤 opens', () => {
@@ -95,5 +95,36 @@ describe('a sentence heard in pieces (recording mode sends each pause as its own
     expect(joinPieces(['শোয়েব ভাই বাকি নিল', 'দেড় হাজার টাকা'])).toBe('শোয়েব ভাই বাকি নিল দেড় হাজার টাকা');
     expect(joinPieces([], ' সাজু ')).toBe('সাজু');
     expect(joinPieces(['', ' '], '')).toBe('');
+  });
+});
+
+describe('বলুন examples, labelled by type', () => {
+  it('বিক্রি: নগদ বিক্রি, then বাকি', () => {
+    expect(sayExamples('sale')).toEqual([
+      { label: 'নগদ বিক্রি', text: 'নগদ বিক্রি আদা, চাল ১০০ টাকা' },
+      { label: 'বাকি', text: 'সাজু বাকি নিয়েছে আদা, চাল, আটা ১০০ টাকা' },
+    ]);
+  });
+
+  it('মাল: মাল কেনা', () => {
+    expect(sayExamples('purchase')).toEqual([{ label: 'মাল কেনা', text: '১০০০ টাকার আলু কেনা হয়েছে' }]);
+  });
+
+  it('বাকি tab: বাকি, জমা, and হিসাব দেখা when no customer is chosen', () => {
+    expect(sayExamples('ledger', { lookup: true }).map((e) => e.label)).toEqual(['বাকি', 'জমা', 'হিসাব দেখা']);
+    expect(sayExamples('ledger', { lookup: true }).at(-1)!.text).toBe('সাজুর হিসাব');
+    expect(sayExamples('ledger').map((e) => e.label)).toEqual(['বাকি', 'জমা']);
+  });
+
+  it('every label matches what the parser reads the sentence as', () => {
+    const byKind = { cash_sale: 'নগদ বিক্রি', baki: 'বাকি', joma: 'জমা', purchase: 'মাল কেনা' } as const;
+    for (const tab of ['sale', 'purchase', 'ledger'] as const)
+      for (const ex of sayExamples(tab)) expect(ex.label).toBe(byKind[parseFixed(ex.text).kind!]);
+  });
+
+  it('read aloud: type, then the sentence', () => {
+    expect(examplesSpeech(sayExamples('ledger', { lookup: true }))).toBe(
+      'যেমন, বাকি: সাজু বাকি নিয়েছে আদা, চাল, আটা ১০০ টাকা। জমা: সাজু ৫০ টাকা জমা দিয়েছে। হিসাব দেখা: সাজুর হিসাব।',
+    );
   });
 });

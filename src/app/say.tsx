@@ -15,7 +15,7 @@ import { writer } from '../device';
 import { fixedAsParsed } from '../domain/entry';
 import { joinWav } from '../domain/wav';
 import { within } from '../domain/within';
-import { EXAMPLE_BN, LOOKUP_EXAMPLE_BN, clipUri, customerLookup, fixedProblemWords, heardErrorWords, joinPieces, readKeyboardText } from '../domain/keyboard';
+import { EXAMPLE_BN, clipUri, examplesSpeech, sayExamples, customerLookup, fixedProblemWords, heardErrorWords, joinPieces, readKeyboardText } from '../domain/keyboard';
 import { nav } from '../lib/nav';
 import { speak, stopSpeaking } from '../lib/speak';
 import { colors, fonts, fontSize, radius, spacing } from '../theme/tokens';
@@ -38,7 +38,7 @@ export default function SayScreen() {
   const tab: Tab = tabParam === 'purchase' || tabParam === 'ledger' ? tabParam : 'sale';
   /** বাকি tab, no customer chosen: a name alone opens that customer's হিসাব. */
   const canLookup = tab === 'ledger' && !customer;
-  const examples = canLookup ? [...EXAMPLE_BN.ledger, LOOKUP_EXAMPLE_BN] : EXAMPLE_BN[tab];
+  const examples = sayExamples(tab, { lookup: canLookup });
   const [text, setText] = useState('');
   const [problem, setProblem] = useState('');
   const [busy, setBusy] = useState(false);
@@ -69,7 +69,7 @@ export default function SayScreen() {
    */
   const clips = useRef<NonNullable<Clip>[]>([]);
 
-  const intro = `${customer ? `${customer}। ` : ''}মাইক চেপে বলুন। যেমন: ${examples.join('। অথবা: ')}।`;
+  const intro = `${customer ? `${customer}। ` : ''}মাইক চেপে বলুন। ${examplesSpeech(examples)}`;
 
   const showProblem = useCallback((words: string) => {
     setProblem(words);
@@ -379,9 +379,16 @@ export default function SayScreen() {
               </Txt>
             </View>
             {examples.map((ex) => (
-              <Txt key={ex} wrap size={fontSize.label} weight="semibold">
-                {`“${ex}”`}
-              </Txt>
+              <View key={ex.text} accessible accessibilityLabel={`${ex.label}: ${ex.text}`} style={styles.exampleItem}>
+                <View style={styles.exampleLabel}>
+                  <Txt size={fontSize.caption} weight="bold" color={colors.onColor}>
+                    {ex.label}
+                  </Txt>
+                </View>
+                <Txt wrap size={fontSize.label} weight="semibold">
+                  {`“${ex.text}”`}
+                </Txt>
+              </View>
             ))}
           </View>
 
@@ -460,7 +467,9 @@ const styles = StyleSheet.create({
   top: { flexDirection: 'row', alignItems: 'center', paddingLeft: spacing.screen },
   back: { width: 52, height: 52, borderRadius: radius.pill, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center', marginTop: spacing.screenTop },
   body: { paddingHorizontal: spacing.screen, gap: spacing.md, paddingBottom: spacing.md },
-  example: { backgroundColor: colors.saleTint, borderRadius: radius.card, padding: spacing.lg, gap: spacing.xs },
+  example: { backgroundColor: colors.saleTint, borderRadius: radius.card, padding: spacing.lg, gap: spacing.md },
+  exampleItem: { gap: 4, alignItems: 'flex-start' },
+  exampleLabel: { backgroundColor: colors.saleDark, borderRadius: radius.pill, paddingHorizontal: spacing.sm, paddingVertical: 2 },
   exampleHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   input: {
     minHeight: 150,
