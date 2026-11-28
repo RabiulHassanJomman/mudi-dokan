@@ -35,7 +35,7 @@ export default function CashScreen() {
   const db = useSQLiteContext();
   /** Rows from another phone came in: reload. */
   const synced = useDataVersion();
-  const play = useClipPlayer();
+  const clip = useClipPlayer();
   const [day, setDay] = useState<CashDay | null>(null);
   const [outs, setOuts] = useState<HistoryItem[]>([]);
 
@@ -173,10 +173,10 @@ export default function CashScreen() {
                   <Pressable
                     accessibilityRole="button"
                     accessibilityLabel={`${what}, রেকর্ড শুনুন`}
-                    onPress={() => play(i.audio_path)}
+                    onPress={() => clip.toggle(i.audio_path)}
                     style={styles.play}
                   >
-                    <Icon name="play" size={20} color={colors.sale} />
+                    <Icon name={clip.icon(i.audio_path)} size={20} color={colors.sale} />
                   </Pressable>
                 ) : (
                   // no clip (typed, Android < 13, or past 30 days): ▶️ hidden, the row keeps its shape

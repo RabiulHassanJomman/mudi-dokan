@@ -19,7 +19,7 @@ import { colors, fontSize, radius, size, spacing } from '../theme/tokens';
  */
 export default function DebugLogScreen() {
   const db = useSQLiteContext();
-  const play = useClipPlayer();
+  const clip = useClipPlayer();
   const [rows, setRows] = useState<VoiceLogRow[]>([]);
 
   useFocusEffect(
@@ -79,10 +79,10 @@ export default function DebugLogScreen() {
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel="রেকর্ড শুনুন"
-                  onPress={() => play(r.audio_path)}
+                  onPress={() => clip.toggle(r.audio_path)}
                   style={styles.play}
                 >
-                  <Icon name="play" size={20} color={colors.sale} />
+                  <Icon name={clip.icon(r.audio_path)} size={20} color={colors.sale} />
                 </Pressable>
               ) : (
                 <View style={[styles.play, styles.noClip]} />

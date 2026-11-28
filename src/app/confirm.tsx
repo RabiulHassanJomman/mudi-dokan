@@ -162,7 +162,7 @@ export default function ConfirmScreen() {
   const queued = params.queued === '1' && !!params.logId;
   const queuedAt = useRef<number | null>(null);
   const [queuedInfo, setQueuedInfo] = useState<{ at: number; audio: string | null } | null>(null);
-  const playClip = useClipPlayer();
+  const clip = useClipPlayer();
   /** ✏️ from History: "sales:<basket id>" or "<table>:<row id>" — the card edits a saved entry. */
   const fixing = !!params.fix;
   const tab = params.tab ?? 'sale';
@@ -804,8 +804,8 @@ export default function ConfirmScreen() {
             </Txt>
           </View>
           {queuedInfo.audio && (
-            <Pressable accessibilityRole="button" accessibilityLabel="কথাটা শুনুন" onPress={() => playClip(queuedInfo.audio)} style={({ pressed }) => [styles.queuedPlay, pressed && styles.pressed]}>
-              <Icon name="play" size={24} color={colors.ink} />
+            <Pressable accessibilityRole="button" accessibilityLabel="কথাটা শুনুন" onPress={() => clip.toggle(queuedInfo.audio)} style={({ pressed }) => [styles.queuedPlay, pressed && styles.pressed]}>
+              <Icon name={clip.icon(queuedInfo.audio)} size={24} color={colors.ink} />
             </Pressable>
           )}
         </View>

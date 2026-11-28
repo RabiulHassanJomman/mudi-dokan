@@ -57,7 +57,7 @@ export default function HistoryScreen() {
   const db = useSQLiteContext();
   /** Rows from another phone came in: reload. */
   const synced = useDataVersion();
-  const play = useClipPlayer();
+  const clip = useClipPlayer();
   const params = useLocalSearchParams<{ filter?: string; date?: string }>();
   const [date, setDate] = useState(params.date ?? today());
   const [filter, setFilter] = useState<HistoryFilter>(HISTORY_FILTERS.some((f) => f.key === params.filter) ? (params.filter as HistoryFilter) : 'all');
@@ -171,10 +171,10 @@ export default function HistoryScreen() {
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel={`${line.title}, রেকর্ড শুনুন`}
-                  onPress={() => play(i.audio_path)}
+                  onPress={() => clip.toggle(i.audio_path)}
                   style={styles.play}
                 >
-                  <Icon name="play" size={22} color={colors.sale} />
+                  <Icon name={clip.icon(i.audio_path)} size={22} color={colors.sale} />
                 </Pressable>
               ) : (
                 // no clip (typed, Android < 13, or past 30 days): ▶️ hidden, the row keeps its shape

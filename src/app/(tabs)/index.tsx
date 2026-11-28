@@ -84,7 +84,7 @@ export default function SaleScreen() {
   const db = useSQLiteContext();
   /** Rows from another phone came in: reload. */
   const synced = useDataVersion();
-  const play = useClipPlayer();
+  const clip = useClipPlayer();
   const [reload, setReload] = useState(0);
   const del = useDeleteEntry(() => setReload((n) => n + 1));
   const [shopName, setShopName] = useState<string | null>(null);
@@ -264,10 +264,10 @@ export default function SaleScreen() {
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel={`${line.title}, রেকর্ড শুনুন`}
-                  onPress={() => play(r.audio_path)}
+                  onPress={() => clip.toggle(r.audio_path)}
                   style={styles.play}
                 >
-                  <Icon name="play" size={22} color={colors.sale} />
+                  <Icon name={clip.icon(r.audio_path)} size={22} color={colors.sale} />
                 </Pressable>
               ) : (
                 // no clip (typed, or past 30 days): ▶️ hidden, the row keeps its shape

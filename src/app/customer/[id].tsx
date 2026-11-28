@@ -31,7 +31,7 @@ export default function CustomerScreen() {
   const db = useSQLiteContext();
   /** Rows from another phone came in: reload. */
   const synced = useDataVersion();
-  const play = useClipPlayer();
+  const clip = useClipPlayer();
   /** summary=1: opened by saying the name in the বাকি tab: read the summary once it loads. */
   const { id, summary } = useLocalSearchParams<{ id: string; summary?: string }>();
   const toRead = useRef(summary === '1');
@@ -255,10 +255,10 @@ export default function CustomerScreen() {
                 accessibilityRole="button"
                 accessibilityLabel={`${what(r)} শুনুন`}
                 accessibilityState={{ disabled: !r.audio_path }}
-                onPress={() => (r.audio_path ? play(r.audio_path) : void speak(`${what(r)}, ${formatNumber(r.amount_poisha / 100)} টাকা`))}
+                onPress={() => (r.audio_path ? clip.toggle(r.audio_path) : void speak(`${what(r)}, ${formatNumber(r.amount_poisha / 100)} টাকা`))}
                 style={[styles.play, !r.audio_path && styles.dim]}
               >
-                <Icon name="play" size={20} color={colors.sale} />
+                <Icon name={clip.icon(r.audio_path)} size={20} color={colors.sale} />
               </Pressable>
             </Pressable>
           );
